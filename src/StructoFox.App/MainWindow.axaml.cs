@@ -17,7 +17,7 @@ public partial class MainWindow : Window
 
     // Lays out the placeholder landing screen: title, tagline, and two live smoke tests.
     // Proves both the platform-neutral Core and the OXSUIT theme loader are wired in.
-    static Control BuildContent()
+    Control BuildContent()
     {
         var root = new StackPanel { Margin = new(24), Spacing = 12 };
 
@@ -42,6 +42,19 @@ public partial class MainWindow : Window
             Text = $"OXSUIT loader: {brushCount} brushes parsed.",
             FontSize = 12, Opacity = 0.6,
         });
+
+        // UI-kit smoke test: a button that chains the new MessageDialog + PromptDialog.
+        var status = new TextBlock { FontSize = 12, Opacity = 0.6 };
+        var demo = Ui.Btn("🦊 Test dialogs", "Try the new MessageDialog and PromptDialog");
+        demo.HorizontalAlignment = HorizontalAlignment.Left;
+        demo.Click += async (_, _) =>
+        {
+            var answer = await MessageDialog.Show(this, "Does the fox's dialog work?", "UI kit", DialogButtons.YesNo);
+            var name = await PromptDialog.Show(this, "What should we name the demo?", "Reynard", "Prompt");
+            status.Text = $"You said {answer}; name = {name ?? "(cancelled)"}.";
+        };
+        root.Children.Add(demo);
+        root.Children.Add(status);
 
         root.Children.Add(new TextBlock { Text = Loc.S("Smoke_Header"), Margin = new(0, 12, 0, 0) });
         root.Children.Add(new TextBox
