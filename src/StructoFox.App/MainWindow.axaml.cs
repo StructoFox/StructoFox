@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using OXSUIT.Loaders.Avalonia;
 using StructoFox.Core.Models;
 using StructoFox.Core;
 
@@ -23,7 +24,7 @@ public partial class MainWindow : Window
 
         // Try the OXSUIT loader on an inline theme so we can tint the title from it.
         var theme = LoadSampleTheme(out var brushCount);
-        var titleBrush = theme?.TryGetResource("AccentBgBrush", null, out var b) == true
+        var titleBrush = theme.TryGetResource("AccentBgBrush", null, out var b)
             ? b as IBrush : null;
 
         root.Children.Add(new TextBlock
@@ -96,7 +97,7 @@ public partial class MainWindow : Window
 
     // Feeds a tiny inline OXSUIT theme through the loader to confirm it parses on Avalonia.
     // Returns the resource dictionary (or null) and reports how many brushes came back.
-    static ResourceDictionary? LoadSampleTheme(out int brushCount)
+    static ResourceDictionary LoadSampleTheme(out int brushCount)
     {
         const string xml =
             """
@@ -108,8 +109,8 @@ public partial class MainWindow : Window
               </colors>
             </oxsuit>
             """;
-        var dict = OxsuitLoader.Parse(xml);
-        brushCount = dict?.Count ?? 0;
+        var dict = OxsuitLoader.LoadXml(xml);
+        brushCount = dict.Count;
         return dict;
     }
 }

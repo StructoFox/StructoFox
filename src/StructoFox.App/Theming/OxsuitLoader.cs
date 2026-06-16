@@ -1,161 +1,148 @@
+// OXSUIT 1.0 — Avalonia Loader
+// Loads an .oxsuit file into an Avalonia ResourceDictionary.
+//
+// Color conversion:
+//   OXSUIT uses web-standard #RRGGBB / #RRGGBBAA (alpha last).
+//   Avalonia's Color.FromArgb expects alpha FIRST — this loader reorders transparently.
+//   (Avalonia, unlike WPF, uses the same channel order internally, but the parse step is identical.)
+//
+// Resource key mapping:
+//   OXSUIT key                 → Avalonia resource key
+//   "ContentBg"                → "ContentBgBrush"                  (SolidColorBrush)
+//   "CornerRadius"             → "OxsuitCornerRadius"               (CornerRadius)
+//   "ShadowDepth"              → "OxsuitShadowDepth"                (double)
+//   "ContentBorderWidth"       → "OxsuitContentBorderWidth"         (double)
+//                              → "OxsuitContentBorderThickness"     (Thickness)
+//   …same for Sidebar/Control/Input/Primary/Secondary/Tertiary border widths.
+
+using System;
+using System.Linq;
 using System.Xml.Linq;
-using Avalonia.Controls;
-using Avalonia.Media;
+using Avalonia;            // CornerRadius, Thickness
+using Avalonia.Controls;   // ResourceDictionary
+using Avalonia.Media;      // Color, Colors, SolidColorBrush
 
-namespace StructoFox.App;
+namespace OXSUIT.Loaders.Avalonia;
 
-/// <summary>
-/// Loads a native OXSUIT 1.0 theme file (.oxsuit) into an Avalonia <see cref="ResourceDictionary"/>.
-/// Avalonia port of ClaudetRelay's WPF loader: same <c>&lt;oxsuit&gt;</c> XML, same key map,
-/// same <b>#RRGGBBAA</b> convention (alpha byte last) — just Avalonia brushes instead of WPF ones.
-/// </summary>
 public static class OxsuitLoader
 {
-    // OXSUIT 1.0 short key -> resource key. Kept identical to ClaudetRelay so themes port verbatim.
-    static readonly Dictionary<string, string> s_keyMap =
-        new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Content surface
-        ["ContentBg"]       = "ContentBgBrush",
-        ["ContentBorder"]   = "ContentBorderBrush",
-        ["ContentText"]     = "ContentTextBrush",
-        ["ContentHigh"]     = "ContentHighBrush",
-        ["ContentDim"]      = "ContentDimBrush",
-
-        // Sidebar surface
-        ["SidebarBg"]       = "SidebarBgBrush",
-        ["SidebarBorder"]   = "SidebarBorderBrush",
-        ["SidebarText"]     = "SidebarTextBrush",
-        ["SidebarHigh"]     = "SidebarHighBrush",
-        ["SidebarDim"]      = "SidebarDimBrush",
-
-        // Control surface
-        ["ControlBg"]       = "ControlBgBrush",
-        ["ControlBorder"]   = "ControlBorderBrush",
-        ["ControlText"]     = "ControlTextBrush",
-        ["ControlHigh"]     = "ControlHighBrush",
-        ["ControlDim"]      = "ControlDimBrush",
-        ["ControlHover"]    = "ControlHoverBrush",
-
-        // Input surface
-        ["InputBg"]         = "InputBgBrush",
-        ["InputBorder"]     = "InputBorderBrush",
-        ["InputText"]       = "InputTextBrush",
-        ["InputHigh"]       = "InputHighBrush",
-        ["InputDim"]        = "InputDimBrush",
-
-        // Accent
-        ["AccentBg"]        = "AccentBgBrush",
-        ["AccentText"]      = "AccentTextBrush",
-        ["AccentHighlight"] = "AccentHighlightBrush",
-        ["PrimaryAccent"]   = "PrimaryAccentBrush",
-        ["SecondaryAccent"] = "SecondaryAccentBrush",
-        ["TertiaryAccent"]  = "TertiaryAccentBrush",
-
-        // Primary bubble slot ("Bg" -> "Bubble" is a historical ClaudetRelay naming quirk)
-        ["PrimaryBg"]       = "PrimaryBubbleBrush",
-        ["PrimaryBorder"]   = "PrimaryBubbleBorderBrush",
-        ["PrimaryText"]     = "PrimaryTextBrush",
-        ["PrimaryHigh"]     = "PrimaryHighBrush",
-        ["PrimaryDim"]      = "PrimaryDimBrush",
-
-        // Secondary bubble slot
-        ["SecondaryBg"]     = "SecondaryBubbleBrush",
-        ["SecondaryBorder"] = "SecondaryBubbleBorderBrush",
-        ["SecondaryText"]   = "SecondaryTextBrush",
-        ["SecondaryHigh"]   = "SecondaryHighBrush",
-        ["SecondaryDim"]    = "SecondaryDimBrush",
-
-        // Tertiary bubble slot
-        ["TertiaryBg"]      = "TertiaryBubbleBrush",
-        ["TertiaryBorder"]  = "TertiaryBubbleBorderBrush",
-        ["TertiaryText"]    = "TertiaryTextBrush",
-        ["TertiaryHigh"]    = "TertiaryHighBrush",
-        ["TertiaryDim"]     = "TertiaryDimBrush",
-    };
+    /// <summary>
+    /// Loads an .oxsuit file and returns an Avalonia ResourceDictionary,
+    /// ready to be merged into Application.Current.Resources or a control's resources.
+    /// </summary>
+    /// <param name="path">Full path to the .oxsuit file.</param>
+    /// <param name="appExtension">
+    ///   Optional app name to also load a matching &lt;extensions app="…"&gt; block.
+    /// </param>
+    public static ResourceDictionary Load(string path, string? appExtension = null) =>
+        Build(XDocument.Load(path), appExtension);
 
     /// <summary>
-    /// Loads the .oxsuit file at <paramref name="path"/> into a ResourceDictionary.
-    /// Returns null if the file is missing, unparseable, or holds no usable theme entries.
+    /// Same as <see cref="Load"/> but reads the theme from an in-memory XML string
+    /// instead of a file — handy for embedded themes and tests.
     /// </summary>
-    public static ResourceDictionary? Load(string path)
-    {
-        if (!File.Exists(path)) return null;
-        try { return Parse(File.ReadAllText(path)); }
-        catch { return null; }
-    }
+    public static ResourceDictionary LoadXml(string xml, string? appExtension = null) =>
+        Build(XDocument.Parse(xml), appExtension);
 
-    /// <summary>
-    /// Returns a friendly display name for an .oxsuit file: the root <c>name</c> attribute
-    /// if present, otherwise the bare filename. A theme should introduce itself politely.
-    /// </summary>
-    public static string GetDisplayName(string path)
+    // Walks the parsed document and fills a ResourceDictionary with colours, tokens and extensions.
+    // The single place all the actual loading happens — Load/LoadXml are just the two front doors.
+    static ResourceDictionary Build(XDocument xml, string? appExtension)
     {
-        try
-        {
-            var name = XDocument.Load(path).Root?.Attribute("name")?.Value;
-            if (!string.IsNullOrWhiteSpace(name)) return name;
-        }
-        catch { /* fall through to filename */ }
-        return Path.GetFileNameWithoutExtension(path);
-    }
+        var root = xml.Root ?? throw new InvalidOperationException("Invalid OXSUIT file — missing root element.");
+        var rd   = new ResourceDictionary();
 
-    /// <summary>
-    /// Parses OXSUIT v1.0 XML text into a ResourceDictionary of SolidColorBrushes.
-    /// Colours are #RRGGBB or #RRGGBBAA (alpha LAST). Returns null if nothing usable was found.
-    /// </summary>
-    public static ResourceDictionary? Parse(string xmlText)
-    {
-        var root = XDocument.Parse(xmlText).Root;
-        if (root?.Name.LocalName != "oxsuit") return null;
-
-        var result = new ResourceDictionary();
+        // ── Core colours ──────────────────────────────────────────────────────────
         foreach (var el in root.Element("colors")?.Elements("color") ?? Enumerable.Empty<XElement>())
-        {
-            var oxKey = el.Attribute("key")?.Value;
-            var value = el.Attribute("value")?.Value;
-            if (string.IsNullOrWhiteSpace(oxKey) || string.IsNullOrWhiteSpace(value)) continue;
+            AddColor(rd, el);
 
-            try { result[MapKey(oxKey)] = new SolidColorBrush(ParseHex(value)); }
-            catch { /* skip a single unparseable colour, keep the rest */ }
+        // ── Geometry tokens ─────────────────────────────────────────────────────────
+        foreach (var el in root.Element("tokens")?.Elements("token") ?? Enumerable.Empty<XElement>())
+            AddToken(rd, el);
+
+        // ── App-specific extensions (only the requested app's block) ─────────────────
+        if (appExtension != null)
+        {
+            var ext = root.Elements("extensions").FirstOrDefault(e =>
+                string.Equals(e.Attribute("app")?.Value, appExtension, StringComparison.OrdinalIgnoreCase));
+            foreach (var el in ext?.Elements("color") ?? Enumerable.Empty<XElement>())
+                AddColor(rd, el);
         }
 
-        return result.Count > 0 ? ApplyFallbacks(result) : null;
+        return rd;
     }
 
-    // Maps an OXSUIT short key to its resource key; unknown keys just get a "Brush" suffix.
-    static string MapKey(string oxKey) =>
-        s_keyMap.TryGetValue(oxKey, out var key) ? key : oxKey + "Brush";
-
-    // Fills in a few semantically-related brushes when a theme omits them, so partial themes still render.
-    static ResourceDictionary ApplyFallbacks(ResourceDictionary d)
+    // Adds one <color key value> as a SolidColorBrush under "<key>Brush".
+    static void AddColor(ResourceDictionary rd, XElement el)
     {
-        void Fallback(string missing, string source)
+        var key   = el.Attribute("key")?.Value;
+        var value = el.Attribute("value")?.Value;
+        if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(value)) return;
+
+        rd[key + "Brush"] = new SolidColorBrush(ParseWebColor(value));
+    }
+
+    // Adds one <token key value> as the matching geometry resource(s); ignores unknown keys.
+    static void AddToken(ResourceDictionary rd, XElement el)
+    {
+        var key   = el.Attribute("key")?.Value;
+        var value = el.Attribute("value")?.Value;
+        if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(value)) return;
+
+        if (!double.TryParse(value,
+                System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var d)) return;
+
+        switch (key)
         {
-            if (!d.ContainsKey(missing) && d.TryGetResource(source, null, out var v)) d[missing] = v;
+            case "CornerRadius":
+                rd["OxsuitCornerRadius"] = new CornerRadius(d);
+                break;
+
+            case "ShadowDepth":
+                rd["OxsuitShadowDepth"] = d;
+                break;
+
+            // Per-surface border widths: emit both a double and a Thickness so bindings
+            // can grab whichever type their target property expects.
+            case "ContentBorderWidth":
+            case "SidebarBorderWidth":
+            case "ControlBorderWidth":
+            case "InputBorderWidth":
+            case "PrimaryBorderWidth":
+            case "SecondaryBorderWidth":
+            case "TertiaryBorderWidth":
+                rd[$"Oxsuit{key}"]                               = d;
+                rd[$"Oxsuit{key.Replace("Width", "Thickness")}"] = new Thickness(d);
+                break;
         }
-        Fallback("ControlTextBrush", "ContentTextBrush");
-        Fallback("SidebarTextBrush", "ContentTextBrush");
-        Fallback("InputBgBrush",     "ControlBgBrush");
-        Fallback("InputTextBrush",   "ContentTextBrush");
-        return d;
     }
 
     /// <summary>
-    /// Parses a hex colour in OXSUIT format: #RGB, #RRGGBB, or #RRGGBBAA (alpha byte last).
-    /// Anything else comes back as magenta — loud on purpose, so bad values are easy to spot.
+    /// Parses a web-standard hex colour (#RGB, #RRGGBB, or #RRGGBBAA with alpha LAST)
+    /// into an Avalonia Color. A bad value comes back as magenta — loud on purpose.
     /// </summary>
-    static Color ParseHex(string hex)
+    static Color ParseWebColor(string hex)
     {
         hex = hex.TrimStart('#');
         return hex.Length switch
         {
-            3 => Color.FromRgb(B(new string(hex[0], 2)), B(new string(hex[1], 2)), B(new string(hex[2], 2))),
-            6 => Color.FromRgb(B(hex[..2]), B(hex[2..4]), B(hex[4..6])),
-            8 => Color.FromArgb(B(hex[6..8]), B(hex[..2]), B(hex[2..4]), B(hex[4..6])), // alpha last in OXSUIT
-            _ => Colors.Magenta,
-        };
+            3 => Color.FromRgb(
+                    Convert.ToByte(new string(hex[0], 2), 16),
+                    Convert.ToByte(new string(hex[1], 2), 16),
+                    Convert.ToByte(new string(hex[2], 2), 16)),
 
-        static byte B(string s) => Convert.ToByte(s, 16);
+            6 => Color.FromRgb(
+                    Convert.ToByte(hex[0..2], 16),
+                    Convert.ToByte(hex[2..4], 16),
+                    Convert.ToByte(hex[4..6], 16)),
+
+            8 => Color.FromArgb(                 // OXSUIT: RRGGBBAA → Avalonia wants alpha first
+                    Convert.ToByte(hex[6..8], 16),   // alpha is LAST in web format
+                    Convert.ToByte(hex[0..2], 16),
+                    Convert.ToByte(hex[2..4], 16),
+                    Convert.ToByte(hex[4..6], 16)),
+
+            _ => Colors.Magenta,                 // fallback — signals a bad value
+        };
     }
 }
