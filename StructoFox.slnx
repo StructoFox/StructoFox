@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/StructoFox.App/StructoFox.App.csproj" />
     <Project Path="src/StructoFox.Core/StructoFox.Core.csproj" />
   </Folder>
 </Solution>
