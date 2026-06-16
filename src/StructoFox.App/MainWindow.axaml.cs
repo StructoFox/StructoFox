@@ -15,21 +15,32 @@ public partial class MainWindow : Window
         Content = BuildContent();
     }
 
-    // Lays out the placeholder landing screen: title, tagline, and a live core smoke test.
-    // Proves the platform-neutral Core is wired in before any real UI exists.
+    // Lays out the placeholder landing screen: title, tagline, and two live smoke tests.
+    // Proves both the platform-neutral Core and the OXSUIT theme loader are wired in.
     static Control BuildContent()
     {
         var root = new StackPanel { Margin = new(24), Spacing = 12 };
+
+        // Try the OXSUIT loader on an inline theme so we can tint the title from it.
+        var theme = LoadSampleTheme(out var brushCount);
+        var titleBrush = theme?.TryGetResource("AccentBgBrush", null, out var b) == true
+            ? b as IBrush : null;
 
         root.Children.Add(new TextBlock
         {
             Text = "🦊 " + Loc.S("App_Title"),
             FontSize = 32, FontWeight = FontWeight.Bold,
+            Foreground = titleBrush,  // tinted by the loaded theme, or default if it failed
         });
         root.Children.Add(new TextBlock
         {
             Text = Loc.S("App_Tagline"),
             FontSize = 16, Opacity = 0.7,
+        });
+        root.Children.Add(new TextBlock
+        {
+            Text = $"OXSUIT loader: {brushCount} brushes parsed.",
+            FontSize = 12, Opacity = 0.6,
         });
 
         root.Children.Add(new TextBlock { Text = Loc.S("Smoke_Header"), Margin = new(0, 12, 0, 0) });
@@ -68,5 +79,24 @@ public partial class MainWindow : Window
         };
 
         return CodeExportService.Generate(new[] { greeter }, ExportLanguage.CSharp);
+    }
+
+    // Feeds a tiny inline OXSUIT theme through the loader to confirm it parses on Avalonia.
+    // Returns the resource dictionary (or null) and reports how many brushes came back.
+    static ResourceDictionary? LoadSampleTheme(out int brushCount)
+    {
+        const string xml =
+            """
+            <oxsuit version="1.0" name="Smoke">
+              <colors>
+                <color key="AccentBg" value="#E8702A" />
+                <color key="ContentText" value="#212121" />
+                <color key="ContentBg" value="#FAFAFA" />
+              </colors>
+            </oxsuit>
+            """;
+        var dict = OxsuitLoader.Parse(xml);
+        brushCount = dict?.Count ?? 0;
+        return dict;
     }
 }
