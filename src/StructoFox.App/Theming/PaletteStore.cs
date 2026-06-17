@@ -30,4 +30,20 @@ public static class PaletteStore
 
     // Persists a palette to the store, returning the written file path.
     public static string Save(ColorPalette palette) => PaletteService.Save(Dir, palette);
+
+    static string ActiveFile => Path.Combine(Dir, "active.txt");
+
+    /// <summary>The name of the palette colour pickers should use; null until the user chooses one.</summary>
+    public static string? ActiveName
+    {
+        get { try { return File.Exists(ActiveFile) ? File.ReadAllText(ActiveFile).Trim() : null; } catch { return null; } }
+        set { try { Directory.CreateDirectory(Dir); File.WriteAllText(ActiveFile, value ?? ""); } catch { } }
+    }
+
+    /// <summary>The active palette: the one named by <see cref="ActiveName"/>, else the first, else built-in.</summary>
+    public static ColorPalette Active()
+    {
+        var all = LoadAll();
+        return all.FirstOrDefault(p => p.Name == ActiveName) ?? all.FirstOrDefault() ?? PaletteService.BuiltIn();
+    }
 }

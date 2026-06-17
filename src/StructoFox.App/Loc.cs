@@ -117,6 +117,7 @@ public static class Loc
         ["Style_Reset"]     = "Reset style",
         ["Style_Inherit"]   = "Inherit (default)",
         ["Style_Open"]      = "🎨 Style…",
+        ["Palette_Choose"]  = "Choose palette",
 
         // Style editor window
         ["StyleEd_Title"]     = "🎨 Element style",
@@ -237,6 +238,7 @@ public static class Loc
         ["Style_Reset"]     = "Stil zurücksetzen",
         ["Style_Inherit"]   = "Erben (Standard)",
         ["Style_Open"]      = "🎨 Stil…",
+        ["Palette_Choose"]  = "Palette wählen",
 
         // Style editor window
         ["StyleEd_Title"]     = "🎨 Element-Stil",

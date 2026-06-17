@@ -29,6 +29,7 @@ public class HexColorPicker : StackPanel
     readonly TextBox _hex = new() { Width = 100 };
     readonly TextBox _c = Field(), _m = Field(), _y = Field(), _k = Field();
 
+    readonly StackPanel _paletteArea = new() { Spacing = 4 };
     double _h, _s = 1, _v;     // current HSV (the SV box / hue bar drive these)
     bool _updating, _svDrag, _hueDrag;
 
@@ -42,7 +43,7 @@ public class HexColorPicker : StackPanel
         Children.Add(_preview);
         Children.Add(BuildSvBox());
         Children.Add(BuildHueBar());
-        if (showPalette) Children.Add(BuildPaletteStrip());
+        if (showPalette) { Children.Add(_paletteArea); RebuildPaletteArea(); }
         Children.Add(ChannelRow("R", _r));
         Children.Add(ChannelRow("G", _g));
         Children.Add(ChannelRow("B", _b));
@@ -169,10 +170,37 @@ public class HexColorPicker : StackPanel
         return CmykToRgb(c, m, y, k);
     }
 
-    // Builds a one-click palette strip (CI colours) from the active palette; chips set the colour.
-    Control BuildPaletteStrip()
+    // (Re)builds the palette area: a header with the active palette's name + a chooser button,
+    // then a one-click strip of that palette's colours (CI colours). Chips set the colour.
+    void RebuildPaletteArea()
     {
-        var pal   = PaletteStore.LoadAll().FirstOrDefault() ?? PaletteService.BuiltIn();
+        _paletteArea.Children.Clear();
+        var pal = PaletteStore.Active();
+
+        var chooser = new Button { Content = "▾", Padding = new(6, 0), MinHeight = 22 };
+        ToolTip.SetTip(chooser, Loc.S("Palette_Choose"));
+        chooser.Click += (_, _) =>
+        {
+            var cm = new ContextMenu();
+            foreach (var p in PaletteStore.LoadAll())
+            {
+                var name = p.Name;
+                var mi = new MenuItem { Header = name };
+                mi.Click += (_, _) => { PaletteStore.ActiveName = name; RebuildPaletteArea(); };
+                cm.Items.Add(mi);
+            }
+            cm.Open(chooser);
+        };
+        _paletteArea.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 6,
+            Children =
+            {
+                new TextBlock { Text = pal.Name, FontSize = 11, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center },
+                chooser,
+            },
+        });
+
         var strip = new WrapPanel { MaxWidth = BoxW + 16 };
         foreach (var nc in pal.Colors)
         {
@@ -183,7 +211,7 @@ public class HexColorPicker : StackPanel
             chip.Click += (_, _) => { try { Commit(Color.Parse(hex)); } catch { } };
             strip.Children.Add(chip);
         }
-        return strip;
+        _paletteArea.Children.Add(strip);
     }
 
     // ── colour-space conversions ─────────────────────────────────────────────

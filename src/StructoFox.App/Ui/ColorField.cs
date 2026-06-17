@@ -81,7 +81,6 @@ public class ColorField : StackPanel
     static string? PaletteName(Color c)
     {
         var hex = HexColorPicker.HexOf(c);
-        var pal = PaletteStore.LoadAll().FirstOrDefault() ?? PaletteService.BuiltIn();
-        return pal.Colors.FirstOrDefault(n => string.Equals(n.Value, hex, StringComparison.OrdinalIgnoreCase))?.Name;
+        return PaletteStore.Active().Colors.FirstOrDefault(n => string.Equals(n.Value, hex, StringComparison.OrdinalIgnoreCase))?.Name;
     }
 }
