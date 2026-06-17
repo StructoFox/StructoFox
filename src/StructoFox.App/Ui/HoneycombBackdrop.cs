@@ -5,13 +5,26 @@ using Avalonia.Media;
 namespace StructoFox.App;
 
 /// <summary>
-/// A faint honeycomb (flat-top hexagon) texture behind content — a more futuristic, "techy" backdrop
-/// than a plain grid. Theme-agnostic low-alpha grey, kept subtle so it never fights the diagrams on top.
+/// A faint honeycomb (flat-top hexagon) texture behind content — a futuristic, "techy" backdrop.
+/// Its line colour follows the theme (bind <see cref="LineBrush"/> to an OXSUIT accent), but is forced
+/// to a low alpha so it's present without being prominent. Re-renders on resize and on theme swaps.
 /// </summary>
 public class HoneycombBackdrop : Control
 {
-    const double R = 20;   // hexagon radius (centre → vertex)
-    static readonly Pen Line = new(new SolidColorBrush(Color.FromArgb(22, 128, 128, 128)), 1);
+    const double R = 20;        // hexagon radius (centre → vertex)
+    const byte Alpha = 38;      // forced transparency, regardless of the source brush
+
+    /// <summary>The (opaque) source colour for the comb lines — bind to a theme accent brush.</summary>
+    public static readonly StyledProperty<IBrush?> LineBrushProperty =
+        AvaloniaProperty.Register<HoneycombBackdrop, IBrush?>(nameof(LineBrush));
+
+    public IBrush? LineBrush
+    {
+        get => GetValue(LineBrushProperty);
+        set => SetValue(LineBrushProperty, value);
+    }
+
+    static HoneycombBackdrop() => AffectsRender<HoneycombBackdrop>(LineBrushProperty);
 
     public HoneycombBackdrop() => ClipToBounds = true;
 
@@ -22,16 +35,19 @@ public class HoneycombBackdrop : Control
         if (e.Property == BoundsProperty) InvalidateVisual();
     }
 
-    // Tiles flat-top hexagons across the control; odd columns are offset by half a row.
+    // Tiles flat-top hexagons across the control in the theme accent at low alpha.
     public override void Render(DrawingContext ctx)
     {
+        var src = (LineBrush as ISolidColorBrush)?.Color ?? Color.FromRgb(128, 128, 128);
+        var pen = new Pen(new SolidColorBrush(Color.FromArgb(Alpha, src.R, src.G, src.B)), 1);
+
         double stepX = 1.5 * R, stepY = Math.Sqrt(3) * R;
         int col = 0;
         for (double cx = 0; cx <= Bounds.Width + R; cx += stepX, col++)
         {
             double offsetY = (col % 2 == 0) ? 0 : stepY / 2;
             for (double cy = offsetY; cy <= Bounds.Height + R; cy += stepY)
-                ctx.DrawGeometry(null, Line, Hexagon(cx, cy));
+                ctx.DrawGeometry(null, pen, Hexagon(cx, cy));
         }
     }
 

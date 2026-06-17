@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 
@@ -30,6 +31,10 @@ public partial class MainWindow : Window
         Width  = 1140;
         Height = 740;
         MinWidth = 760; MinHeight = 480;
+
+        // Drop the OS title bar (keep the resizable border) so our top bar IS the themed title bar.
+        this.WindowDecorations = global::Avalonia.Controls.WindowDecorations.BorderOnly;
+
         Ui.ThemeWindow(this);
 
         Content = BuildShell();
@@ -76,13 +81,33 @@ public partial class MainWindow : Window
         palette.Click += (_, _) => new PaletteEditorWindow().Show();
         right.Children.Add(palette);
 
+        // Our own themed window controls (the OS chrome is hidden).
+        right.Children.Add(new Border { Width = 6 });
+        right.Children.Add(WinButton("—", "Minimize", () => WindowState = WindowState.Minimized));
+        right.Children.Add(WinButton("▢", "Maximize / restore",
+            () => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized));
+        right.Children.Add(WinButton("✕", "Close", Close));
+
         var dock = new DockPanel();
         DockPanel.SetDock(brand, Dock.Left);
         DockPanel.SetDock(right, Dock.Right);
         dock.Children.Add(brand);
         dock.Children.Add(right);
         bar.Child = dock;
+
+        // The bar is the title bar: drag to move, double-click to maximise/restore.
+        bar.PointerPressed += (_, e) => { if (e.GetCurrentPoint(bar).Properties.IsLeftButtonPressed) BeginMoveDrag(e); };
+        bar.DoubleTapped   += (_, _) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
         return bar;
+    }
+
+    // A small themed window-control button (minimise / maximise / close).
+    Button WinButton(string glyph, string tip, Action action)
+    {
+        var b = Ui.Btn(glyph, tip);
+        b.Padding = new(10, 4);
+        b.Click += (_, _) => action();
+        return b;
     }
 
     // The live theme switcher combo (every shipped OXSUIT theme).
@@ -149,7 +174,9 @@ public partial class MainWindow : Window
         Ui.Theme(host, Border.BackgroundProperty, "ContentBgBrush");
 
         var layered = new Grid();
-        layered.Children.Add(new HoneycombBackdrop());
+        var comb = new HoneycombBackdrop();
+        Ui.Theme(comb, HoneycombBackdrop.LineBrushProperty, "AccentBgBrush");  // honeycomb follows the theme accent
+        layered.Children.Add(comb);
         layered.Children.Add(new ScrollViewer
         {
             Padding = new(24),
