@@ -48,8 +48,9 @@ public static class PaletteService
 
         (string name, string hex)[] primaries =
         {
-            ("Red", "#FF0000"), ("Yellow", "#FFD400"), ("Green", "#00A000"),
-            ("Blue", "#0070FF"), ("Violet", "#8000FF"), ("Orange", "#FF8000"),
+            ("Red",    "#FF0000"), ("Orange", "#FF8000"), ("Yellow", "#FFD400"), ("Lime",  "#99CC00"),
+            ("Green",  "#00A000"), ("Cyan",   "#00B8D4"), ("Blue",   "#0070FF"), ("Indigo", "#3F51B5"),
+            ("Violet", "#8000FF"), ("Magenta", "#D500A0"), ("Brown",  "#8B4513"),
         };
         foreach (var (name, hex) in primaries)
             foreach (var pct in new[] { 100, 80, 60, 40, 20 })  // 100% = pure, 20% = pale (mixed with white)
