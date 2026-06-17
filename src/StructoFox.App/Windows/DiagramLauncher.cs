@@ -49,13 +49,17 @@ public static class DiagramLauncher
 
         // Programmablaufplan option — label flags whether a flowchart already exists.
         var papBtn = ChoiceBtn(FlowChartService.Exists(projFolder, key) ? Loc.S("Diag_PapExists") : Loc.S("Diag_Pap"));
-        papBtn.Click += (_, _) => { dlg.Close(); OpenDiagram(owner, "Programmablaufplan", title); };
+        papBtn.Click += (_, _) => { dlg.Close(); ComingSoon(owner, "Programmablaufplan", title); };
         stack.Children.Add(papBtn);
 
         // Struktogramm option — same existence hint, plus a tooltip naming the DIN standard.
         var nsBtn = ChoiceBtn(StructogramService.Exists(projFolder, key) ? Loc.S("Diag_NsExists") : Loc.S("Diag_Ns"));
         ToolTip.SetTip(nsBtn, Loc.S("Diag_NsTip"));
-        nsBtn.Click += (_, _) => { dlg.Close(); OpenDiagram(owner, "Struktogramm", title); };
+        nsBtn.Click += (_, _) =>
+        {
+            dlg.Close();
+            new StructogramWindow(projFolder, key, title, themePath).Show();
+        };
         stack.Children.Add(nsBtn);
 
         return dlg.ShowDialog(owner);
@@ -72,8 +76,8 @@ public static class DiagramLauncher
         return b;
     }
 
-    // TODO(Phase 3): replace with `new FlowChartWindow(...)` / `new StructogramWindow(...)` once ported.
-    // For now it just announces which editor would open, so the chooser flow is fully testable today.
-    static async void OpenDiagram(Window owner, string which, string title) =>
+    // TODO(Phase 3): replace with `new FlowChartWindow(...).Show()` once the flowchart editor is ported.
+    // The structogram path already opens the real StructogramWindow; this covers the PAP option meanwhile.
+    static async void ComingSoon(Window owner, string which, string title) =>
         await MessageDialog.Show(owner, $"The {which} editor for \"{title}\" will open here once it's ported.", "Coming soon");
 }
