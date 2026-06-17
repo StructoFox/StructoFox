@@ -37,27 +37,35 @@ public class HexColorPicker : StackPanel
     /// <summary>Raised whenever the chosen colour changes (any input).</summary>
     public event EventHandler? ColorChanged;
 
-    // Builds preview, HSV box + hue bar, palette area, and the grouped RGB(dec/hex) + CMYK grids.
-    public HexColorPicker(bool showPalette = true)
+    // Builds the picker. Default = vertical stack. When a leadingColumn is given, uses a wide layout:
+    // a 3-column top row [leading | HSV box+hue | preview], a divider, then the RGB and CMYK rows.
+    public HexColorPicker(bool showPalette = true, Control? leadingColumn = null)
     {
         Spacing = 6;
-        Children.Add(_preview);
-        Children.Add(BuildSvBox());
-        Children.Add(BuildHueBar());
-        if (showPalette) { Children.Add(_paletteArea); RebuildPaletteArea(); }
 
-        // R: [0-255] [0-FF] | G: … | B: …
-        Children.Add(new StackPanel
+        if (leadingColumn is not null)
         {
-            Orientation = Orientation.Horizontal, Spacing = 12,
-            Children = { ChannelGroup("R", _rDec, _rHex), ChannelGroup("G", _gDec, _gHex), ChannelGroup("B", _bDec, _bHex) },
-        });
-        // C: % | M: % | Y: % | K: %
-        Children.Add(new StackPanel
+            _preview.Width = 90; _preview.Height = double.NaN; _preview.VerticalAlignment = VerticalAlignment.Stretch;
+            var visual = new StackPanel { Spacing = 6, Children = { BuildSvBox(), BuildHueBar() } };
+            Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 12,
+                Children = { leadingColumn, visual, _preview },
+            });
+            if (showPalette) { Children.Add(_paletteArea); RebuildPaletteArea(); }
+            Children.Add(Sep());
+            Children.Add(RgbRow());
+            Children.Add(CmykRow());
+        }
+        else
         {
-            Orientation = Orientation.Horizontal, Spacing = 12,
-            Children = { PctGroup("C", _c), PctGroup("M", _m), PctGroup("Y", _y), PctGroup("K", _k) },
-        });
+            Children.Add(_preview);
+            Children.Add(BuildSvBox());
+            Children.Add(BuildHueBar());
+            if (showPalette) { Children.Add(_paletteArea); RebuildPaletteArea(); }
+            Children.Add(RgbRow());
+            Children.Add(CmykRow());
+        }
 
         WireText(_rDec, FromDec); WireText(_gDec, FromDec); WireText(_bDec, FromDec);
         WireText(_rHex, FromHex); WireText(_gHex, FromHex); WireText(_bHex, FromHex);
@@ -284,6 +292,23 @@ public class HexColorPicker : StackPanel
     static TextBox Dec()  => new() { Width = 46 };
     static TextBox Hex2() => new() { Width = 40 };
     static TextBox Pctf() => new() { Width = 56 };
+
+    // The RGB row: R/G/B, each as decimal + hex.
+    Control RgbRow() => new StackPanel
+    {
+        Orientation = Orientation.Horizontal, Spacing = 12,
+        Children = { ChannelGroup("R", _rDec, _rHex), ChannelGroup("G", _gDec, _gHex), ChannelGroup("B", _bDec, _bHex) },
+    };
+
+    // The CMYK row: four percentage groups.
+    Control CmykRow() => new StackPanel
+    {
+        Orientation = Orientation.Horizontal, Spacing = 12,
+        Children = { PctGroup("C", _c), PctGroup("M", _m), PctGroup("Y", _y), PctGroup("K", _k) },
+    };
+
+    // A thin horizontal divider between the picker's top area and the numeric rows.
+    static Control Sep() => new Border { Height = 1, Background = Brushes.Gray, Opacity = 0.4, Margin = new(0, 4, 0, 4) };
 
     // "R: [dec] [hex]" group.
     static Control ChannelGroup(string label, TextBox dec, TextBox hex) => new StackPanel

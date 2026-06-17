@@ -20,7 +20,7 @@ public class PaletteEditorWindow : Window
     readonly ComboBox    _paletteCombo = new() { MinWidth = 220 };
     readonly WrapPanel   _swatches     = new();
     readonly TextBox     _nameBox      = new() { PlaceholderText = "Colour name", MinWidth = 160 };
-    readonly HexColorPicker _picker    = new(showPalette: false) { Color = Colors.SteelBlue };
+    HexColorPicker _picker = null!;   // assigned in BuildContent (needs the leading column)
 
     // Loads the saved palettes (seeding if needed) and builds the editor around the first one.
     public PaletteEditorWindow()
@@ -64,23 +64,21 @@ public class PaletteEditorWindow : Window
         top.Children.Add(saveBtn);
         root.Children.Add(top);
 
-        // ── Bottom: colour editor ──────────────────────────────────────────────
-        var editor = new StackPanel { Spacing = 8, Margin = new(0, 12, 0, 0) };
-        DockPanel.SetDock(editor, Dock.Bottom);
-        var fields = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        fields.Children.Add(new TextBlock { Text = "Name:", VerticalAlignment = VerticalAlignment.Center });
-        fields.Children.Add(_nameBox);
-        editor.Children.Add(fields);
-        editor.Children.Add(_picker);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        // ── Bottom: colour editor — wide 3-column picker (name+buttons | picker | preview) ──
         var addBtn = Ui.Btn("＋ Add / Update", "Add a new colour, or update the selected one");
         addBtn.Click += (_, _) => AddOrUpdate();
         var delBtn = Ui.Btn("✕ Remove", "Remove the selected colour");
         delBtn.Click += (_, _) => RemoveSelected();
-        actions.Children.Add(addBtn);
-        actions.Children.Add(delBtn);
-        editor.Children.Add(actions);
-        root.Children.Add(editor);
+
+        var lead = new StackPanel
+        {
+            Width = 170, Spacing = 8,
+            Children = { new TextBlock { Text = "Name:" }, _nameBox, addBtn, delBtn },
+        };
+        _picker = new HexColorPicker(showPalette: false, leadingColumn: lead) { Color = Colors.SteelBlue };
+        _picker.Margin = new(0, 12, 0, 0);
+        DockPanel.SetDock(_picker, Dock.Bottom);
+        root.Children.Add(_picker);
 
         // ── Middle: swatches (fills remaining space) ───────────────────────────
         var scroll = new ScrollViewer
