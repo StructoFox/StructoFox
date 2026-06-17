@@ -15,27 +15,52 @@ public static class PaletteService
     // Palette files are plain JSON with this extension; one palette per file.
     public const string Extension = ".palette.json";
 
-    /// <summary>The built-in starter palette: neutral ink/paper tones plus a clear accent set.
-    /// A sane default that's also a template for users building their own.</summary>
-    public static ColorPalette BuiltIn() => new()
+    /// <summary>The built-in starter palette: a greyscale ramp (incl. pure black &amp; white) plus a
+    /// lightness ramp for each main hue. A broad, useful default — and a good stress test of the grid.</summary>
+    public static ColorPalette BuiltIn()
     {
-        Name = "Standard",
-        Colors =
-        [
-            new("Ink",       "#1C1C1C"),
-            new("Paper",     "#FFFFFF"),
-            new("Slate",     "#5A5A5A"),
-            new("Mist",      "#E0E0E0"),
-            new("Red",       "#D32F2F"),
-            new("Orange",    "#F57F17"),
-            new("Amber",     "#FFB300"),
-            new("Green",     "#388E3C"),
-            new("Teal",      "#00897B"),
-            new("Blue",      "#1976D2"),
-            new("Indigo",    "#3949AB"),
-            new("Purple",    "#8E24AA"),
-        ],
-    };
+        var p = new ColorPalette { Name = "Standard" };
+
+        // Greyscale ramp: pure black, 20/40/60/80% lightness, pure white.
+        p.Colors.Add(new("Black", "#000000"));
+        foreach (var l in new[] { 0.20, 0.40, 0.60, 0.80 })
+            p.Colors.Add(new($"Gray {Pct(l)}%", HslHex(0, 0, l)));
+        p.Colors.Add(new("White", "#FFFFFF"));
+
+        // Per-hue lightness ramps (dark → light) at full-ish saturation.
+        (string name, double h)[] hues =
+        {
+            ("Red", 0), ("Orange", 30), ("Yellow", 52), ("Green", 130), ("Blue", 215), ("Violet", 280),
+        };
+        foreach (var (name, h) in hues)
+            foreach (var l in new[] { 0.30, 0.45, 0.60, 0.75, 0.88 })
+                p.Colors.Add(new($"{name} {Pct(l)}%", HslHex(h, 0.85, l)));
+
+        return p;
+    }
+
+    // Whole-percent label for a 0..1 lightness.
+    static int Pct(double v) => (int)Math.Round(v * 100);
+
+    // HSL→#RRGGBB (h in degrees, s/l in 0..1) — kept in Core (no UI types) so palettes stay portable.
+    static string HslHex(double h, double s, double l)
+    {
+        double c = (1 - Math.Abs(2 * l - 1)) * s;
+        double x = c * (1 - Math.Abs((h / 60) % 2 - 1));
+        double m = l - c / 2;
+        double r = 0, g = 0, b = 0;
+        switch (((int)(h / 60)) % 6)
+        {
+            case 0: r = c; g = x; break;
+            case 1: r = x; g = c; break;
+            case 2: g = c; b = x; break;
+            case 3: g = x; b = c; break;
+            case 4: r = x; b = c; break;
+            default: r = c; b = x; break;
+        }
+        byte B(double v) => (byte)Math.Round((v + m) * 255);
+        return $"#{B(r):X2}{B(g):X2}{B(b):X2}";
+    }
 
     /// <summary>Reads every <c>*.palette.json</c> in <paramref name="dir"/>; returns empty if the
     /// folder is missing. Unreadable files are skipped rather than aborting the whole load.</summary>
