@@ -171,6 +171,8 @@ public class HexColorPicker : StackPanel
 
         var chooser = new Button { Content = "▾", Padding = new(6, 0), MinHeight = 22 };
         ToolTip.SetTip(chooser, Loc.S("Palette_Choose"));
+        Ui.Theme(chooser, TemplatedControl.BackgroundProperty, "ControlBgBrush");
+        Ui.Theme(chooser, TemplatedControl.ForegroundProperty, "SidebarTextBrush");
         chooser.Click += (_, _) =>
         {
             var cm = new ContextMenu();
@@ -183,14 +185,15 @@ public class HexColorPicker : StackPanel
             }
             cm.Open(chooser);
         };
+
+        // Bind the name label to the theme's text colour so it stays readable on dark backgrounds.
+        var nameLabel = new TextBlock { Text = pal.Name, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        Ui.Theme(nameLabel, TextBlock.ForegroundProperty, "ContentTextBrush");
+
         _paletteArea.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 6,
-            Children =
-            {
-                new TextBlock { Text = pal.Name, FontSize = 11, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center },
-                chooser,
-            },
+            Children = { nameLabel, chooser },
         });
 
         var strip = new WrapPanel { MaxWidth = BoxW + 16 };
