@@ -38,7 +38,7 @@ public class StyleEditorWindow : Window
         SizeToContent         = SizeToContent.Height;
         CanResize             = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Ui.Theme(this, BackgroundProperty, "ContentBgBrush");
+        Ui.ThemeWindow(this);
 
         Content = BuildContent();
         LoadInto(current);

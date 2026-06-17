@@ -62,7 +62,7 @@ public class FlowChartWindow : Window
 
         if (!string.IsNullOrWhiteSpace(themePath))
             try { Resources.MergedDictionaries.Add(OxsuitLoader.Load(themePath)); } catch { /* unthemed is fine */ }
-        Ui.Theme(this, BackgroundProperty, "ContentBgBrush");
+        Ui.ThemeWindow(this);
 
         Build();
     }

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
@@ -52,6 +53,14 @@ public static class Ui
         Theme(c, TemplatedControl.ForegroundProperty,  "SidebarTextBrush");
         Theme(c, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
         return c;
+    }
+
+    /// <summary>Themes a whole window: surface background AND an inherited text colour, so chrome text
+    /// always stays readable on the OXSUIT background (TextElement.Foreground cascades to children).</summary>
+    public static void ThemeWindow(Window w)
+    {
+        Theme(w, TemplatedControl.BackgroundProperty, "ContentBgBrush");
+        Theme(w, TextElement.ForegroundProperty,      "ContentTextBrush");
     }
 
     /// <summary>Binds a property to an OXSUIT theme brush via DynamicResource — present-theme or default,

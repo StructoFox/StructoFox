@@ -32,7 +32,7 @@ public static class DiagramLauncher
         // Merge the theme so DynamicResource brushes resolve, then tint the window surface.
         if (!string.IsNullOrWhiteSpace(themePath))
             try { dlg.Resources.MergedDictionaries.Add(OxsuitLoader.Load(themePath)); } catch { /* unthemed is fine */ }
-        Ui.Theme(dlg, TemplatedControl.BackgroundProperty, "ContentBgBrush");
+        Ui.ThemeWindow(dlg);
 
         var stack = new StackPanel { Margin = new(16), Spacing = 6 };
         dlg.Content = stack;

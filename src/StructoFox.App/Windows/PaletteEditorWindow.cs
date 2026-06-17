@@ -29,7 +29,7 @@ public class PaletteEditorWindow : Window
         Width                 = 560;
         Height                = 540;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Ui.Theme(this, BackgroundProperty, "ContentBgBrush");
+        Ui.ThemeWindow(this);
 
         _palettes = PaletteStore.LoadAll();
         _current  = _palettes.FirstOrDefault() ?? PaletteService.BuiltIn();
