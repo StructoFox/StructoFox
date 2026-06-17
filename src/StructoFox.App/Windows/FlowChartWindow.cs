@@ -229,7 +229,10 @@ public class FlowChartWindow : Window
         {
             if (b is null) return;
             b.FontWeight = active ? FontWeight.Bold : FontWeight.Normal;
-            Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush" : "ControlBgBrush");
+            // Pair each background with its intended text colour: AccentText sits on AccentBg,
+            // SidebarText on ControlBg. (Mismatching them made the active button unreadable on dark themes.)
+            Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
         }
         Style(_selectBtn,  _mode == EditMode.Select);
         Style(_connectBtn, _mode == EditMode.Connect);
