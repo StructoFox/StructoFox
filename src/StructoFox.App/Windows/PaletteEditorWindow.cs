@@ -102,34 +102,34 @@ public class PaletteEditorWindow : Window
             .OfType<ComboItem>().FirstOrDefault(c => c.Id == _current.Name);
     }
 
-    // Redraws the swatch grid for the current palette; clicking a swatch loads it into the editor.
+    // Redraws the swatch grid as small colour chips; details live in a hover tooltip, so even
+    // palettes with hundreds of colours stay compact. Clicking a chip loads it into the editor.
     void RebuildSwatches()
     {
         _swatches.Children.Clear();
         foreach (var c in _current.Colors)
         {
             var nc = c;
-            var swatch = new Button
+            var chip = new Button
             {
-                Width = 110, Height = 54, Margin = new(4), Padding = new(6),
+                Width = 30, Height = 30, Margin = new(3), Padding = new(0),
                 Background = SolidOrFallback(nc.Value),
-                Content = new TextBlock
-                {
-                    Text = $"{nc.Name}\n{nc.Value}", FontSize = 10,
-                    Foreground = ReadableOn(nc.Value), TextWrapping = TextWrapping.Wrap,
-                },
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new(ReferenceEquals(nc, _selected) ? 3 : 1),  // thicker = selected
             };
-            swatch.Click += (_, _) => SelectColor(nc);
-            _swatches.Children.Add(swatch);
+            ToolTip.SetTip(chip, $"{nc.Name}\n{nc.Value}");
+            chip.Click += (_, _) => SelectColor(nc);
+            _swatches.Children.Add(chip);
         }
     }
 
-    // Loads a clicked swatch into the name box + picker so it can be edited.
+    // Loads a clicked chip into the name box + picker, and redraws so its selection ring shows.
     void SelectColor(NamedColor nc)
     {
         _selected      = nc;
         _nameBox.Text  = nc.Name;
         try { _picker.Color = Color.Parse(nc.Value); } catch { /* keep current pick */ }
+        RebuildSwatches();
     }
 
     // Adds a new colour, or updates the selected one, from the name box + picker, then redraws.
@@ -189,18 +189,5 @@ public class PaletteEditorWindow : Window
     static IBrush SolidOrFallback(string hex)
     {
         try { return new SolidColorBrush(Color.Parse(hex)); } catch { return Brushes.Transparent; }
-    }
-
-    // Picks black or white text for legibility against the given background colour.
-    static IBrush ReadableOn(string hex)
-    {
-        try
-        {
-            var c = Color.Parse(hex);
-            // Perceived luminance — light backgrounds get black text, dark get white.
-            var lum = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
-            return lum > 0.6 ? Brushes.Black : Brushes.White;
-        }
-        catch { return Brushes.Black; }
     }
 }
