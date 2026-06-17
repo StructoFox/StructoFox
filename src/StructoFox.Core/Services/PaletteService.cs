@@ -22,17 +22,38 @@ public static class PaletteService
     /// <summary>The default built-in palette (Standard) — kept for callers that want a single fallback.</summary>
     public static ColorPalette BuiltIn() => Standard();
 
-    // The "Standard" palette: a couple of rows of common, simple named colours.
+    // The "Standard" palette: a curated set of well-known, named standard colours (CSS/X11),
+    // spanning every hue area — the kind of names everyone recognises (Crimson, Navy, Teal…).
     static ColorPalette Standard() => new()
     {
         Name = "Standard",
         Colors =
         [
-            new("Black",   "#000000"), new("White",  "#FFFFFF"), new("Gray",    "#808080"), new("Silver", "#C0C0C0"),
-            new("Red",     "#E53935"), new("Orange", "#FB8C00"), new("Banana",  "#FFE135"), new("Yellow", "#FDD835"),
-            new("Lime",    "#C0CA33"), new("Green",  "#43A047"), new("Teal",    "#00897B"), new("Cyan",   "#00ACC1"),
-            new("Blue",    "#1E88E5"), new("Navy",   "#283593"), new("Violet",  "#8E24AA"), new("Purple", "#6A1B9A"),
-            new("Magenta", "#D81B60"), new("Pink",   "#FF8DA1"), new("Brown",   "#6D4C41"), new("Beige",  "#D7CCC8"),
+            // Neutrals
+            new("Black", "#000000"), new("Gray", "#808080"), new("Silver", "#C0C0C0"), new("White", "#FFFFFF"),
+            // Reds
+            new("Crimson", "#DC143C"), new("Firebrick", "#B22222"), new("Maroon", "#800000"), new("Tomato", "#FF6347"),
+            // Pinks
+            new("Salmon", "#FA8072"), new("Pink", "#FFC0CB"), new("Hot Pink", "#FF69B4"),
+            // Oranges & golds
+            new("Coral", "#FF7F50"), new("Orange", "#FFA500"), new("Gold", "#FFD700"),
+            // Yellows
+            new("Yellow", "#FFFF00"), new("Khaki", "#F0E68C"),
+            // Browns
+            new("Tan", "#D2B48C"), new("Sienna", "#A0522D"), new("Chocolate", "#D2691E"), new("Brown", "#A52A2A"),
+            // Greens
+            new("Olive", "#808000"), new("Olive Drab", "#6B8E23"), new("Lime Green", "#32CD32"),
+            new("Green", "#008000"), new("Forest Green", "#228B22"), new("Sea Green", "#2E8B57"),
+            // Cyans / teals
+            new("Teal", "#008080"), new("Turquoise", "#40E0D0"), new("Aqua", "#00FFFF"),
+            // Blues
+            new("Sky Blue", "#87CEEB"), new("Steel Blue", "#4682B4"), new("Royal Blue", "#4169E1"),
+            new("Blue", "#0000FF"), new("Navy", "#000080"), new("Midnight Blue", "#191970"),
+            // Purples
+            new("Slate Blue", "#6A5ACD"), new("Indigo", "#4B0082"), new("Violet", "#EE82EE"),
+            new("Purple", "#800080"), new("Magenta", "#FF00FF"), new("Orchid", "#DA70D6"),
+            // Soft neutrals
+            new("Lavender", "#E6E6FA"), new("Beige", "#F5F5DC"),
         ],
     };
 
