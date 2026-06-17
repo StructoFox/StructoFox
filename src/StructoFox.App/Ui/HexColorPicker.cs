@@ -54,8 +54,7 @@ public class HexColorPicker : StackPanel
             });
             if (showPalette) { Children.Add(_paletteArea); RebuildPaletteArea(); }
             Children.Add(Sep());
-            Children.Add(RgbRow());
-            Children.Add(CmykRow());
+            Children.Add(NumericArea());
         }
         else
         {
@@ -63,8 +62,7 @@ public class HexColorPicker : StackPanel
             Children.Add(BuildSvBox());
             Children.Add(BuildHueBar());
             if (showPalette) { Children.Add(_paletteArea); RebuildPaletteArea(); }
-            Children.Add(RgbRow());
-            Children.Add(CmykRow());
+            Children.Add(NumericArea());
         }
 
         WireText(_rDec, FromDec); WireText(_gDec, FromDec); WireText(_bDec, FromDec);
@@ -293,19 +291,28 @@ public class HexColorPicker : StackPanel
     static TextBox Hex2() => new() { Width = 40 };
     static TextBox Pctf() => new() { Width = 56 };
 
-    // The RGB row: R/G/B, each as decimal + hex.
-    Control RgbRow() => new StackPanel
+    // The numeric area: RGB stacked vertically (each dec+hex) on the left, CMYK as a 2×2 grid on
+    // the right — R/G/B | C M / Y K — separated by a thin divider.
+    Control NumericArea()
     {
-        Orientation = Orientation.Horizontal, Spacing = 12,
-        Children = { ChannelGroup("R", _rDec, _rHex), ChannelGroup("G", _gDec, _gHex), ChannelGroup("B", _bDec, _bHex) },
-    };
+        var rgb = new StackPanel
+        {
+            Spacing = 4, VerticalAlignment = VerticalAlignment.Center,
+            Children = { ChannelGroup("R", _rDec, _rHex), ChannelGroup("G", _gDec, _gHex), ChannelGroup("B", _bDec, _bHex) },
+        };
 
-    // The CMYK row: four percentage groups.
-    Control CmykRow() => new StackPanel
-    {
-        Orientation = Orientation.Horizontal, Spacing = 12,
-        Children = { PctGroup("C", _c), PctGroup("M", _m), PctGroup("Y", _y), PctGroup("K", _k) },
-    };
+        var cmyk = new Grid { ColumnSpacing = 10, RowSpacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        cmyk.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        cmyk.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        cmyk.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        cmyk.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        void Place(Control c, int row, int col) { Grid.SetRow(c, row); Grid.SetColumn(c, col); cmyk.Children.Add(c); }
+        Place(PctGroup("C", _c), 0, 0); Place(PctGroup("M", _m), 0, 1);
+        Place(PctGroup("Y", _y), 1, 0); Place(PctGroup("K", _k), 1, 1);
+
+        var sep = new Border { Width = 1, Background = Brushes.Gray, Opacity = 0.4, Margin = new(10, 0, 10, 0) };
+        return new StackPanel { Orientation = Orientation.Horizontal, Children = { rgb, sep, cmyk } };
+    }
 
     // A thin horizontal divider between the picker's top area and the numeric rows.
     static Control Sep() => new Border { Height = 1, Background = Brushes.Gray, Opacity = 0.4, Margin = new(0, 4, 0, 4) };
