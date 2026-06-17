@@ -501,6 +501,9 @@ public class FlowChartWindow : Window
             conn.Label = t; Save(); RenderConnection(conn);
         };
         cm.Items.Add(relabel);
+        var flip = new MenuItem { Header = Loc.S("Flow_FlipArrow") };
+        flip.Click += (_, _) => { (conn.FromId, conn.ToId) = (conn.ToId, conn.FromId); Save(); RenderConnection(conn); };
+        cm.Items.Add(flip);
         var del = new MenuItem { Header = Loc.S("Flow_DeleteArrow") };
         del.Click += (_, _) => DeleteConnection(conn);
         cm.Items.Add(del);

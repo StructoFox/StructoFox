@@ -162,7 +162,9 @@ public class StructogramWindow : Window
             // Diagram-surface look, with optional per-block overrides on top of the style default.
             cell.BorderBrush = Solid(b.Style?.LineColor) ?? _lineBrush;
             if (b.Style?.LineThickness is double lt) cell.BorderThickness = new(lt);
-            if (Solid(b.Style?.FillColor) is { } fill) cell.Background = fill;
+            // Always give the cell a background (transparent if no fill) so the WHOLE area — including
+            // empty space inside the block — is hit-testable for right-click, not just text/borders.
+            cell.Background = Solid(b.Style?.FillColor) ?? Brushes.Transparent;
         }
 
         cell.PointerPressed += (_, e) =>
