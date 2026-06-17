@@ -46,4 +46,7 @@ public class FlowChartData
     public List<FlowConnection> Connections { get; set; } = [];
     public double               GridSize    { get; set; } = 10;
     public bool                 SnapToGrid  { get; set; } = false;
+
+    /// <summary>The diagram's surface appearance, persisted with it (user-controlled, theme-independent).</summary>
+    public DiagramStyle         Style       { get; set; } = new();
 }

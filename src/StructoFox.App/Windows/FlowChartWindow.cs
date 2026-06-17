@@ -39,8 +39,8 @@ public class FlowChartWindow : Window
 
     Button? _selectBtn, _connectBtn, _removeBtn;
 
-    // The diagram surface look (independent of the app theme); canvas paints with it.
-    readonly DiagramStyle _style = DiagramStyle.Default();
+    // The diagram surface look (theme-independent), persisted with the diagram.
+    readonly DiagramStyle _style;
 
     // Loads (or starts) the flowchart for one function/method and builds the editor.
     public FlowChartWindow(string projFolder, string key, string title, string? themePath)
@@ -50,6 +50,7 @@ public class FlowChartWindow : Window
         _themePath  = themePath;
         _data       = FlowChartService.Load(projFolder, key);
         if (string.IsNullOrEmpty(_data.Title)) _data.Title = title;
+        _style      = _data.Style;   // persisted with the diagram
 
         Title                 = string.Format(Loc.S("Flow_Title"),
                                     string.IsNullOrEmpty(title) ? Loc.S("Common_Untitled") : title);

@@ -47,4 +47,7 @@ public class StructogramData
 {
     public string        Title { get; set; } = "";
     public List<NsBlock> Root  { get; set; } = [];
+
+    /// <summary>The diagram's surface appearance, persisted with it (user-controlled, theme-independent).</summary>
+    public DiagramStyle  Style { get; set; } = new();
 }

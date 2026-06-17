@@ -25,9 +25,8 @@ public class StructogramWindow : Window
 
     Border? _hostBorder;
 
-    // The diagram surface look — user-controlled and independent of the app theme (see DiagramStyle).
-    // TODO: load/persist per diagram + a style editor; for now every diagram uses the default.
-    readonly DiagramStyle _style = DiagramStyle.Default();
+    // The diagram surface look — user-controlled, theme-independent, persisted with the diagram.
+    readonly DiagramStyle _style;
     IBrush _lineBrush = Brushes.Black;   // structural lines / borders
     IBrush _textBrush = Brushes.Black;   // block text
     IBrush _bgBrush   = Brushes.White;   // canvas background
@@ -40,6 +39,7 @@ public class StructogramWindow : Window
         _themePath  = themePath;
         _data       = StructogramService.Load(projFolder, key);
         if (string.IsNullOrEmpty(_data.Title)) _data.Title = title;
+        _style      = _data.Style;   // persisted with the diagram
 
         Title                 = string.Format(Loc.S("Struct_Title"),
                                     string.IsNullOrEmpty(title) ? Loc.S("Common_Untitled") : title);
