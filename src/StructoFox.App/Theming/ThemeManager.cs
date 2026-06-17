@@ -36,13 +36,16 @@ public static class ThemeManager
         _current = dict;
     }
 
-    /// <summary>Dresses the app in a sensible default — ClaudesChoice if present, else the first theme found.</summary>
+    // The theme worn out of the box: a clean light "drawing board" surface for diagrams & code.
+    public const string DefaultThemeName = "PaperWhite";
+
+    /// <summary>Dresses the app in the default theme (PaperWhite) if present, else the first theme found.</summary>
     public static void ApplyDefault(Application app)
     {
         var all = Available().ToList();
         if (all.Count == 0) return;
 
-        var pick = all.FirstOrDefault(t => t.Name.Equals("ClaudesChoice", StringComparison.OrdinalIgnoreCase));
+        var pick = all.FirstOrDefault(t => t.Name.Equals(DefaultThemeName, StringComparison.OrdinalIgnoreCase));
         Apply(app, pick.Path ?? all[0].Path);
     }
 }

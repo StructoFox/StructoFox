@@ -51,7 +51,7 @@ public partial class MainWindow : Window
         {
             var themeCombo = Ui.Combo(260);
             foreach (var (name, path) in themes) themeCombo.Items.Add(new ComboItem(name, path));
-            themeCombo.SelectedIndex = Math.Max(0, themes.FindIndex(t => t.Name.Equals("ClaudesChoice", StringComparison.OrdinalIgnoreCase)));
+            themeCombo.SelectedIndex = Math.Max(0, themes.FindIndex(t => t.Name.Equals(ThemeManager.DefaultThemeName, StringComparison.OrdinalIgnoreCase)));
             themeCombo.SelectionChanged += (_, _) =>
             {
                 if (themeCombo.SelectedItem is ComboItem ci) ThemeManager.Apply(Application.Current!, ci.Id);
