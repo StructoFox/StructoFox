@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using StructoFox.Core;
@@ -8,29 +10,38 @@ using StructoFox.Core.Models;
 namespace StructoFox.App;
 
 /// <summary>
-/// A self-contained colour picker offering three equivalent ways to choose a colour: a one-click
-/// palette strip (CI colours), RGB sliders + hex, and CMYK fields (for print/CI accuracy). All views
-/// stay in sync. Theme-independent and dependency-free. Exposes <see cref="Color"/> + <see cref="ColorChanged"/>.
-/// NOTE: CMYK↔RGB uses the standard (profile-less) conversion — approximate, not ICC-calibrated.
+/// A self-contained colour picker. Visual scheme = an HSV saturation/value box + a hue bar (the
+/// most practical, precise-everywhere layout), backed by exact RGB sliders, hex, and CMYK fields,
+/// plus a one-click palette strip (CI colours). All views stay in sync. Theme-independent, no
+/// external dependency. NOTE: CMYK↔RGB is the standard profile-less approximation (not ICC).
 /// </summary>
 public class HexColorPicker : StackPanel
 {
-    readonly Border  _preview = new() { Height = 26, CornerRadius = new(3), BorderBrush = Brushes.Gray, BorderThickness = new(1) };
+    const double BoxW = 200, BoxH = 130, BarH = 16;
+
+    readonly Border  _preview  = new() { Height = 24, CornerRadius = new(3), BorderBrush = Brushes.Gray, BorderThickness = new(1) };
+    readonly Grid    _svBox    = new() { Width = BoxW, Height = BoxH, Background = Brushes.Transparent };
+    readonly Border  _hueFill  = new() { IsHitTestVisible = false };          // solid current hue (bottom layer)
+    readonly Border  _hueBar   = new() { Width = BoxW, Height = BarH, BorderBrush = Brushes.Gray, BorderThickness = new(1) };
     readonly Slider  _r = Channel();
     readonly Slider  _g = Channel();
     readonly Slider  _b = Channel();
     readonly TextBox _hex = new() { Width = 100 };
     readonly TextBox _c = Field(), _m = Field(), _y = Field(), _k = Field();
-    bool _updating;
 
-    /// <summary>Raised whenever the chosen colour changes (palette, slider, hex or CMYK edit).</summary>
+    double _h, _s = 1, _v;     // current HSV (the SV box / hue bar drive these)
+    bool _updating, _svDrag, _hueDrag;
+
+    /// <summary>Raised whenever the chosen colour changes (any input).</summary>
     public event EventHandler? ColorChanged;
 
-    // Builds the preview, optional palette strip, RGB sliders, hex field and CMYK row, all wired in sync.
+    // Builds preview, HSV box + hue bar, optional palette strip, RGB sliders, hex and CMYK — all synced.
     public HexColorPicker(bool showPalette = true)
     {
         Spacing = 6;
         Children.Add(_preview);
+        Children.Add(BuildSvBox());
+        Children.Add(BuildHueBar());
         if (showPalette) Children.Add(BuildPaletteStrip());
         Children.Add(ChannelRow("R", _r));
         Children.Add(ChannelRow("G", _g));
@@ -39,41 +50,39 @@ public class HexColorPicker : StackPanel
         Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 6,
-            Children =
-            {
-                new TextBlock { Text = "CMYK %", VerticalAlignment = VerticalAlignment.Center },
-                _c, _m, _y, _k,
-            },
+            Children = { new TextBlock { Text = "CMYK %", VerticalAlignment = VerticalAlignment.Center }, _c, _m, _y, _k },
         });
 
         foreach (var s in new[] { _r, _g, _b })
             s.PropertyChanged += (_, e) => { if (e.Property == RangeBase.ValueProperty) Commit(FromSliders()); };
         WireText(_hex, () => { try { return Color.Parse(_hex.Text ?? ""); } catch { return (Color?)null; } });
-        foreach (var f in new[] { _c, _m, _y, _k }) WireText(f, () => FromCmyk());
+        foreach (var f in new[] { _c, _m, _y, _k }) WireText(f, FromCmyk);
 
         Color = Colors.Black;
     }
 
-    /// <summary>The selected colour. Setting it updates every view (sliders, hex, CMYK, preview).</summary>
+    /// <summary>The selected colour. Setting it updates every view.</summary>
     public Color Color
     {
         get => FromSliders();
         set => ShowColor(value);
     }
 
-    // Pushes a colour into every input/display at once, guarded so the sync doesn't recurse.
+    // Pushes a colour into every input/display at once (and recomputes HSV), guarded against recursion.
     void ShowColor(Color col)
     {
         _updating = true;
         _r.Value = col.R; _g.Value = col.G; _b.Value = col.B;
         _hex.Text = HexOf(col);
-        var (c, m, y, k) = RgbToCmyk(col);
-        _c.Text = Pct(c); _m.Text = Pct(m); _y.Text = Pct(y); _k.Text = Pct(k);
+        var (cc, mm, yy, kk) = RgbToCmyk(col);
+        _c.Text = Pct(cc); _m.Text = Pct(mm); _y.Text = Pct(yy); _k.Text = Pct(kk);
+        (_h, _s, _v) = RgbToHsv(col);
+        _hueFill.Background = new SolidColorBrush(HsvToRgb(_h, 1, 1));   // SV box base = full-sat hue
         _preview.Background = new SolidColorBrush(col);
         _updating = false;
     }
 
-    // Adopts a new colour from one of the inputs: refresh all views and notify listeners.
+    // Adopts a colour from one of the inputs: refresh all views and notify listeners.
     void Commit(Color col)
     {
         if (_updating) return;
@@ -81,12 +90,72 @@ public class HexColorPicker : StackPanel
         ColorChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    // ── visual HSV controls ────────────────────────────────────────────────
+
+    // The saturation/value box: solid hue, then a white→transparent (S) and a transparent→black (V) overlay.
+    Control BuildSvBox()
+    {
+        var white = new Border
+        {
+            IsHitTestVisible = false,
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new(0, 0, RelativeUnit.Relative), EndPoint = new(1, 0, RelativeUnit.Relative),
+                GradientStops = { new GradientStop(Colors.White, 0), new GradientStop(Color.FromArgb(0, 255, 255, 255), 1) },
+            },
+        };
+        var black = new Border
+        {
+            IsHitTestVisible = false,
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new(0, 0, RelativeUnit.Relative), EndPoint = new(0, 1, RelativeUnit.Relative),
+                GradientStops = { new GradientStop(Color.FromArgb(0, 0, 0, 0), 0), new GradientStop(Colors.Black, 1) },
+            },
+        };
+        _svBox.Children.Add(_hueFill);
+        _svBox.Children.Add(white);
+        _svBox.Children.Add(black);
+
+        void Set(Point p)
+        {
+            _s = Math.Clamp(p.X / BoxW, 0, 1);
+            _v = Math.Clamp(1 - p.Y / BoxH, 0, 1);
+            Commit(HsvToRgb(_h, _s, _v));
+        }
+        _svBox.PointerPressed  += (_, e) => { _svDrag = true; e.Pointer.Capture(_svBox); Set(e.GetPosition(_svBox)); };
+        _svBox.PointerMoved    += (_, e) => { if (_svDrag) Set(e.GetPosition(_svBox)); };
+        _svBox.PointerReleased += (_, e) => { _svDrag = false; e.Pointer.Capture(null); };
+        return _svBox;
+    }
+
+    // The hue bar: a full rainbow gradient; clicking/dragging picks the hue.
+    Control BuildHueBar()
+    {
+        _hueBar.Background = new LinearGradientBrush
+        {
+            StartPoint = new(0, 0, RelativeUnit.Relative), EndPoint = new(1, 0, RelativeUnit.Relative),
+            GradientStops =
+            {
+                new(Color.FromRgb(255, 0, 0), 0.0), new(Color.FromRgb(255, 255, 0), 1.0 / 6),
+                new(Color.FromRgb(0, 255, 0), 2.0 / 6), new(Color.FromRgb(0, 255, 255), 3.0 / 6),
+                new(Color.FromRgb(0, 0, 255), 4.0 / 6), new(Color.FromRgb(255, 0, 255), 5.0 / 6),
+                new(Color.FromRgb(255, 0, 0), 1.0),
+            },
+        };
+        void Set(Point p) { _h = Math.Clamp(p.X / BoxW, 0, 1) * 360; Commit(HsvToRgb(_h, _s, _v)); }
+        _hueBar.PointerPressed  += (_, e) => { _hueDrag = true; e.Pointer.Capture(_hueBar); Set(e.GetPosition(_hueBar)); };
+        _hueBar.PointerMoved    += (_, e) => { if (_hueDrag) Set(e.GetPosition(_hueBar)); };
+        _hueBar.PointerReleased += (_, e) => { _hueDrag = false; e.Pointer.Capture(null); };
+        return _hueBar;
+    }
+
     // Hooks a text field to commit its parsed colour on Enter or focus-loss (ignoring invalid input).
     void WireText(TextBox box, Func<Color?> parse)
     {
         void Try() { if (!_updating && parse() is { } col) Commit(col); }
         box.LostFocus += (_, _) => Try();
-        box.KeyDown   += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) Try(); };
+        box.KeyDown   += (_, e) => { if (e.Key == Key.Enter) Try(); };
     }
 
     // The colour currently described by the RGB sliders (the canonical source).
@@ -104,7 +173,7 @@ public class HexColorPicker : StackPanel
     Control BuildPaletteStrip()
     {
         var pal   = PaletteStore.LoadAll().FirstOrDefault() ?? PaletteService.BuiltIn();
-        var strip = new WrapPanel { MaxWidth = 250 };
+        var strip = new WrapPanel { MaxWidth = BoxW + 16 };
         foreach (var nc in pal.Colors)
         {
             var hex  = nc.Value;
@@ -117,14 +186,14 @@ public class HexColorPicker : StackPanel
         return strip;
     }
 
-    // ── conversion + small helpers ───────────────────────────────────────────
+    // ── colour-space conversions ─────────────────────────────────────────────
 
     /// <summary>Standard (profile-less) RGB→CMYK: K from the brightest channel, then C/M/Y relative to it.</summary>
     public static (double c, double m, double y, double k) RgbToCmyk(Color col)
     {
         double r = col.R / 255.0, g = col.G / 255.0, b = col.B / 255.0;
         double k = 1 - Math.Max(r, Math.Max(g, b));
-        if (k >= 1) return (0, 0, 0, 1);   // pure black — undefined C/M/Y, treat as zero
+        if (k >= 1) return (0, 0, 0, 1);
         return ((1 - r - k) / (1 - k), (1 - g - k) / (1 - k), (1 - b - k) / (1 - k), k);
     }
 
@@ -134,13 +203,45 @@ public class HexColorPicker : StackPanel
         (byte)Math.Round(255 * (1 - m) * (1 - k)),
         (byte)Math.Round(255 * (1 - y) * (1 - k)));
 
-    // A 0–255 channel slider.
-    static Slider Channel() => new() { Minimum = 0, Maximum = 255, Width = 150, SmallChange = 1, LargeChange = 16 };
+    // RGB→HSV (h in degrees, s/v in 0..1).
+    static (double h, double s, double v) RgbToHsv(Color col)
+    {
+        double r = col.R / 255.0, g = col.G / 255.0, b = col.B / 255.0;
+        double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), d = max - min;
+        double h = 0;
+        if (d != 0)
+        {
+            if (max == r)      h = 60 * (((g - b) / d) % 6);
+            else if (max == g) h = 60 * (((b - r) / d) + 2);
+            else               h = 60 * (((r - g) / d) + 4);
+        }
+        if (h < 0) h += 360;
+        return (h, max == 0 ? 0 : d / max, max);
+    }
 
-    // A narrow numeric field for a CMYK percentage.
+    // HSV→RGB (h in degrees, s/v in 0..1).
+    static Color HsvToRgb(double h, double s, double v)
+    {
+        h = ((h % 360) + 360) % 360;
+        double c = v * s, x = c * (1 - Math.Abs((h / 60) % 2 - 1)), m = v - c;
+        double r = 0, g = 0, b = 0;
+        switch ((int)(h / 60))
+        {
+            case 0: r = c; g = x; break;
+            case 1: r = x; g = c; break;
+            case 2: g = c; b = x; break;
+            case 3: g = x; b = c; break;
+            case 4: r = x; b = c; break;
+            default: r = c; b = x; break;
+        }
+        return Color.FromRgb((byte)Math.Round((r + m) * 255), (byte)Math.Round((g + m) * 255), (byte)Math.Round((b + m) * 255));
+    }
+
+    // ── small helpers ────────────────────────────────────────────────────────
+
+    static Slider Channel() => new() { Minimum = 0, Maximum = 255, Width = 150, SmallChange = 1, LargeChange = 16 };
     static TextBox Field() => new() { Width = 46 };
 
-    // A labelled row (fixed-width letter + control).
     static Control ChannelRow(string label, Control control) => LabeledRow(label, control);
     static Control LabeledRow(string label, Control control) => new StackPanel
     {
@@ -148,7 +249,6 @@ public class HexColorPicker : StackPanel
         Children = { new TextBlock { Text = label, Width = 32, VerticalAlignment = VerticalAlignment.Center }, control },
     };
 
-    // Parses a CMYK percentage field (0..100) into a 0..1 fraction; false if it isn't a number.
     static bool TryPct(TextBox box, out double frac)
     {
         frac = 0;
@@ -157,7 +257,6 @@ public class HexColorPicker : StackPanel
         return true;
     }
 
-    // Formats a 0..1 fraction as a whole-percent string.
     static string Pct(double frac) => Math.Round(frac * 100).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Formats a colour as opaque web hex (#RRGGBB).</summary>

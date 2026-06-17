@@ -27,7 +27,7 @@ public class PaletteEditorWindow : Window
     {
         Title                 = "🎨 Palette editor";
         Width                 = 560;
-        Height                = 540;
+        Height                = 680;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Ui.ThemeWindow(this);
 
