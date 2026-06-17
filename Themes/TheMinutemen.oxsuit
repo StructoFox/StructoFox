@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<oxsuit version="1.0" name="The Minutemen">
+
+  <colors>
+
+    <!-- Content Surface -->
+    <color key="ContentBg" value="#08101C"/>
+    <color key="ContentText" value="#D4DEF0"/>
+    <color key="ContentDim" value="#485A90"/>
+    <color key="ContentHigh" value="#D4A828"/>
+    <color key="ContentBorder" value="#00000000"/>
+
+    <!-- Sidebar Surface -->
+    <color key="SidebarBg" value="#060C16"/>
+    <color key="SidebarText" value="#D4DEF0"/>
+    <color key="SidebarDim" value="#485A90"/>
+    <color key="SidebarHigh" value="#D4A828"/>
+    <color key="SidebarBorder" value="#00000000"/>
+
+    <!-- Control Surface -->
+    <color key="ControlBg" value="#0E1A2C"/>
+    <color key="ControlHover" value="#162440"/>
+    <color key="ControlText" value="#485A90"/>
+    <color key="ControlDim" value="#485A90"/>
+    <color key="ControlHigh" value="#D4A828"/>
+    <color key="ControlBorder" value="#00000000"/>
+
+    <!-- Input Surface -->
+    <color key="InputBg" value="#0E1A2C"/>
+    <color key="InputText" value="#D4DEF0"/>
+    <color key="InputDim" value="#485A90"/>
+    <color key="InputHigh" value="#D4A828"/>
+    <color key="InputBorder" value="#00000000"/>
+
+    <!-- Accent -->
+    <color key="AccentBg" value="#D4A828"/>
+    <color key="AccentText" value="#060C16"/>
+    <color key="AccentHighlight" value="#D4A828"/>
+    <color key="PrimaryAccent" value="#3870B8"/>
+    <color key="SecondaryAccent" value="#C89020"/>
+    <color key="TertiaryAccent" value="#7898CC"/>
+
+    <!-- Primary Slot -->
+    <color key="PrimaryBg" value="#0A1420"/>
+    <color key="PrimaryText" value="#D4DEF0"/>
+    <color key="PrimaryDim" value="#485A90"/>
+    <color key="PrimaryHigh" value="#D4A828"/>
+    <color key="PrimaryBorder" value="#00000000"/>
+
+    <!-- Secondary Slot -->
+    <color key="SecondaryBg" value="#121008"/>
+    <color key="SecondaryText" value="#D4DEF0"/>
+    <color key="SecondaryDim" value="#485A90"/>
+    <color key="SecondaryHigh" value="#D4A828"/>
+    <color key="SecondaryBorder" value="#00000000"/>
+
+    <!-- Tertiary Slot -->
+    <color key="TertiaryBg" value="#0A1220"/>
+    <color key="TertiaryText" value="#D4DEF0"/>
+    <color key="TertiaryDim" value="#485A90"/>
+    <color key="TertiaryHigh" value="#D4A828"/>
+    <color key="TertiaryBorder" value="#00000000"/>
+
+  </colors>
+
+  <tokens>
+    <token key="CornerRadius"         value="6" unit="px"/>
+    <token key="ShadowDepth"          value="2"/>
+    <token key="ContentBorderWidth"   value="1" unit="px"/>
+    <token key="SidebarBorderWidth"   value="1" unit="px"/>
+    <token key="ControlBorderWidth"   value="1" unit="px"/>
+    <token key="InputBorderWidth"     value="1" unit="px"/>
+    <token key="PrimaryBorderWidth"   value="1" unit="px"/>
+    <token key="SecondaryBorderWidth" value="1" unit="px"/>
+    <token key="TertiaryBorderWidth"  value="1" unit="px"/>
+  </tokens>
+</oxsuit>

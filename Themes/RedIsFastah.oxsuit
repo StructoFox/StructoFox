@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<oxsuit version="1.0" name="Red Is Fastah">
+
+  <!--
+    Da OrcBoyz painted dis one.
+    Red ones go fastah — and dis one is PROPPA red.
+    Frame: dark Rosso Corsa (not brown, not orange — RED).
+    Accent: Ferrari #CC0000.
+    Text: looted gold, cuz da Boyz take trophies.
+  -->
+
+  <colors>
+
+    <!-- Content Surface -->
+    <color key="ContentBg"     value="#180000"/>
+    <color key="ContentText"   value="#F0C890"/>
+    <color key="ContentDim"    value="#993333"/>
+    <color key="ContentHigh"   value="#E80000"/>
+    <color key="ContentBorder" value="#00000000"/>
+
+    <!-- Sidebar Surface — da frame, PROPPA RED -->
+    <color key="SidebarBg"     value="#5C0000"/>
+    <color key="SidebarText"   value="#F0C890"/>
+    <color key="SidebarDim"    value="#C06060"/>
+    <color key="SidebarHigh"   value="#FF4040"/>
+    <color key="SidebarBorder" value="#00000000"/>
+
+    <!-- Control Surface -->
+    <color key="ControlBg"     value="#2D0000"/>
+    <color key="ControlHover"  value="#420000"/>
+    <color key="ControlText"   value="#D4A070"/>
+    <color key="ControlDim"    value="#993333"/>
+    <color key="ControlHigh"   value="#E80000"/>
+    <color key="ControlBorder" value="#00000000"/>
+
+    <!-- Input Surface -->
+    <color key="InputBg"       value="#2D0000"/>
+    <color key="InputText"     value="#F0C890"/>
+    <color key="InputDim"      value="#993333"/>
+    <color key="InputHigh"     value="#E80000"/>
+    <color key="InputBorder"   value="#00000000"/>
+
+    <!-- Accent — Rosso Corsa -->
+    <color key="AccentBg"        value="#CC0000"/>
+    <color key="AccentText"      value="#F0C890"/>
+    <color key="AccentHighlight" value="#CC0000"/>
+    <color key="PrimaryAccent"   value="#CC0000"/>
+    <color key="SecondaryAccent" value="#C8A000"/>
+    <color key="TertiaryAccent"  value="#8B0000"/>
+
+    <!-- Primary Slot -->
+    <color key="PrimaryBg"     value="#180000"/>
+    <color key="PrimaryText"   value="#F0C890"/>
+    <color key="PrimaryDim"    value="#993333"/>
+    <color key="PrimaryHigh"   value="#E80000"/>
+    <color key="PrimaryBorder" value="#00000000"/>
+
+    <!-- Secondary Slot -->
+    <color key="SecondaryBg"     value="#1C0000"/>
+    <color key="SecondaryText"   value="#F0C890"/>
+    <color key="SecondaryDim"    value="#993333"/>
+    <color key="SecondaryHigh"   value="#E80000"/>
+    <color key="SecondaryBorder" value="#00000000"/>
+
+    <!-- Tertiary Slot -->
+    <color key="TertiaryBg"     value="#140000"/>
+    <color key="TertiaryText"   value="#F0C890"/>
+    <color key="TertiaryDim"    value="#993333"/>
+    <color key="TertiaryHigh"   value="#E80000"/>
+    <color key="TertiaryBorder" value="#00000000"/>
+
+  </colors>
+
+  <tokens>
+    <token key="CornerRadius"         value="6"  unit="px"/>
+    <token key="ShadowDepth"          value="2"/>
+    <token key="ContentBorderWidth"   value="1"  unit="px"/>
+    <token key="SidebarBorderWidth"   value="1"  unit="px"/>
+    <token key="ControlBorderWidth"   value="1"  unit="px"/>
+    <token key="InputBorderWidth"     value="1"  unit="px"/>
+    <token key="PrimaryBorderWidth"   value="1"  unit="px"/>
+    <token key="SecondaryBorderWidth" value="1"  unit="px"/>
+    <token key="TertiaryBorderWidth"  value="1"  unit="px"/>
+  </tokens>
+
+</oxsuit>

@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -43,6 +44,21 @@ public partial class MainWindow : Window
             Text = $"OXSUIT loader: {brushCount} brushes parsed.",
             FontSize = 12, Opacity = 0.6,
         });
+
+        // Live theme switcher: pick any shipped OXSUIT theme and watch every window re-tint.
+        var themes = ThemeManager.Available().ToList();
+        if (themes.Count > 0)
+        {
+            var themeCombo = Ui.Combo(260);
+            foreach (var (name, path) in themes) themeCombo.Items.Add(new ComboItem(name, path));
+            themeCombo.SelectedIndex = Math.Max(0, themes.FindIndex(t => t.Name.Equals("ClaudesChoice", StringComparison.OrdinalIgnoreCase)));
+            themeCombo.SelectionChanged += (_, _) =>
+            {
+                if (themeCombo.SelectedItem is ComboItem ci) ThemeManager.Apply(Application.Current!, ci.Id);
+            };
+            root.Children.Add(new TextBlock { Text = $"Theme ({themes.Count} available):", FontSize = 12, Opacity = 0.6 });
+            root.Children.Add(themeCombo);
+        }
 
         // UI-kit smoke test: a button that chains the new MessageDialog + PromptDialog.
         var status = new TextBlock { FontSize = 12, Opacity = 0.6 };

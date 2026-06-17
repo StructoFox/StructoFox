@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<oxsuit version="1.0" name="Rainbow Sparkle Fantasy">
+
+  <colors>
+
+    <!-- Content Surface -->
+    <color key="ContentBg" value="#F0F0F8"/>
+    <color key="ContentText" value="#5C456B"/>
+    <color key="ContentDim" value="#8D9BC0"/>
+    <color key="ContentHigh" value="#FFE6A3"/>
+    <color key="ContentBorder" value="#FF99CC60"/>
+
+    <!-- Sidebar Surface -->
+    <color key="SidebarBg" value="#E6E9F0"/>
+    <color key="SidebarText" value="#5C456B"/>
+    <color key="SidebarDim" value="#8D9BC0"/>
+    <color key="SidebarHigh" value="#FFE6A3"/>
+    <color key="SidebarBorder" value="#A3D9E070"/>
+
+    <!-- Control Surface -->
+    <color key="ControlBg" value="#F0E8F5"/>
+    <color key="ControlHover" value="#D0CEF0"/>
+    <color key="ControlText" value="#8D9BC0"/>
+    <color key="ControlDim" value="#8D9BC0"/>
+    <color key="ControlHigh" value="#FFE6A3"/>
+    <color key="ControlBorder" value="#C0A0FF70"/>
+
+    <!-- Input Surface -->
+    <color key="InputBg" value="#F0E8F5"/>
+    <color key="InputText" value="#5C456B"/>
+    <color key="InputDim" value="#8D9BC0"/>
+    <color key="InputHigh" value="#FFE6A3"/>
+    <color key="InputBorder" value="#FFE6A380"/>
+
+    <!-- Accent -->
+    <color key="AccentBg" value="#FFE6A3"/>
+    <color key="AccentText" value="#E6E9F0"/>
+    <color key="AccentHighlight" value="#FFE6A3"/>
+    <color key="PrimaryAccent" value="#FF99CC"/>
+    <color key="SecondaryAccent" value="#A3D9E0"/>
+    <color key="TertiaryAccent" value="#C0A0FF"/>
+
+    <!-- Primary Slot -->
+    <color key="PrimaryBg" value="#FFE0F0"/>
+    <color key="PrimaryText" value="#5C456B"/>
+    <color key="PrimaryDim" value="#8D9BC0"/>
+    <color key="PrimaryHigh" value="#FFE6A3"/>
+    <color key="PrimaryBorder" value="#FF99CC60"/>
+
+    <!-- Secondary Slot -->
+    <color key="SecondaryBg" value="#D3E8F0"/>
+    <color key="SecondaryText" value="#5C456B"/>
+    <color key="SecondaryDim" value="#8D9BC0"/>
+    <color key="SecondaryHigh" value="#FFE6A3"/>
+    <color key="SecondaryBorder" value="#A3D9E060"/>
+
+    <!-- Tertiary Slot -->
+    <color key="TertiaryBg" value="#E6D5F0"/>
+    <color key="TertiaryText" value="#5C456B"/>
+    <color key="TertiaryDim" value="#8D9BC0"/>
+    <color key="TertiaryHigh" value="#FFE6A3"/>
+    <color key="TertiaryBorder" value="#C0A0FF60"/>
+
+  </colors>
+
+  <tokens>
+    <token key="CornerRadius"         value="6" unit="px"/>
+    <token key="ShadowDepth"          value="2"/>
+    <token key="ContentBorderWidth"   value="1" unit="px"/>
+    <token key="SidebarBorderWidth"   value="1" unit="px"/>
+    <token key="ControlBorderWidth"   value="1" unit="px"/>
+    <token key="InputBorderWidth"     value="1" unit="px"/>
+    <token key="PrimaryBorderWidth"   value="1" unit="px"/>
+    <token key="SecondaryBorderWidth" value="1" unit="px"/>
+    <token key="TertiaryBorderWidth"  value="1" unit="px"/>
+  </tokens>
+</oxsuit>
