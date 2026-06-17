@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -10,34 +9,35 @@ using StructoFox.Core.Models;
 namespace StructoFox.App;
 
 /// <summary>
-/// A self-contained colour picker. Visual scheme = an HSV saturation/value box + a hue bar (the
-/// most practical, precise-everywhere layout), backed by exact RGB sliders, hex, and CMYK fields,
-/// plus a one-click palette strip (CI colours). All views stay in sync. Theme-independent, no
-/// external dependency. NOTE: CMYK↔RGB is the standard profile-less approximation (not ICC).
+/// A self-contained colour picker. Visual scheme = an HSV saturation/value box + a hue bar
+/// (click/drag), backed by a tidy numeric grid: per-channel RGB as decimal (0–255) AND hex (00–FF),
+/// plus CMYK percentages — and a one-click palette strip (CI colours) with a palette chooser.
+/// All views stay in sync. Theme-independent, no external dependency.
+/// NOTE: CMYK↔RGB is the standard profile-less approximation (not ICC).
 /// </summary>
 public class HexColorPicker : StackPanel
 {
     const double BoxW = 200, BoxH = 130, BarH = 16;
 
-    readonly Border  _preview  = new() { Height = 24, CornerRadius = new(3), BorderBrush = Brushes.Gray, BorderThickness = new(1) };
-    readonly Grid    _svBox    = new() { Width = BoxW, Height = BoxH, Background = Brushes.Transparent };
-    readonly Border  _hueFill  = new() { IsHitTestVisible = false };          // solid current hue (bottom layer)
-    readonly Border  _hueBar   = new() { Width = BoxW, Height = BarH, BorderBrush = Brushes.Gray, BorderThickness = new(1) };
-    readonly Slider  _r = Channel();
-    readonly Slider  _g = Channel();
-    readonly Slider  _b = Channel();
-    readonly TextBox _hex = new() { Width = 100 };
-    readonly TextBlock _rgbText = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 11, Opacity = 0.8 };
-    readonly TextBox _c = Field(), _m = Field(), _y = Field(), _k = Field();
+    readonly Border _preview = new() { Height = 24, CornerRadius = new(3), BorderBrush = Brushes.Gray, BorderThickness = new(1) };
+    readonly Grid   _svBox   = new() { Width = BoxW, Height = BoxH, Background = Brushes.Transparent };
+    readonly Border _hueFill = new() { IsHitTestVisible = false };
+    readonly Border _hueBar  = new() { Width = BoxW, Height = BarH, BorderBrush = Brushes.Gray, BorderThickness = new(1) };
+
+    // Per-channel numeric inputs: decimal (0–255) and hex (00–FF).
+    readonly TextBox _rDec = Dec(), _gDec = Dec(), _bDec = Dec();
+    readonly TextBox _rHex = Hex2(), _gHex = Hex2(), _bHex = Hex2();
+    readonly TextBox _c = Pctf(), _m = Pctf(), _y = Pctf(), _k = Pctf();
 
     readonly StackPanel _paletteArea = new() { Spacing = 4 };
-    double _h, _s = 1, _v;     // current HSV (the SV box / hue bar drive these)
+    Color  _color = Colors.Black;
+    double _h, _s = 1, _v;
     bool _updating, _svDrag, _hueDrag;
 
     /// <summary>Raised whenever the chosen colour changes (any input).</summary>
     public event EventHandler? ColorChanged;
 
-    // Builds preview, HSV box + hue bar, optional palette strip, RGB sliders, hex and CMYK — all synced.
+    // Builds preview, HSV box + hue bar, palette area, and the grouped RGB(dec/hex) + CMYK grids.
     public HexColorPicker(bool showPalette = true)
     {
         Spacing = 6;
@@ -45,23 +45,22 @@ public class HexColorPicker : StackPanel
         Children.Add(BuildSvBox());
         Children.Add(BuildHueBar());
         if (showPalette) { Children.Add(_paletteArea); RebuildPaletteArea(); }
-        Children.Add(ChannelRow("R", _r));
-        Children.Add(ChannelRow("G", _g));
-        Children.Add(ChannelRow("B", _b));
+
+        // R: [0-255] [0-FF] | G: … | B: …
         Children.Add(new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 8,
-            Children = { new TextBlock { Text = "Hex", Width = 32, VerticalAlignment = VerticalAlignment.Center }, _hex, _rgbText },
+            Orientation = Orientation.Horizontal, Spacing = 12,
+            Children = { ChannelGroup("R", _rDec, _rHex), ChannelGroup("G", _gDec, _gHex), ChannelGroup("B", _bDec, _bHex) },
         });
+        // C: % | M: % | Y: % | K: %
         Children.Add(new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 6,
-            Children = { new TextBlock { Text = "CMYK %", VerticalAlignment = VerticalAlignment.Center }, _c, _m, _y, _k },
+            Orientation = Orientation.Horizontal, Spacing = 12,
+            Children = { PctGroup("C", _c), PctGroup("M", _m), PctGroup("Y", _y), PctGroup("K", _k) },
         });
 
-        foreach (var s in new[] { _r, _g, _b })
-            s.PropertyChanged += (_, e) => { if (e.Property == RangeBase.ValueProperty) Commit(FromSliders()); };
-        WireText(_hex, () => { try { return Color.Parse(_hex.Text ?? ""); } catch { return (Color?)null; } });
+        WireText(_rDec, FromDec); WireText(_gDec, FromDec); WireText(_bDec, FromDec);
+        WireText(_rHex, FromHex); WireText(_gHex, FromHex); WireText(_bHex, FromHex);
         foreach (var f in new[] { _c, _m, _y, _k }) WireText(f, FromCmyk);
 
         Color = Colors.Black;
@@ -70,21 +69,21 @@ public class HexColorPicker : StackPanel
     /// <summary>The selected colour. Setting it updates every view.</summary>
     public Color Color
     {
-        get => FromSliders();
+        get => _color;
         set => ShowColor(value);
     }
 
-    // Pushes a colour into every input/display at once (and recomputes HSV), guarded against recursion.
+    // Pushes a colour into every input/display at once (RGB dec+hex, CMYK, HSV, preview), guarded.
     void ShowColor(Color col)
     {
         _updating = true;
-        _r.Value = col.R; _g.Value = col.G; _b.Value = col.B;
-        _hex.Text = HexOf(col);
-        _rgbText.Text = $"{col.R}, {col.G}, {col.B}";
+        _color = col;
+        _rDec.Text = col.R.ToString(); _gDec.Text = col.G.ToString(); _bDec.Text = col.B.ToString();
+        _rHex.Text = col.R.ToString("X2"); _gHex.Text = col.G.ToString("X2"); _bHex.Text = col.B.ToString("X2");
         var (cc, mm, yy, kk) = RgbToCmyk(col);
         _c.Text = Pct(cc); _m.Text = Pct(mm); _y.Text = Pct(yy); _k.Text = Pct(kk);
         (_h, _s, _v) = RgbToHsv(col);
-        _hueFill.Background = new SolidColorBrush(HsvToRgb(_h, 1, 1));   // SV box base = full-sat hue
+        _hueFill.Background = new SolidColorBrush(HsvToRgb(_h, 1, 1));
         _preview.Background = new SolidColorBrush(col);
         _updating = false;
     }
@@ -99,7 +98,7 @@ public class HexColorPicker : StackPanel
 
     // ── visual HSV controls ────────────────────────────────────────────────
 
-    // The saturation/value box: solid hue, then a white→transparent (S) and a transparent→black (V) overlay.
+    // The saturation/value box: solid hue, then white→transparent (S) and transparent→black (V) overlays.
     Control BuildSvBox()
     {
         var white = new Border
@@ -157,27 +156,7 @@ public class HexColorPicker : StackPanel
         return _hueBar;
     }
 
-    // Hooks a text field to commit its parsed colour on Enter or focus-loss (ignoring invalid input).
-    void WireText(TextBox box, Func<Color?> parse)
-    {
-        void Try() { if (!_updating && parse() is { } col) Commit(col); }
-        box.LostFocus += (_, _) => Try();
-        box.KeyDown   += (_, e) => { if (e.Key == Key.Enter) Try(); };
-    }
-
-    // The colour currently described by the RGB sliders (the canonical source).
-    Color FromSliders() => Color.FromRgb((byte)_r.Value, (byte)_g.Value, (byte)_b.Value);
-
-    // The colour described by the four CMYK fields, or null if they don't parse.
-    Color? FromCmyk()
-    {
-        if (!(TryPct(_c, out var c) && TryPct(_m, out var m) && TryPct(_y, out var y) && TryPct(_k, out var k)))
-            return null;
-        return CmykToRgb(c, m, y, k);
-    }
-
-    // (Re)builds the palette area: a header with the active palette's name + a chooser button,
-    // then a one-click strip of that palette's colours (CI colours). Chips set the colour.
+    // (Re)builds the palette area: active palette name + ▾ chooser, then a one-click colour strip.
     void RebuildPaletteArea()
     {
         _paletteArea.Children.Clear();
@@ -220,6 +199,38 @@ public class HexColorPicker : StackPanel
         _paletteArea.Children.Add(strip);
     }
 
+    // Hooks a text field to commit its parsed colour on Enter or focus-loss (ignoring invalid input).
+    void WireText(TextBox box, Func<Color?> parse)
+    {
+        void Try() { if (!_updating && parse() is { } col) Commit(col); }
+        box.LostFocus += (_, _) => Try();
+        box.KeyDown   += (_, e) => { if (e.Key == Key.Enter) Try(); };
+    }
+
+    // The colour described by the three decimal (0–255) channel fields, or null if any don't parse.
+    Color? FromDec()
+    {
+        if (TryByteDec(_rDec, out var r) && TryByteDec(_gDec, out var g) && TryByteDec(_bDec, out var b))
+            return Color.FromRgb(r, g, b);
+        return null;
+    }
+
+    // The colour described by the three hex (00–FF) channel fields, or null if any don't parse.
+    Color? FromHex()
+    {
+        if (TryByteHex(_rHex, out var r) && TryByteHex(_gHex, out var g) && TryByteHex(_bHex, out var b))
+            return Color.FromRgb(r, g, b);
+        return null;
+    }
+
+    // The colour described by the four CMYK fields, or null if they don't parse.
+    Color? FromCmyk()
+    {
+        if (TryPct(_c, out var c) && TryPct(_m, out var m) && TryPct(_y, out var y) && TryPct(_k, out var k))
+            return CmykToRgb(c, m, y, k);
+        return null;
+    }
+
     // ── colour-space conversions ─────────────────────────────────────────────
 
     /// <summary>Standard (profile-less) RGB→CMYK: K from the brightest channel, then C/M/Y relative to it.</summary>
@@ -231,13 +242,11 @@ public class HexColorPicker : StackPanel
         return ((1 - r - k) / (1 - k), (1 - g - k) / (1 - k), (1 - b - k) / (1 - k), k);
     }
 
-    // Standard (profile-less) CMYK→RGB; inputs are 0..1.
     static Color CmykToRgb(double c, double m, double y, double k) => Color.FromRgb(
         (byte)Math.Round(255 * (1 - c) * (1 - k)),
         (byte)Math.Round(255 * (1 - m) * (1 - k)),
         (byte)Math.Round(255 * (1 - y) * (1 - k)));
 
-    // RGB→HSV (h in degrees, s/v in 0..1).
     static (double h, double s, double v) RgbToHsv(Color col)
     {
         double r = col.R / 255.0, g = col.G / 255.0, b = col.B / 255.0;
@@ -253,7 +262,6 @@ public class HexColorPicker : StackPanel
         return (h, max == 0 ? 0 : d / max, max);
     }
 
-    // HSV→RGB (h in degrees, s/v in 0..1).
     static Color HsvToRgb(double h, double s, double v)
     {
         h = ((h % 360) + 360) % 360;
@@ -273,16 +281,46 @@ public class HexColorPicker : StackPanel
 
     // ── small helpers ────────────────────────────────────────────────────────
 
-    static Slider Channel() => new() { Minimum = 0, Maximum = 255, Width = 150, SmallChange = 1, LargeChange = 16 };
-    static TextBox Field() => new() { Width = 46 };
+    static TextBox Dec()  => new() { Width = 46 };
+    static TextBox Hex2() => new() { Width = 40 };
+    static TextBox Pctf() => new() { Width = 56 };
 
-    static Control ChannelRow(string label, Control control) => LabeledRow(label, control);
-    static Control LabeledRow(string label, Control control) => new StackPanel
+    // "R: [dec] [hex]" group.
+    static Control ChannelGroup(string label, TextBox dec, TextBox hex) => new StackPanel
     {
-        Orientation = Orientation.Horizontal, Spacing = 8,
-        Children = { new TextBlock { Text = label, Width = 32, VerticalAlignment = VerticalAlignment.Center }, control },
+        Orientation = Orientation.Horizontal, Spacing = 4,
+        Children = { new TextBlock { Text = label + ":", VerticalAlignment = VerticalAlignment.Center }, dec, hex },
     };
 
+    // "C: [%] %" group.
+    static Control PctGroup(string label, TextBox pct) => new StackPanel
+    {
+        Orientation = Orientation.Horizontal, Spacing = 4,
+        Children =
+        {
+            new TextBlock { Text = label + ":", VerticalAlignment = VerticalAlignment.Center }, pct,
+            new TextBlock { Text = "%", VerticalAlignment = VerticalAlignment.Center },
+        },
+    };
+
+    // Parses a 0–255 decimal field (clamped) into a byte; false if it isn't a number.
+    static bool TryByteDec(TextBox box, out byte value)
+    {
+        value = 0;
+        if (!int.TryParse(box.Text, out var n)) return false;
+        value = (byte)Math.Clamp(n, 0, 255);
+        return true;
+    }
+
+    // Parses a 00–FF hex field into a byte; false if it isn't valid hex.
+    static bool TryByteHex(TextBox box, out byte value)
+    {
+        value = 0;
+        try { value = Convert.ToByte((box.Text ?? "").Trim().TrimStart('#'), 16); return true; }
+        catch { return false; }
+    }
+
+    // Parses a CMYK percentage field (0..100, one decimal allowed) into a 0..1 fraction.
     static bool TryPct(TextBox box, out double frac)
     {
         frac = 0;
@@ -291,7 +329,8 @@ public class HexColorPicker : StackPanel
         return true;
     }
 
-    static string Pct(double frac) => Math.Round(frac * 100).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    // One-decimal percent label for a 0..1 fraction.
+    static string Pct(double frac) => (frac * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Formats a colour as opaque web hex (#RRGGBB).</summary>
     public static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
