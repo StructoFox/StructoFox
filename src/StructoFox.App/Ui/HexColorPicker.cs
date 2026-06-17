@@ -317,22 +317,24 @@ public class HexColorPicker : StackPanel
     // A thin horizontal divider between the picker's top area and the numeric rows.
     static Control Sep() => new Border { Height = 1, Background = Brushes.Gray, Opacity = 0.4, Margin = new(0, 4, 0, 4) };
 
-    // "R: [dec] [hex]" group.
+    // "R: [dec] [hex]" group. The label has a fixed width so dec/hex fields line up across rows.
     static Control ChannelGroup(string label, TextBox dec, TextBox hex) => new StackPanel
     {
         Orientation = Orientation.Horizontal, Spacing = 4,
-        Children = { new TextBlock { Text = label + ":", VerticalAlignment = VerticalAlignment.Center }, dec, hex },
+        Children = { Lbl(label), dec, hex },
     };
 
-    // "C: [%] %" group.
+    // "C: [%] %" group. The label has a fixed width so the % fields line up across the 2×2 grid.
     static Control PctGroup(string label, TextBox pct) => new StackPanel
     {
         Orientation = Orientation.Horizontal, Spacing = 4,
-        Children =
-        {
-            new TextBlock { Text = label + ":", VerticalAlignment = VerticalAlignment.Center }, pct,
-            new TextBlock { Text = "%", VerticalAlignment = VerticalAlignment.Center },
-        },
+        Children = { Lbl(label), pct, new TextBlock { Text = "%", VerticalAlignment = VerticalAlignment.Center } },
+    };
+
+    // A fixed-width "<X>:" label, so every field that follows snaps to the same vertical line.
+    static TextBlock Lbl(string label) => new()
+    {
+        Text = label + ":", Width = 18, VerticalAlignment = VerticalAlignment.Center,
     };
 
     // Parses a 0–255 decimal field (clamped) into a byte; false if it isn't a number.
