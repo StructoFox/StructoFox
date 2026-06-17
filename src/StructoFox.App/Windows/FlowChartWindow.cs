@@ -173,6 +173,17 @@ public class FlowChartWindow : Window
         row.Children.Add(toNsBtn);
 
         row.Children.Add(new Border { Width = 12 });
+        var bgBtn = TBtn("🎨", Loc.S("Flow_Background"));
+        bgBtn.Click += async (_, _) =>
+        {
+            var hex = await ColorPickDialog.Pick(this, Loc.S("Flow_Background"), _style.BackgroundColor);
+            if (hex is null) return;
+            _style.BackgroundColor = hex;
+            if (_canvas is not null) _canvas.Background = new SolidColorBrush(Color.Parse(hex));
+            Save();
+        };
+        row.Children.Add(bgBtn);
+
         var zoomBtn = TBtn("1:1", Loc.S("Common_ResetZoomTip"));
         zoomBtn.Click += (_, _) => { _zoom = 1.0; if (_canvas is not null) _canvas.RenderTransform = null; };
         row.Children.Add(zoomBtn);

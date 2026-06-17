@@ -98,6 +98,7 @@ public static class Loc
         ["Flow_ToStructogramTitle"]    = "Convert to structogram",
         ["Flow_ToStructogramOverwrite"] = "A structogram already exists for this function. Overwrite it with the converted flowchart?",
         ["Flow_ToStructogramPartial"]  = "Converted — but some parts of the flowchart could not be structured. They are flagged in amber in the structogram.",
+        ["Flow_Background"]            = "Canvas background colour",
 
         // Per-element styling
         ["Style_Menu"]      = "🎨 Style",
@@ -209,6 +210,7 @@ public static class Loc
         ["Flow_ToStructogramTitle"]    = "In Struktogramm umwandeln",
         ["Flow_ToStructogramOverwrite"] = "Für diese Funktion existiert bereits ein Struktogramm. Mit dem umgewandelten Ablaufplan überschreiben?",
         ["Flow_ToStructogramPartial"]  = "Umgewandelt — aber einige Teile des Ablaufplans ließen sich nicht strukturieren. Sie sind im Struktogramm bernsteinfarben markiert.",
+        ["Flow_Background"]            = "Hintergrundfarbe der Zeichenfläche",
 
         // Per-element styling
         ["Style_Menu"]      = "🎨 Stil",
