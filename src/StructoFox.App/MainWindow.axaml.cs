@@ -57,6 +57,18 @@ public partial class MainWindow : Window
         root.Children.Add(demo);
         root.Children.Add(status);
 
+        // UI-kit smoke test: a themed combo of ComboItems, reflecting its pick into the status line.
+        var combo = Ui.Combo(220);
+        combo.Items.Add(new ComboItem("C#", "csharp"));
+        combo.Items.Add(new ComboItem("Rust", "rust"));
+        combo.Items.Add(new ComboItem("Python", "python"));
+        combo.SelectedIndex = 0;
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedItem is ComboItem ci) status.Text = $"Combo pick: {ci.Name} (id={ci.Id})";
+        };
+        root.Children.Add(combo);
+
         root.Children.Add(new TextBlock { Text = Loc.S("Smoke_Header"), Margin = new(0, 12, 0, 0) });
         root.Children.Add(new TextBox
         {
