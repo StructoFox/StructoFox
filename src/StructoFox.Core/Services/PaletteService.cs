@@ -30,30 +30,47 @@ public static class PaletteService
         Colors =
         [
             // Neutrals
-            new("Black", "#000000"), new("Gray", "#808080"), new("Silver", "#C0C0C0"), new("White", "#FFFFFF"),
+            new("Black", "#000000"), new("Dim Gray", "#696969"), new("Gray", "#808080"), new("Dark Gray", "#A9A9A9"),
+            new("Silver", "#C0C0C0"), new("Light Gray", "#D3D3D3"), new("Gainsboro", "#DCDCDC"),
+            new("Slate Gray", "#708090"), new("Light Slate Gray", "#778899"), new("White", "#FFFFFF"),
             // Reds
-            new("Crimson", "#DC143C"), new("Firebrick", "#B22222"), new("Maroon", "#800000"), new("Tomato", "#FF6347"),
+            new("Dark Red", "#8B0000"), new("Maroon", "#800000"), new("Firebrick", "#B22222"), new("Crimson", "#DC143C"),
+            new("Red", "#FF0000"), new("Indian Red", "#CD5C5C"), new("Light Coral", "#F08080"), new("Tomato", "#FF6347"),
             // Pinks
-            new("Salmon", "#FA8072"), new("Pink", "#FFC0CB"), new("Hot Pink", "#FF69B4"),
+            new("Salmon", "#FA8072"), new("Deep Pink", "#FF1493"), new("Hot Pink", "#FF69B4"),
+            new("Pale Violet Red", "#DB7093"), new("Pink", "#FFC0CB"), new("Light Pink", "#FFB6C1"), new("Misty Rose", "#FFE4E1"),
             // Oranges & golds
-            new("Coral", "#FF7F50"), new("Orange", "#FFA500"), new("Gold", "#FFD700"),
-            // Yellows
-            new("Yellow", "#FFFF00"), new("Khaki", "#F0E68C"),
+            new("Orange Red", "#FF4500"), new("Coral", "#FF7F50"), new("Dark Orange", "#FF8C00"),
+            new("Orange", "#FFA500"), new("Gold", "#FFD700"), new("Goldenrod", "#DAA520"),
             // Browns
-            new("Tan", "#D2B48C"), new("Sienna", "#A0522D"), new("Chocolate", "#D2691E"), new("Brown", "#A52A2A"),
+            new("Saddle Brown", "#8B4513"), new("Sienna", "#A0522D"), new("Brown", "#A52A2A"), new("Chocolate", "#D2691E"),
+            new("Peru", "#CD853F"), new("Rosy Brown", "#BC8F8F"), new("Tan", "#D2B48C"), new("Wheat", "#F5DEB3"),
+            // Yellows
+            new("Dark Khaki", "#BDB76B"), new("Khaki", "#F0E68C"), new("Pale Goldenrod", "#EEE8AA"),
+            new("Yellow", "#FFFF00"), new("Light Yellow", "#FFFFE0"),
             // Greens
-            new("Olive", "#808000"), new("Olive Drab", "#6B8E23"), new("Lime Green", "#32CD32"),
+            new("Dark Olive Green", "#556B2F"), new("Olive", "#808000"), new("Olive Drab", "#6B8E23"),
+            new("Yellow Green", "#9ACD32"), new("Chartreuse", "#7FFF00"), new("Lime Green", "#32CD32"),
             new("Green", "#008000"), new("Forest Green", "#228B22"), new("Sea Green", "#2E8B57"),
+            new("Medium Sea Green", "#3CB371"), new("Spring Green", "#00FF7F"),
             // Cyans / teals
-            new("Teal", "#008080"), new("Turquoise", "#40E0D0"), new("Aqua", "#00FFFF"),
+            new("Teal", "#008080"), new("Dark Cyan", "#008B8B"), new("Light Sea Green", "#20B2AA"),
+            new("Turquoise", "#40E0D0"), new("Aquamarine", "#7FFFD4"), new("Aqua", "#00FFFF"),
+            new("Cadet Blue", "#5F9EA0"), new("Pale Turquoise", "#AFEEEE"),
             // Blues
-            new("Sky Blue", "#87CEEB"), new("Steel Blue", "#4682B4"), new("Royal Blue", "#4169E1"),
-            new("Blue", "#0000FF"), new("Navy", "#000080"), new("Midnight Blue", "#191970"),
+            new("Steel Blue", "#4682B4"), new("Sky Blue", "#87CEEB"), new("Light Blue", "#ADD8E6"),
+            new("Deep Sky Blue", "#00BFFF"), new("Dodger Blue", "#1E90FF"), new("Cornflower Blue", "#6495ED"),
+            new("Royal Blue", "#4169E1"), new("Blue", "#0000FF"), new("Medium Blue", "#0000CD"),
+            new("Navy", "#000080"), new("Midnight Blue", "#191970"),
             // Purples
-            new("Slate Blue", "#6A5ACD"), new("Indigo", "#4B0082"), new("Violet", "#EE82EE"),
-            new("Purple", "#800080"), new("Magenta", "#FF00FF"), new("Orchid", "#DA70D6"),
-            // Soft neutrals
-            new("Lavender", "#E6E6FA"), new("Beige", "#F5F5DC"),
+            new("Slate Blue", "#6A5ACD"), new("Medium Slate Blue", "#7B68EE"), new("Dark Slate Blue", "#483D8B"),
+            new("Indigo", "#4B0082"), new("Blue Violet", "#8A2BE2"), new("Medium Purple", "#9370DB"),
+            new("Dark Violet", "#9400D3"), new("Dark Orchid", "#9932CC"), new("Purple", "#800080"),
+            new("Medium Orchid", "#BA55D3"), new("Orchid", "#DA70D6"), new("Violet", "#EE82EE"),
+            new("Plum", "#DDA0DD"), new("Thistle", "#D8BFD8"), new("Magenta", "#FF00FF"), new("Medium Violet Red", "#C71585"),
+            // Soft neutrals / off-whites
+            new("Lavender", "#E6E6FA"), new("Beige", "#F5F5DC"), new("Ivory", "#FFFFF0"), new("Snow", "#FFFAFA"),
+            new("Linen", "#FAF0E6"), new("Azure", "#F0FFFF"), new("Honeydew", "#F0FFF0"), new("Mint Cream", "#F5FFFA"),
         ],
     };
 

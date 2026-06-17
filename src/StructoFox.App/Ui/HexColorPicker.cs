@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -198,7 +199,14 @@ public class HexColorPicker : StackPanel
             var hex = nc.Value;
             strip.Children.Add(Ui.ColorChip(hex, $"{nc.Name}\n{hex}", () => { try { Commit(Color.Parse(hex)); } catch { } }, size: 22));
         }
-        _paletteArea.Children.Add(strip);
+        // Cap the height and scroll, so a large palette doesn't push the numeric fields off-window.
+        _paletteArea.Children.Add(new ScrollViewer
+        {
+            MaxHeight = 96,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
+            Content = strip,
+        });
     }
 
     // Hooks a text field to commit its parsed colour on Enter or focus-loss (ignoring invalid input).
