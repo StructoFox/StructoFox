@@ -119,8 +119,8 @@ public class HexColorPicker : StackPanel
 
     // ── conversion + small helpers ───────────────────────────────────────────
 
-    // Standard (profile-less) RGB→CMYK: K from the brightest channel, then C/M/Y relative to it.
-    static (double c, double m, double y, double k) RgbToCmyk(Color col)
+    /// <summary>Standard (profile-less) RGB→CMYK: K from the brightest channel, then C/M/Y relative to it.</summary>
+    public static (double c, double m, double y, double k) RgbToCmyk(Color col)
     {
         double r = col.R / 255.0, g = col.G / 255.0, b = col.B / 255.0;
         double k = 1 - Math.Max(r, Math.Max(g, b));
@@ -135,7 +135,7 @@ public class HexColorPicker : StackPanel
         (byte)Math.Round(255 * (1 - y) * (1 - k)));
 
     // A 0–255 channel slider.
-    static Slider Channel() => new() { Minimum = 0, Maximum = 255, Width = 200, SmallChange = 1, LargeChange = 16 };
+    static Slider Channel() => new() { Minimum = 0, Maximum = 255, Width = 150, SmallChange = 1, LargeChange = 16 };
 
     // A narrow numeric field for a CMYK percentage.
     static TextBox Field() => new() { Width = 46 };
@@ -160,6 +160,6 @@ public class HexColorPicker : StackPanel
     // Formats a 0..1 fraction as a whole-percent string.
     static string Pct(double frac) => Math.Round(frac * 100).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    // Formats a colour as opaque web hex (#RRGGBB).
-    static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+    /// <summary>Formats a colour as opaque web hex (#RRGGBB).</summary>
+    public static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
 }

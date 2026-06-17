@@ -1,30 +1,26 @@
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
-using StructoFox.Core;
 using StructoFox.Core.Models;
 
 namespace StructoFox.App;
 
 /// <summary>
-/// A dedicated editor for one element's appearance: pick line/fill/text colours and thickness,
-/// apply saved preset slots (incl. built-in B/W standards), and save the current look as a new slot.
-/// Roomier and clearer than a cascading menu when there are many colours. Returns the edited style.
+/// A compact editor for one element's appearance: collapsible line/fill/text colour fields, a
+/// thickness picker, preset slots (incl. built-in B/W standards) and a live preview. Returns the
+/// edited style, or null on cancel.
 /// </summary>
 public class StyleEditorWindow : Window
 {
     List<StylePreset> _presets = new();
 
-    readonly ComboBox    _presetCombo = new() { MinWidth = 220 };
-    readonly HexColorPicker _linePicker = new() { Color = Colors.Black };
-    readonly HexColorPicker _fillPicker = new() { Color = Colors.White };
-    readonly HexColorPicker _textPicker = new() { Color = Colors.Black };
-    readonly CheckBox    _lineInherit = new() { Content = "Inherit" };
-    readonly CheckBox    _fillInherit = new() { Content = "Inherit" };
-    readonly CheckBox    _textInherit = new() { Content = "Inherit" };
-    readonly ComboBox    _thickCombo  = new() { MinWidth = 120 };
-    readonly Border      _preview     = new() { Height = 60, CornerRadius = new(3) };
-    readonly TextBlock   _previewText = new() { Text = "", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+    readonly ComboBox   _presetCombo = new() { MinWidth = 200 };
+    readonly ColorField _lineField   = new(Loc.S("StyleEd_Line"));
+    readonly ColorField _fillField   = new(Loc.S("StyleEd_Fill"));
+    readonly ColorField _textField   = new(Loc.S("StyleEd_Text"));
+    readonly ComboBox   _thickCombo  = new() { MinWidth = 120 };
+    readonly Border     _preview     = new() { Height = 56, CornerRadius = new(3) };
+    readonly TextBlock  _previewText = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
 
     // Opens the editor over an owner, seeded from the current style; returns the edited style or null.
     public static Task<ElementStyle?> Edit(Window owner, ElementStyle current) =>
@@ -34,7 +30,7 @@ public class StyleEditorWindow : Window
     StyleEditorWindow(ElementStyle current)
     {
         Title                 = Loc.S("StyleEd_Title");
-        Width                 = 420;
+        Width                 = 440;
         SizeToContent         = SizeToContent.Height;
         CanResize             = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -45,12 +41,12 @@ public class StyleEditorWindow : Window
         UpdatePreview();
     }
 
-    // Lays out the preset row, the three colour rows, thickness, a live preview and OK/Cancel.
+    // Lays out the preset chooser, the three collapsible colour fields, thickness, preview and OK/Cancel.
     Control BuildContent()
     {
-        var root = new StackPanel { Margin = new(16), Spacing = 10 };
+        var root = new StackPanel { Margin = new(16), Spacing = 8 };
 
-        // Preset slots: choose one and apply it, or save the current look as a new slot.
+        // Preset slots: choose + apply on one line, save on the next (keeps it from overflowing).
         _presets = PresetStore.All();
         foreach (var p in _presets) _presetCombo.Items.Add(p.Name);
         var applyBtn = Ui.Btn(Loc.S("StyleEd_Apply"));
@@ -58,11 +54,15 @@ public class StyleEditorWindow : Window
         var saveBtn = Ui.Btn(Loc.S("StyleEd_SaveSlot"));
         saveBtn.Click += async (_, _) => await SaveAsSlot();
         root.Children.Add(new TextBlock { Text = Loc.S("StyleEd_Preset") });
-        root.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _presetCombo, applyBtn, saveBtn } });
+        root.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _presetCombo, applyBtn } });
+        root.Children.Add(saveBtn);
 
-        root.Children.Add(ColorRow(Loc.S("StyleEd_Line"), _linePicker, _lineInherit));
-        root.Children.Add(ColorRow(Loc.S("StyleEd_Fill"), _fillPicker, _fillInherit));
-        root.Children.Add(ColorRow(Loc.S("StyleEd_Text"), _textPicker, _textInherit));
+        // Collapsible colour fields.
+        foreach (var f in new[] { _lineField, _fillField, _textField })
+        {
+            f.Changed += (_, _) => UpdatePreview();
+            root.Children.Add(f);
+        }
 
         // Thickness: inherit, or 1..5 px.
         _thickCombo.Items.Add(Loc.S("Style_Inherit"));
@@ -90,54 +90,39 @@ public class StyleEditorWindow : Window
         return root;
     }
 
-    // Builds one labelled colour row: an inherit checkbox that disables the picker when ticked.
-    Control ColorRow(string label, HexColorPicker picker, CheckBox inherit)
-    {
-        inherit.IsCheckedChanged += (_, _) => { picker.IsEnabled = inherit.IsChecked != true; UpdatePreview(); };
-        picker.ColorChanged += (_, _) => UpdatePreview();
-        return new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 8,
-            Children =
-            {
-                new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Width = 110 },
-                inherit,
-                picker,
-            },
-        };
-    }
-
     // Seeds the controls from an element style (used at startup and when applying a preset).
     void LoadInto(ElementStyle s)
     {
-        _lineInherit.IsChecked = s.LineColor is null;
-        _fillInherit.IsChecked = s.FillColor is null;
-        _textInherit.IsChecked = s.TextColor is null;
-        if (s.LineColor is { } lc) TrySet(_linePicker, lc);
-        if (s.FillColor is { } fc) TrySet(_fillPicker, fc);
-        if (s.TextColor is { } tc) TrySet(_textPicker, tc);
-        _linePicker.IsEnabled = s.LineColor is not null;
-        _fillPicker.IsEnabled = s.FillColor is not null;
-        _textPicker.IsEnabled = s.TextColor is not null;
+        SetField(_lineField, s.LineColor);
+        SetField(_fillField, s.FillColor);
+        SetField(_textField, s.TextColor);
         _thickCombo.SelectedIndex = s.LineThickness is { } t && t >= 1 && t <= 5 ? (int)Math.Round(t) : 0;
         UpdatePreview();
+    }
+
+    // Applies one optional hex value to a field: inherit when null, else set the colour.
+    static void SetField(ColorField field, string? hex)
+    {
+        if (hex is null) { field.Inherit = true; return; }
+        field.Inherit = false;
+        try { field.Color = Color.Parse(hex); } catch { /* keep current */ }
     }
 
     // Reads the controls back into a fresh ElementStyle (inherit → null fields).
     ElementStyle BuildStyle() => new()
     {
-        LineColor     = _lineInherit.IsChecked == true ? null : HexOf(_linePicker.Color),
-        FillColor     = _fillInherit.IsChecked == true ? null : HexOf(_fillPicker.Color),
-        TextColor     = _textInherit.IsChecked == true ? null : HexOf(_textPicker.Color),
+        LineColor     = _lineField.Inherit ? null : HexColorPicker.HexOf(_lineField.Color),
+        FillColor     = _fillField.Inherit ? null : HexColorPicker.HexOf(_fillField.Color),
+        TextColor     = _textField.Inherit ? null : HexColorPicker.HexOf(_textField.Color),
         LineThickness = _thickCombo.SelectedIndex >= 1 ? _thickCombo.SelectedIndex : null,
     };
 
-    // Repaints the preview from the current controls, treating "inherit" as the default look.
+    // Repaints the preview from the current fields, treating "inherit" as the default look.
     void UpdatePreview()
     {
-        var line = _lineInherit.IsChecked == true ? Colors.Black : _linePicker.Color;
-        var fill = _fillInherit.IsChecked == true ? Colors.White : _fillPicker.Color;
-        var text = _textInherit.IsChecked == true ? Colors.Black : _textPicker.Color;
+        var line = _lineField.Inherit ? Colors.Black : _lineField.Color;
+        var fill = _fillField.Inherit ? Colors.White : _fillField.Color;
+        var text = _textField.Inherit ? Colors.Black : _textField.Color;
         var th   = _thickCombo.SelectedIndex >= 1 ? _thickCombo.SelectedIndex : 1;
 
         _preview.Background      = new SolidColorBrush(fill);
@@ -154,18 +139,8 @@ public class StyleEditorWindow : Window
         if (string.IsNullOrWhiteSpace(name)) return;
         PresetStore.Save(new StylePreset(name.Trim(), BuildStyle()));
 
-        // Refresh the preset list so the new slot is immediately selectable.
         _presets = PresetStore.All();
         _presetCombo.Items.Clear();
         foreach (var p in _presets) _presetCombo.Items.Add(p.Name);
     }
-
-    // Sets a picker's colour from hex, ignoring an unparseable value.
-    static void TrySet(HexColorPicker picker, string hex)
-    {
-        try { picker.Color = Color.Parse(hex); } catch { /* keep current */ }
-    }
-
-    // Formats an Avalonia colour as opaque web hex (#RRGGBB).
-    static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
 }
