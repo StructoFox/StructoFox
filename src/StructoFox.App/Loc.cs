@@ -63,6 +63,15 @@ public static class Loc
         ["Struct_DefSelector"]    = "selector",
         ["Struct_DefStatement"]   = "statement",
         ["Struct_FlaggedTip"]     = "This region could not be structured from the flowchart — review and rewrite it manually.",
+
+        // Per-element styling
+        ["Style_Menu"]      = "🎨 Style",
+        ["Style_Line"]      = "Line colour",
+        ["Style_Fill"]      = "Fill colour",
+        ["Style_Text"]      = "Text colour",
+        ["Style_Thickness"] = "Line thickness",
+        ["Style_Reset"]     = "Reset style",
+        ["Style_Inherit"]   = "Inherit (default)",
     };
 
     // German overlay; any key not listed here quietly falls through to the English baseline.
@@ -114,6 +123,15 @@ public static class Loc
         ["Struct_DefSelector"]    = "Selektor",
         ["Struct_DefStatement"]   = "Anweisung",
         ["Struct_FlaggedTip"]     = "Dieser Bereich konnte nicht aus dem Ablaufplan strukturiert werden — bitte manuell prüfen und umschreiben.",
+
+        // Per-element styling
+        ["Style_Menu"]      = "🎨 Stil",
+        ["Style_Line"]      = "Linienfarbe",
+        ["Style_Fill"]      = "Füllfarbe",
+        ["Style_Text"]      = "Textfarbe",
+        ["Style_Thickness"] = "Linienstärke",
+        ["Style_Reset"]     = "Stil zurücksetzen",
+        ["Style_Inherit"]   = "Erben (Standard)",
     };
 
     // Language code -> its string table. Lookups consult the active table, then English.
