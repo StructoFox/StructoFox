@@ -108,16 +108,9 @@ public class PaletteEditorWindow : Window
         foreach (var c in _current.Colors)
         {
             var nc = c;
-            var chip = new Button
-            {
-                Width = 30, Height = 30, Margin = new(3), Padding = new(0),
-                Background = SolidOrFallback(nc.Value),
-                BorderBrush = Brushes.Gray,
-                BorderThickness = new(ReferenceEquals(nc, _selected) ? 3 : 1),  // thicker = selected
-            };
-            ToolTip.SetTip(chip, $"{nc.Name}\n{nc.Value}");
-            chip.Click += (_, _) => SelectColor(nc);
-            _swatches.Children.Add(chip);
+            _swatches.Children.Add(Ui.ColorChip(
+                nc.Value, $"{nc.Name}\n{nc.Value}", () => SelectColor(nc),
+                selected: ReferenceEquals(nc, _selected), size: 30));
         }
     }
 
@@ -182,10 +175,4 @@ public class PaletteEditorWindow : Window
 
     // Formats an Avalonia colour as opaque web hex (#RRGGBB) for storage.
     static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
-
-    // A solid brush for a swatch background, falling back to transparent on a bad hex value.
-    static IBrush SolidOrFallback(string hex)
-    {
-        try { return new SolidColorBrush(Color.Parse(hex)); } catch { return Brushes.Transparent; }
-    }
 }

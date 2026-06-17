@@ -15,51 +15,70 @@ public static class PaletteService
     // Palette files are plain JSON with this extension; one palette per file.
     public const string Extension = ".palette.json";
 
-    /// <summary>The built-in starter palette: a greyscale ramp (incl. pure black &amp; white) plus a
-    /// lightness ramp for each main hue. A broad, useful default — and a good stress test of the grid.</summary>
-    public static ColorPalette BuiltIn()
-    {
-        var p = new ColorPalette { Name = "Standard" };
+    /// <summary>All built-in palettes offered everywhere: the basic <b>Standard</b> set of common
+    /// named colours, and a systematic <b>Office</b> set (grey ramp + per-primary tint ramps).</summary>
+    public static List<ColorPalette> BuiltIns() => [Standard(), Office()];
 
-        // Greyscale ramp: pure black, 20/40/60/80% lightness, pure white.
+    /// <summary>The default built-in palette (Standard) — kept for callers that want a single fallback.</summary>
+    public static ColorPalette BuiltIn() => Standard();
+
+    // The "Standard" palette: a couple of rows of common, simple named colours.
+    static ColorPalette Standard() => new()
+    {
+        Name = "Standard",
+        Colors =
+        [
+            new("Black",   "#000000"), new("White",  "#FFFFFF"), new("Gray",    "#808080"), new("Silver", "#C0C0C0"),
+            new("Red",     "#E53935"), new("Orange", "#FB8C00"), new("Banana",  "#FFE135"), new("Yellow", "#FDD835"),
+            new("Lime",    "#C0CA33"), new("Green",  "#43A047"), new("Teal",    "#00897B"), new("Cyan",   "#00ACC1"),
+            new("Blue",    "#1E88E5"), new("Navy",   "#283593"), new("Violet",  "#8E24AA"), new("Purple", "#6A1B9A"),
+            new("Magenta", "#D81B60"), new("Pink",   "#FF8DA1"), new("Brown",   "#6D4C41"), new("Beige",  "#D7CCC8"),
+        ],
+    };
+
+    // The "Office" palette: a black→white grey ramp, then a 100→20% tint ramp for each primary.
+    static ColorPalette Office()
+    {
+        var p = new ColorPalette { Name = "Office" };
+
         p.Colors.Add(new("Black", "#000000"));
-        foreach (var l in new[] { 0.20, 0.40, 0.60, 0.80 })
-            p.Colors.Add(new($"Gray {Pct(l)}%", HslHex(0, 0, l)));
+        foreach (var pct in new[] { 80, 60, 40, 20 })  // "X% grey" = X% black
+            p.Colors.Add(new($"Gray {pct}%", GrayHex(pct)));
         p.Colors.Add(new("White", "#FFFFFF"));
 
-        // Per-hue lightness ramps (dark → light) at full-ish saturation.
-        (string name, double h)[] hues =
+        (string name, string hex)[] primaries =
         {
-            ("Red", 0), ("Orange", 30), ("Yellow", 52), ("Green", 130), ("Blue", 215), ("Violet", 280),
+            ("Red", "#FF0000"), ("Yellow", "#FFD400"), ("Green", "#00A000"),
+            ("Blue", "#0070FF"), ("Violet", "#8000FF"), ("Orange", "#FF8000"),
         };
-        foreach (var (name, h) in hues)
-            foreach (var l in new[] { 0.30, 0.45, 0.60, 0.75, 0.88 })
-                p.Colors.Add(new($"{name} {Pct(l)}%", HslHex(h, 0.85, l)));
+        foreach (var (name, hex) in primaries)
+            foreach (var pct in new[] { 100, 80, 60, 40, 20 })  // 100% = pure, 20% = pale (mixed with white)
+                p.Colors.Add(new($"{name} {pct}%", MixWhite(hex, pct)));
 
         return p;
     }
 
-    // Whole-percent label for a 0..1 lightness.
-    static int Pct(double v) => (int)Math.Round(v * 100);
-
-    // HSL→#RRGGBB (h in degrees, s/l in 0..1) — kept in Core (no UI types) so palettes stay portable.
-    static string HslHex(double h, double s, double l)
+    // "X% grey" → lightness (100-X)%, as #RRGGBB.
+    static string GrayHex(int grayPct)
     {
-        double c = (1 - Math.Abs(2 * l - 1)) * s;
-        double x = c * (1 - Math.Abs((h / 60) % 2 - 1));
-        double m = l - c / 2;
-        double r = 0, g = 0, b = 0;
-        switch (((int)(h / 60)) % 6)
-        {
-            case 0: r = c; g = x; break;
-            case 1: r = x; g = c; break;
-            case 2: g = c; b = x; break;
-            case 3: g = x; b = c; break;
-            case 4: r = x; b = c; break;
-            default: r = c; b = x; break;
-        }
-        byte B(double v) => (byte)Math.Round((v + m) * 255);
-        return $"#{B(r):X2}{B(g):X2}{B(b):X2}";
+        int v = (int)Math.Round(255 * (100 - grayPct) / 100.0);
+        return $"#{v:X2}{v:X2}{v:X2}";
+    }
+
+    // Mixes a base colour with white: pct=100 → pure base, pct=20 → mostly white.
+    static string MixWhite(string baseHex, int pct)
+    {
+        var (r, g, b) = Rgb(baseHex);
+        double t = pct / 100.0;
+        byte M(int ch) => (byte)Math.Round(ch * t + 255 * (1 - t));
+        return $"#{M(r):X2}{M(g):X2}{M(b):X2}";
+    }
+
+    // Parses #RRGGBB into integer channels.
+    static (int r, int g, int b) Rgb(string hex)
+    {
+        hex = hex.TrimStart('#');
+        return (Convert.ToInt32(hex[..2], 16), Convert.ToInt32(hex[2..4], 16), Convert.ToInt32(hex[4..6], 16));
     }
 
     /// <summary>Reads every <c>*.palette.json</c> in <paramref name="dir"/>; returns empty if the

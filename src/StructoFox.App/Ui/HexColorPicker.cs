@@ -195,12 +195,8 @@ public class HexColorPicker : StackPanel
         var strip = new WrapPanel { MaxWidth = BoxW + 16 };
         foreach (var nc in pal.Colors)
         {
-            var hex  = nc.Value;
-            var chip = new Button { Width = 20, Height = 20, Margin = new(2), Padding = new(0), BorderBrush = Brushes.Gray, BorderThickness = new(1) };
-            try { chip.Background = new SolidColorBrush(Color.Parse(hex)); } catch { chip.Background = Brushes.Transparent; }
-            ToolTip.SetTip(chip, $"{nc.Name}\n{hex}");
-            chip.Click += (_, _) => { try { Commit(Color.Parse(hex)); } catch { } };
-            strip.Children.Add(chip);
+            var hex = nc.Value;
+            strip.Children.Add(Ui.ColorChip(hex, $"{nc.Name}\n{hex}", () => { try { Commit(Color.Parse(hex)); } catch { } }, size: 22));
         }
         _paletteArea.Children.Add(strip);
     }

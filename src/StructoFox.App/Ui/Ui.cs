@@ -2,8 +2,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
+using Avalonia.Media;
 
 namespace StructoFox.App;
 
@@ -71,4 +73,26 @@ public static class Ui
     /// never crashing. Shared so windows and controls all tint from the same well.</summary>
     public static void Theme(Control c, AvaloniaProperty prop, string key) =>
         c.Bind(prop, new DynamicResourceExtension(key));
+
+    /// <summary>
+    /// A clickable colour chip (Border, not Button — so its hover never hides the colour). On hover
+    /// it lifts with a chip-coloured corona; <paramref name="selected"/> gives it a thicker ring.
+    /// </summary>
+    public static Control ColorChip(string hex, string tooltip, Action onClick, bool selected = false, double size = 24)
+    {
+        var b = new Border
+        {
+            Width = size, Height = size, Margin = new(3), CornerRadius = new(3),
+            BorderBrush = selected ? Brushes.Black : Brushes.Gray,
+            BorderThickness = new(selected ? 3 : 1),
+            Cursor = new Cursor(StandardCursorType.Hand),
+        };
+        try { b.Background = new SolidColorBrush(Color.Parse(hex)); } catch { b.Background = Brushes.Transparent; }
+        ToolTip.SetTip(b, tooltip);
+
+        b.PointerEntered += (_, _) => { try { b.BoxShadow = BoxShadows.Parse($"0 1 7 2 {hex}"); } catch { } b.ZIndex = 1; };
+        b.PointerExited  += (_, _) => { b.BoxShadow = default; b.ZIndex = 0; };
+        b.PointerPressed += (_, _) => onClick();
+        return b;
+    }
 }

@@ -14,18 +14,15 @@ public static class PaletteStore
     public static string Dir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StructoFox", "Palettes");
 
-    // Drops the built-in Standard palette into an empty store so there's always something to start from.
-    public static void EnsureSeeded()
-    {
-        if (PaletteService.LoadAll(Dir).Count == 0)
-            PaletteService.Save(Dir, PaletteService.BuiltIn());
-    }
-
-    // Returns every saved palette (seeding first), so callers always get at least the Standard one.
+    // The built-in palettes plus every saved one; a saved palette overrides a built-in of the same name.
+    // Built-ins always appear, so Standard/Office are available without writing any files.
     public static List<ColorPalette> LoadAll()
     {
-        EnsureSeeded();
-        return PaletteService.LoadAll(Dir);
+        var saved      = PaletteService.LoadAll(Dir);
+        var savedNames = saved.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result     = PaletteService.BuiltIns().Where(b => !savedNames.Contains(b.Name)).ToList();
+        result.AddRange(saved);
+        return result;
     }
 
     // Persists a palette to the store, returning the written file path.
