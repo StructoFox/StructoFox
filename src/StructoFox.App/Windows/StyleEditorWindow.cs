@@ -16,9 +16,9 @@ public class StyleEditorWindow : Window
     List<StylePreset> _presets = new();
 
     readonly ComboBox    _presetCombo = new() { MinWidth = 220 };
-    readonly ColorPicker _linePicker  = new() { Color = Colors.Black };
-    readonly ColorPicker _fillPicker  = new() { Color = Colors.White };
-    readonly ColorPicker _textPicker  = new() { Color = Colors.Black };
+    readonly HexColorPicker _linePicker = new() { Color = Colors.Black };
+    readonly HexColorPicker _fillPicker = new() { Color = Colors.White };
+    readonly HexColorPicker _textPicker = new() { Color = Colors.Black };
     readonly CheckBox    _lineInherit = new() { Content = "Inherit" };
     readonly CheckBox    _fillInherit = new() { Content = "Inherit" };
     readonly CheckBox    _textInherit = new() { Content = "Inherit" };
@@ -91,7 +91,7 @@ public class StyleEditorWindow : Window
     }
 
     // Builds one labelled colour row: an inherit checkbox that disables the picker when ticked.
-    Control ColorRow(string label, ColorPicker picker, CheckBox inherit)
+    Control ColorRow(string label, HexColorPicker picker, CheckBox inherit)
     {
         inherit.IsCheckedChanged += (_, _) => { picker.IsEnabled = inherit.IsChecked != true; UpdatePreview(); };
         picker.ColorChanged += (_, _) => UpdatePreview();
@@ -161,7 +161,7 @@ public class StyleEditorWindow : Window
     }
 
     // Sets a picker's colour from hex, ignoring an unparseable value.
-    static void TrySet(ColorPicker picker, string hex)
+    static void TrySet(HexColorPicker picker, string hex)
     {
         try { picker.Color = Color.Parse(hex); } catch { /* keep current */ }
     }

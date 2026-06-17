@@ -35,6 +35,10 @@ public static class Ui
             HorizontalContentAlignment = HorizontalAlignment.Center,
         };
         if (!string.IsNullOrEmpty(tooltip)) ToolTip.SetTip(b, tooltip);
+        // Tie buttons to the OXSUIT theme so their label stays readable on any themed surface
+        // (Fluent's own button foreground doesn't follow our inherited window text colour).
+        Theme(b, TemplatedControl.BackgroundProperty, "ControlBgBrush");
+        Theme(b, TemplatedControl.ForegroundProperty, "SidebarTextBrush");
         return b;
     }
 

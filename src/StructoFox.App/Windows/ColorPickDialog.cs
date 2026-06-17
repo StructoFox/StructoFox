@@ -10,7 +10,7 @@ namespace StructoFox.App;
 /// </summary>
 public class ColorPickDialog : Window
 {
-    readonly ColorPicker _picker = new();
+    readonly HexColorPicker _picker = new();
 
     // Opens the picker over an owner and awaits the chosen hex (or null on cancel).
     public static Task<string?> Pick(Window owner, string title, string? initialHex)

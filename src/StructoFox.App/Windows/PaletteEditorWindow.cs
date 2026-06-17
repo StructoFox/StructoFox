@@ -20,7 +20,7 @@ public class PaletteEditorWindow : Window
     readonly ComboBox    _paletteCombo = new() { MinWidth = 220 };
     readonly WrapPanel   _swatches     = new();
     readonly TextBox     _nameBox      = new() { PlaceholderText = "Colour name", MinWidth = 160 };
-    readonly ColorPicker _picker       = new() { Color = Colors.SteelBlue };
+    readonly HexColorPicker _picker    = new(showPalette: false) { Color = Colors.SteelBlue };
 
     // Loads the saved palettes (seeding if needed) and builds the editor around the first one.
     public PaletteEditorWindow()
