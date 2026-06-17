@@ -25,6 +25,13 @@ public class StructogramWindow : Window
 
     Border? _hostBorder;
 
+    // The diagram surface look — user-controlled and independent of the app theme (see DiagramStyle).
+    // TODO: load/persist per diagram + a style editor; for now every diagram uses the default.
+    readonly DiagramStyle _style = DiagramStyle.Default();
+    IBrush _lineBrush = Brushes.Black;   // structural lines / borders
+    IBrush _textBrush = Brushes.Black;   // block text
+    IBrush _bgBrush   = Brushes.White;   // canvas background
+
     // Loads (or starts) the structogram for one function/method and builds the editor surface.
     public StructogramWindow(string projFolder, string key, string title, string? themePath)
     {
@@ -82,7 +89,19 @@ public class StructogramWindow : Window
         };
         Grid.SetRow(scroll, 1); root.Children.Add(scroll);
 
-        _hostBorder = new Border { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, MinWidth = 360 };
+        // Resolve the diagram-surface brushes from the style (not the app theme).
+        _lineBrush = new SolidColorBrush(Color.Parse(_style.LineColor));
+        _textBrush = new SolidColorBrush(Color.Parse(_style.TextColor));
+        _bgBrush   = new SolidColorBrush(Color.Parse(_style.BackgroundColor));
+
+        _hostBorder = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment   = VerticalAlignment.Top,
+            MinWidth            = 360,
+            Background          = _bgBrush,
+            Padding             = new(8),
+        };
         scroll.Content = _hostBorder;
 
         Rebuild();
@@ -127,21 +146,20 @@ public class StructogramWindow : Window
 
         var cell = new Border
         {
-            BorderThickness = new(b.Flagged ? 2 : 1),
+            BorderThickness = new(b.Flagged ? _style.LineThickness * 2 : _style.LineThickness),
             Child           = inner,
         };
         if (b.Flagged)
         {
             // Region the converter could not structure — pulsing amber↔white so it stays visible
-            // on ANY background (including amber themes). See ApplyFlaggedPulse.
+            // on ANY background. The flag is a warning affordance, intentionally not part of DiagramStyle.
             cell.Background = new SolidColorBrush(Color.FromArgb(0x22, 0xF5, 0x7F, 0x17));
             ToolTip.SetTip(cell, Loc.S("Struct_FlaggedTip"));
             ApplyFlaggedPulse(cell);
         }
         else
         {
-            Ui.Theme(cell, Border.BorderBrushProperty, "ControlBorderBrush");
-            Ui.Theme(cell, Border.BackgroundProperty,  "CardBgBrush");
+            cell.BorderBrush = _lineBrush;  // diagram-surface line colour, not the app theme
         }
 
         cell.PointerPressed += (_, e) =>
@@ -247,13 +265,14 @@ public class StructogramWindow : Window
         cond.FontStyle = FontStyle.Italic;
         cond.DoubleTapped += (_, _) => EditText(b);
 
+        var t = _style.LineThickness;
         var bodyWrap = new Border
         {
             Child           = RenderSequence(b.Body),
             Margin          = new(14, 0, 0, 0),       // inset = loop bracket
-            BorderThickness = new(1, 1, 0, 1),
+            BorderThickness = new(t, t, 0, t),
+            BorderBrush     = _lineBrush,
         };
-        Ui.Theme(bodyWrap, Border.BorderBrushProperty, "ControlBorderBrush");
 
         if (preTest) { outer.Children.Add(cond); outer.Children.Add(bodyWrap); }
         else         { outer.Children.Add(bodyWrap); outer.Children.Add(TopBorder(cond)); }
@@ -421,27 +440,25 @@ public class StructogramWindow : Window
 
     // ── Visual helpers ───────────────────────────────────────────────────────
 
-    // A themed, wrapping label — the workhorse text element of every box.
+    // A wrapping label drawn in the diagram's own text colour/font — the workhorse of every box.
     TextBlock LabelText(string text)
     {
-        var t = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-        Ui.Theme(t, TextBlock.ForegroundProperty, "SidebarTextBrush");
-        return t;
+        return new TextBlock
+        {
+            Text              = text,
+            TextWrapping      = TextWrapping.Wrap,
+            FontSize          = _style.FontSize,
+            FontFamily        = new FontFamily(_style.FontFamily),
+            Foreground        = _textBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
     }
 
     // Draws a top divider line above the child — how NS boxes separate stacked regions.
-    Border TopBorder(Control child)
-    {
-        var b = new Border { Child = child, BorderThickness = new(0, 1, 0, 0) };
-        Ui.Theme(b, Border.BorderBrushProperty, "ControlBorderBrush");
-        return b;
-    }
+    Border TopBorder(Control child) =>
+        new() { Child = child, BorderThickness = new(0, _style.LineThickness, 0, 0), BorderBrush = _lineBrush };
 
     // Draws a left divider line beside the child — how NS boxes separate side-by-side columns.
-    Border LeftBorder(Control child)
-    {
-        var b = new Border { Child = child, BorderThickness = new(1, 0, 0, 0) };
-        Ui.Theme(b, Border.BorderBrushProperty, "ControlBorderBrush");
-        return b;
-    }
+    Border LeftBorder(Control child) =>
+        new() { Child = child, BorderThickness = new(_style.LineThickness, 0, 0, 0), BorderBrush = _lineBrush };
 }
