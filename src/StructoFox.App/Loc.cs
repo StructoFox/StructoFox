@@ -100,6 +100,13 @@ public static class Loc
         ["Flow_ToStructogramOverwrite"] = "A structogram already exists for this function. Overwrite it with the converted flowchart?",
         ["Flow_ToStructogramPartial"]  = "Converted — but some parts of the flowchart could not be structured. They are flagged in amber in the structogram.",
         ["Flow_Background"]            = "Canvas background colour",
+        ["NodeTxt_Title"]              = "Node text",
+        ["NodeTxt_Font"]               = "Font",
+        ["NodeTxt_Size"]               = "Size",
+        ["NodeTxt_Bold"]               = "Bold",
+        ["NodeTxt_Italic"]             = "Italic",
+        ["NodeTxt_Underline"]          = "Underline",
+        ["NodeTxt_Strike"]             = "Strikethrough",
 
         // Per-element styling
         ["Style_Menu"]      = "🎨 Style",
@@ -213,6 +220,13 @@ public static class Loc
         ["Flow_ToStructogramOverwrite"] = "Für diese Funktion existiert bereits ein Struktogramm. Mit dem umgewandelten Ablaufplan überschreiben?",
         ["Flow_ToStructogramPartial"]  = "Umgewandelt — aber einige Teile des Ablaufplans ließen sich nicht strukturieren. Sie sind im Struktogramm bernsteinfarben markiert.",
         ["Flow_Background"]            = "Hintergrundfarbe der Zeichenfläche",
+        ["NodeTxt_Title"]              = "Knotentext",
+        ["NodeTxt_Font"]               = "Schriftart",
+        ["NodeTxt_Size"]               = "Größe",
+        ["NodeTxt_Bold"]               = "Fett",
+        ["NodeTxt_Italic"]             = "Kursiv",
+        ["NodeTxt_Underline"]          = "Unterstrichen",
+        ["NodeTxt_Strike"]             = "Durchgestrichen",
 
         // Per-element styling
         ["Style_Menu"]      = "🎨 Stil",

@@ -304,15 +304,14 @@ public class FlowChartWindow : Window
 
         var label = new TextBlock
         {
-            Text                = node.Text,
             TextWrapping        = TextWrapping.Wrap,
             TextAlignment       = TextAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment   = VerticalAlignment.Center,
-            FontSize            = 11,
             Margin              = new(6, 2, 6, 2),
             Foreground          = new SolidColorBrush(stroke),
         };
+        ApplyTextFormat(label, node);   // text + font/size/style/decorations (multiline-aware)
         inner.Children.Add(label);
 
         // Transparent container = the draggable/selectable hit area; carries the selection glow.
@@ -386,12 +385,27 @@ public class FlowChartWindow : Window
         cm.Open(anchor);
     }
 
-    // Prompts for a node's text and updates the model + label.
+    // Opens the rich node-text editor (text + font/size/style, multiline); re-applies and saves on OK.
     async Task EditNodeText(FlowNode node, TextBlock label)
     {
-        var text = await PromptDialog.Show(this, Loc.S("Flow_NodeTextPrompt"), node.Text);
-        if (text is null) return;
-        node.Text = text; label.Text = text; Save();
+        if (!await NodeTextDialog.Edit(this, node)) return;
+        ApplyTextFormat(label, node);
+        Save();
+    }
+
+    // Applies a node's text and formatting (font, size, weight, style, decorations) to its label.
+    static void ApplyTextFormat(TextBlock label, FlowNode node)
+    {
+        label.Text       = node.Text;
+        label.FontFamily  = node.FontFamily is { } ff ? new FontFamily(ff) : FontFamily.Default;
+        label.FontSize   = node.FontSize ?? 11;
+        label.FontWeight = node.Bold ? FontWeight.Bold : FontWeight.Normal;
+        label.FontStyle  = node.Italic ? FontStyle.Italic : FontStyle.Normal;
+
+        var dec = new TextDecorationCollection();
+        if (node.Underline)     dec.Add(new TextDecoration { Location = TextDecorationLocation.Underline });
+        if (node.Strikethrough) dec.Add(new TextDecoration { Location = TextDecorationLocation.Strikethrough });
+        label.TextDecorations = dec.Count > 0 ? dec : null;
     }
 
     // ── Connections ────────────────────────────────────────────────────────

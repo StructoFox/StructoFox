@@ -22,6 +22,14 @@ public class FlowNode
     public double       Y      { get; set; } = 60;
     public double       Width  { get; set; } = 140;
     public double       Height { get; set; } = 56;
+
+    // ── Optional text formatting (null/false = node default). Multiline text is allowed. ──
+    public string? FontFamily    { get; set; }
+    public double? FontSize      { get; set; }
+    public bool    Bold          { get; set; }
+    public bool    Italic        { get; set; }
+    public bool    Underline     { get; set; }
+    public bool    Strikethrough { get; set; }
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>

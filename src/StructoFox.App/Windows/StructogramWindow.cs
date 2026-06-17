@@ -67,10 +67,21 @@ public class StructogramWindow : Window
         root.RowDefinitions.Add(new RowDefinition(GridLength.Star));
         Content = root;
 
-        // Toolbar with a usage hint.
+        // Toolbar: a background-colour button plus a usage hint.
         var bar = new Border { Padding = new(12, 8, 12, 8) };
         Ui.Theme(bar, Border.BackgroundProperty, "SidebarBgBrush");
         Grid.SetRow(bar, 0); root.Children.Add(bar);
+
+        var bgBtn = Ui.Btn("🎨", Loc.S("Flow_Background"));
+        bgBtn.Click += async (_, _) =>
+        {
+            var hex = await ColorPickDialog.Pick(this, Loc.S("Flow_Background"), _style.BackgroundColor);
+            if (hex is null) return;
+            _style.BackgroundColor = hex;
+            _bgBrush = new SolidColorBrush(Color.Parse(hex));
+            if (_hostBorder is not null) _hostBorder.Background = _bgBrush;
+            Save();
+        };
 
         var hint = new TextBlock
         {
@@ -78,7 +89,12 @@ public class StructogramWindow : Window
             VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Opacity = 0.8,
         };
         Ui.Theme(hint, TextBlock.ForegroundProperty, "SidebarTextBrush");
-        bar.Child = hint;
+
+        bar.Child = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 10,
+            Children = { bgBtn, hint },
+        };
 
         // Scrollable diagram host — the structogram can grow past the window.
         var scroll = new ScrollViewer
