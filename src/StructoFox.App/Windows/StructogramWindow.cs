@@ -31,6 +31,11 @@ public class StructogramWindow : Window
     IBrush _textBrush = Brushes.Black;   // block text
     IBrush _bgBrush   = Brushes.White;   // canvas background
 
+    ContextMenu? _menu;   // the one open context menu, so a new one closes the old (no stacking)
+
+    // Opens a context menu over an anchor, first closing any menu still showing.
+    void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
+
     // Loads (or starts) the structogram for one function/method and builds the editor surface.
     public StructogramWindow(string projFolder, string key, string title, string? themePath)
     {
@@ -380,7 +385,7 @@ public class StructogramWindow : Window
         del.Click += (_, _) => { parent.Remove(b); Save(); Rebuild(); };
         cm.Items.Add(del);
 
-        cm.Open(anchor);
+        OpenMenu(cm, anchor);
     }
 
     // True when a style carries no overrides at all (every field inherits) — used to drop empty styles.
@@ -441,7 +446,7 @@ public class StructogramWindow : Window
             Add(Loc.S("Struct_KWhile"), NsBlockKind.While);
             Add(Loc.S("Struct_KDoWhile"), NsBlockKind.DoWhile);
             Add(Loc.S("Struct_KCase"), NsBlockKind.Case);
-            cm.Open(b);
+            OpenMenu(cm, b);
         };
         return b;
     }

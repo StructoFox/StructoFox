@@ -38,6 +38,10 @@ public class FlowChartWindow : Window
     double   _zoom = 1.0;
 
     Button? _selectBtn, _connectBtn, _removeBtn;
+    ContextMenu? _menu;   // the one open context menu, so a new one closes the old (no stacking)
+
+    // Opens a context menu over an anchor, first closing any menu still showing.
+    void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
 
     // The diagram surface look (theme-independent), persisted with the diagram.
     readonly DiagramStyle _style;
@@ -102,6 +106,7 @@ public class FlowChartWindow : Window
         // Click on empty canvas clears selection (node clicks are handled and don't bubble here).
         _canvas.PointerPressed += (_, _) =>
         {
+            _menu?.Close();
             if (ConnectMode) return;
             _selected.Clear(); RefreshSelection();
         };
@@ -382,7 +387,7 @@ public class FlowChartWindow : Window
         var del = new MenuItem { Header = Loc.S("Flow_DeleteNode") };
         del.Click += (_, _) => { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); };
         cm.Items.Add(del);
-        cm.Open(anchor);
+        OpenMenu(cm, anchor);
     }
 
     // Opens the rich node-text editor (text + font/size/style, multiline); re-applies and saves on OK.
@@ -521,7 +526,7 @@ public class FlowChartWindow : Window
         var del = new MenuItem { Header = Loc.S("Flow_DeleteArrow") };
         del.Click += (_, _) => DeleteConnection(conn);
         cm.Items.Add(del);
-        cm.Open(anchor);
+        OpenMenu(cm, anchor);
     }
 
     // Re-draws all arrows touching a node (called while it is being dragged).

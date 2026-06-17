@@ -27,6 +27,7 @@ public class HexColorPicker : StackPanel
     readonly Slider  _g = Channel();
     readonly Slider  _b = Channel();
     readonly TextBox _hex = new() { Width = 100 };
+    readonly TextBlock _rgbText = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 11, Opacity = 0.8 };
     readonly TextBox _c = Field(), _m = Field(), _y = Field(), _k = Field();
 
     readonly StackPanel _paletteArea = new() { Spacing = 4 };
@@ -47,7 +48,11 @@ public class HexColorPicker : StackPanel
         Children.Add(ChannelRow("R", _r));
         Children.Add(ChannelRow("G", _g));
         Children.Add(ChannelRow("B", _b));
-        Children.Add(LabeledRow("Hex", _hex));
+        Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8,
+            Children = { new TextBlock { Text = "Hex", Width = 32, VerticalAlignment = VerticalAlignment.Center }, _hex, _rgbText },
+        });
         Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 6,
@@ -75,6 +80,7 @@ public class HexColorPicker : StackPanel
         _updating = true;
         _r.Value = col.R; _g.Value = col.G; _b.Value = col.B;
         _hex.Text = HexOf(col);
+        _rgbText.Text = $"{col.R}, {col.G}, {col.B}";
         var (cc, mm, yy, kk) = RgbToCmyk(col);
         _c.Text = Pct(cc); _m.Text = Pct(mm); _y.Text = Pct(yy); _k.Text = Pct(kk);
         (_h, _s, _v) = RgbToHsv(col);
