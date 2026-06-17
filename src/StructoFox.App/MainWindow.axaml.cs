@@ -149,7 +149,7 @@ public partial class MainWindow : Window
         Ui.Theme(host, Border.BackgroundProperty, "ContentBgBrush");
 
         var layered = new Grid();
-        layered.Children.Add(new GridBackdrop());
+        layered.Children.Add(new HoneycombBackdrop());
         layered.Children.Add(new ScrollViewer
         {
             Padding = new(24),
