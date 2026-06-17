@@ -49,7 +49,11 @@ public static class DiagramLauncher
 
         // Programmablaufplan option — label flags whether a flowchart already exists.
         var papBtn = ChoiceBtn(FlowChartService.Exists(projFolder, key) ? Loc.S("Diag_PapExists") : Loc.S("Diag_Pap"));
-        papBtn.Click += (_, _) => { dlg.Close(); ComingSoon(owner, "Programmablaufplan", title); };
+        papBtn.Click += (_, _) =>
+        {
+            dlg.Close();
+            new FlowChartWindow(projFolder, key, title, themePath).Show();
+        };
         stack.Children.Add(papBtn);
 
         // Struktogramm option — same existence hint, plus a tooltip naming the DIN standard.
@@ -76,8 +80,4 @@ public static class DiagramLauncher
         return b;
     }
 
-    // TODO(Phase 3): replace with `new FlowChartWindow(...).Show()` once the flowchart editor is ported.
-    // The structogram path already opens the real StructogramWindow; this covers the PAP option meanwhile.
-    static async void ComingSoon(Window owner, string which, string title) =>
-        await MessageDialog.Show(owner, $"The {which} editor for \"{title}\" will open here once it's ported.", "Coming soon");
 }
