@@ -69,6 +69,13 @@ public partial class MainWindow : Window
         };
         root.Children.Add(combo);
 
+        // First ported window: open the DiagramLauncher chooser over a throwaway project folder.
+        var launch = Ui.Btn("🔁 Open diagram chooser", "Test the ported DiagramLauncher");
+        launch.HorizontalAlignment = HorizontalAlignment.Left;
+        launch.Click += async (_, _) =>
+            await DiagramLauncher.ChooseAndOpen(this, System.IO.Path.GetTempPath(), "demo", "Greeter.Greet()", null);
+        root.Children.Add(launch);
+
         root.Children.Add(new TextBlock { Text = Loc.S("Smoke_Header"), Margin = new(0, 12, 0, 0) });
         root.Children.Add(new TextBox
         {

@@ -15,12 +15,27 @@ public static class Loc
         ["App_Title"]    = "StructoFox",
         ["App_Tagline"]  = "Flow · Struct · Code",
         ["Smoke_Header"] = "Core smoke test — C# generated from a sample class:",
+
+        // Diagram chooser (DiagramLauncher)
+        ["Diag_Title"]     = "Diagram",
+        ["Diag_SketchOf"]  = "Sketch the flow of:\n{0}",
+        ["Diag_Pap"]       = "🔁 Programmablaufplan",
+        ["Diag_PapExists"] = "🔁 Programmablaufplan (exists)",
+        ["Diag_Ns"]        = "▦ Structogram",
+        ["Diag_NsExists"]  = "▦ Structogram (exists)",
+        ["Diag_NsTip"]     = "Nassi-Shneiderman structogram editor (DIN 66261)",
     };
 
     // German overlay; any key not listed here quietly falls through to the English baseline.
     static readonly Dictionary<string, string> De = new()
     {
-        ["Smoke_Header"] = "Core-Rauchtest — aus einer Beispielklasse generiertes C#:",
+        ["Smoke_Header"]   = "Core-Rauchtest — aus einer Beispielklasse generiertes C#:",
+        ["Diag_Title"]     = "Diagramm",
+        ["Diag_SketchOf"]  = "Ablauf skizzieren von:\n{0}",
+        ["Diag_PapExists"] = "🔁 Programmablaufplan (vorhanden)",
+        ["Diag_Ns"]        = "▦ Struktogramm",
+        ["Diag_NsExists"]  = "▦ Struktogramm (vorhanden)",
+        ["Diag_NsTip"]     = "Nassi-Shneiderman-Struktogramm-Editor (DIN 66261)",
     };
 
     // Language code -> its string table. Lookups consult the active table, then English.

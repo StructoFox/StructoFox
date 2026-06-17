@@ -54,7 +54,8 @@ public static class Ui
         return c;
     }
 
-    // Binds a property to an OXSUIT theme brush via DynamicResource — present-theme or default, never crashing.
-    static void Theme(Control c, AvaloniaProperty prop, string key) =>
+    /// <summary>Binds a property to an OXSUIT theme brush via DynamicResource — present-theme or default,
+    /// never crashing. Shared so windows and controls all tint from the same well.</summary>
+    public static void Theme(Control c, AvaloniaProperty prop, string key) =>
         c.Bind(prop, new DynamicResourceExtension(key));
 }
