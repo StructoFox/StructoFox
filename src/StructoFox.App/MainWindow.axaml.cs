@@ -92,6 +92,12 @@ public partial class MainWindow : Window
             await DiagramLauncher.ChooseAndOpen(this, System.IO.Path.GetTempPath(), "demo", "Greeter.Greet()", null);
         root.Children.Add(launch);
 
+        // Open the shared palette editor (reachable from every diagram editor too).
+        var palette = Ui.Btn("🎨 Palette editor", "Curate, extend and save colour palettes");
+        palette.HorizontalAlignment = HorizontalAlignment.Left;
+        palette.Click += (_, _) => new PaletteEditorWindow().Show();
+        root.Children.Add(palette);
+
         root.Children.Add(new TextBlock { Text = Loc.S("Smoke_Header"), Margin = new(0, 12, 0, 0) });
         root.Children.Add(new TextBox
         {
