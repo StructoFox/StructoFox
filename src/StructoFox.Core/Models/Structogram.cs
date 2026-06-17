@@ -37,6 +37,10 @@ public class NsBlock
     public List<NsBlock> Body  { get; set; } = [];
     public List<NsBlock> Else  { get; set; } = [];
     public List<NsArm>   Arms  { get; set; } = [];
+
+    /// <summary>Optional cosmetic appearance overrides for this block (null = inherit the diagram style).
+    /// Purely presentational — ignored by code generation.</summary>
+    public ElementStyle? Style { get; set; }
 }
 
 public class StructogramData

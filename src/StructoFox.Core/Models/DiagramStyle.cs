@@ -30,3 +30,24 @@ public class DiagramStyle
     // Hands back a fresh copy of the default "drawing-board" look: white paper, dark thin lines.
     public static DiagramStyle Default() => new();
 }
+
+/// <summary>
+/// Optional per-element appearance overrides (one block / node). Every field is nullable and
+/// falls back to the diagram's <see cref="DiagramStyle"/> when unset, so a diagram with no overrides
+/// is a clean, standard-compliant (DIN 66261 / ISO 5807) drawing. Emphasis here is redundant by
+/// design — purely cosmetic, never bedeutungstragend — so a stripped diagram still reads correctly.
+/// </summary>
+public class ElementStyle
+{
+    /// <summary>Override for this element's line/border colour (web hex), or null to inherit.</summary>
+    public string? LineColor { get; set; }
+
+    /// <summary>Override for this element's line/border thickness in px, or null to inherit.</summary>
+    public double? LineThickness { get; set; }
+
+    /// <summary>Override for this element's text colour (web hex), or null to inherit.</summary>
+    public string? TextColor { get; set; }
+
+    /// <summary>Override for this element's background fill (web hex), or null for no fill.</summary>
+    public string? FillColor { get; set; }
+}

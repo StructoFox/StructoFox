@@ -159,7 +159,10 @@ public class StructogramWindow : Window
         }
         else
         {
-            cell.BorderBrush = _lineBrush;  // diagram-surface line colour, not the app theme
+            // Diagram-surface look, with optional per-block overrides on top of the style default.
+            cell.BorderBrush = Solid(b.Style?.LineColor) ?? _lineBrush;
+            if (b.Style?.LineThickness is double lt) cell.BorderThickness = new(lt);
+            if (Solid(b.Style?.FillColor) is { } fill) cell.Background = fill;
         }
 
         cell.PointerPressed += (_, e) =>
@@ -202,7 +205,7 @@ public class StructogramWindow : Window
         var text = b.Flagged
             ? "⚠ " + b.Text
             : (string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhStatement") : b.Text);
-        var t = LabelText(text);
+        var t = PrimaryLabel(text, b);
         t.Margin = new(8, 6, 8, 6);
         if (b.Flagged)
         {
@@ -221,7 +224,7 @@ public class StructogramWindow : Window
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // branch labels
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // branches
 
-        var cond = LabelText(string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhCondition") : b.Text);
+        var cond = PrimaryLabel(string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhCondition") : b.Text, b);
         cond.TextAlignment = TextAlignment.Center;
         cond.Margin = new(8, 6, 8, 6);
         cond.DoubleTapped += (_, _) => EditText(b);
@@ -258,9 +261,9 @@ public class StructogramWindow : Window
     Control LoopBox(NsBlock b, bool preTest)
     {
         var outer = new StackPanel();
-        var cond = LabelText(string.IsNullOrWhiteSpace(b.Text)
+        var cond = PrimaryLabel(string.IsNullOrWhiteSpace(b.Text)
             ? (preTest ? Loc.S("Struct_PhWhile") : Loc.S("Struct_PhDoWhile"))
-            : b.Text);
+            : b.Text, b);
         cond.Margin = new(8, 5, 8, 5);
         cond.FontStyle = FontStyle.Italic;
         cond.DoubleTapped += (_, _) => EditText(b);
@@ -283,7 +286,7 @@ public class StructogramWindow : Window
     Control CaseBox(NsBlock b)
     {
         var outer = new StackPanel();
-        var head = LabelText(string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSelector") : b.Text);
+        var head = PrimaryLabel(string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSelector") : b.Text, b);
         head.TextAlignment = TextAlignment.Center;
         head.Margin = new(8, 5, 8, 5);
         head.DoubleTapped += (_, _) => EditText(b);
@@ -439,6 +442,21 @@ public class StructogramWindow : Window
     };
 
     // ── Visual helpers ───────────────────────────────────────────────────────
+
+    // Builds a block's primary label and applies its optional per-block text-colour override.
+    TextBlock PrimaryLabel(string text, NsBlock b)
+    {
+        var t = LabelText(text);
+        if (Solid(b.Style?.TextColor) is { } tb) t.Foreground = tb;
+        return t;
+    }
+
+    // Turns an optional web-hex string into a brush, or null when unset/unparseable (→ caller inherits).
+    static IBrush? Solid(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return null;
+        try { return new SolidColorBrush(Color.Parse(hex)); } catch { return null; }
+    }
 
     // A wrapping label drawn in the diagram's own text colour/font — the workhorse of every box.
     TextBlock LabelText(string text)
