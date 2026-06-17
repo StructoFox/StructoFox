@@ -347,7 +347,15 @@ public class StructogramWindow : Window
         }
 
         cm.Items.Add(new Separator());
-        cm.Items.Add(StyleMenu(b));
+        var style = new MenuItem { Header = Loc.S("Style_Open") };
+        style.Click += async (_, _) =>
+        {
+            var edited = await StyleEditorWindow.Edit(this, b.Style ?? new ElementStyle());
+            if (edited is null) return;
+            b.Style = IsEmptyStyle(edited) ? null : edited;   // all-inherit → drop the override entirely
+            Save(); Rebuild();
+        };
+        cm.Items.Add(style);
 
         cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Struct_DeleteBlock") };
@@ -357,75 +365,9 @@ public class StructogramWindow : Window
         cm.Open(anchor);
     }
 
-    // Builds the per-block "Style" submenu: line/fill/text colour from the palette, thickness, reset.
-    MenuItem StyleMenu(NsBlock b)
-    {
-        var mi  = new MenuItem { Header = Loc.S("Style_Menu") };
-        var pal = ActivePalette();
-
-        mi.Items.Add(ColorSubmenu(Loc.S("Style_Line"), pal, hex => Ensure(b).LineColor = hex));
-        mi.Items.Add(ColorSubmenu(Loc.S("Style_Fill"), pal, hex => Ensure(b).FillColor = hex));
-        mi.Items.Add(ColorSubmenu(Loc.S("Style_Text"), pal, hex => Ensure(b).TextColor = hex));
-        mi.Items.Add(ThicknessSubmenu(b));
-
-        var reset = new MenuItem { Header = Loc.S("Style_Reset") };
-        reset.Click += (_, _) => { b.Style = null; Save(); Rebuild(); };
-        mi.Items.Add(new Separator());
-        mi.Items.Add(reset);
-        return mi;
-    }
-
-    // A colour-picking submenu: "inherit" plus one swatch-icon entry per palette colour.
-    MenuItem ColorSubmenu(string header, ColorPalette pal, Action<string?> set)
-    {
-        var m = new MenuItem { Header = header };
-
-        var inherit = new MenuItem { Header = Loc.S("Style_Inherit") };
-        inherit.Click += (_, _) => { set(null); Save(); Rebuild(); };
-        m.Items.Add(inherit);
-        m.Items.Add(new Separator());
-
-        foreach (var c in pal.Colors)
-        {
-            var hex  = c.Value;
-            var item = new MenuItem { Header = c.Name, Icon = Swatch(hex) };
-            item.Click += (_, _) => { set(hex); Save(); Rebuild(); };
-            m.Items.Add(item);
-        }
-        return m;
-    }
-
-    // A thickness submenu: inherit, or a few sensible px presets.
-    MenuItem ThicknessSubmenu(NsBlock b)
-    {
-        var m = new MenuItem { Header = Loc.S("Style_Thickness") };
-        var inherit = new MenuItem { Header = Loc.S("Style_Inherit") };
-        inherit.Click += (_, _) => { Ensure(b).LineThickness = null; Save(); Rebuild(); };
-        m.Items.Add(inherit);
-        m.Items.Add(new Separator());
-        foreach (var w in new double[] { 1, 2, 3, 4 })
-        {
-            var ww   = w;
-            var item = new MenuItem { Header = $"{ww:0} px" };
-            item.Click += (_, _) => { Ensure(b).LineThickness = ww; Save(); Rebuild(); };
-            m.Items.Add(item);
-        }
-        return m;
-    }
-
-    // Ensures the block has a style object to write overrides into (created lazily on first use).
-    static ElementStyle Ensure(NsBlock b) => b.Style ??= new ElementStyle();
-
-    // A tiny colour chip used as a menu-item icon so palette entries are recognisable at a glance.
-    static Control Swatch(string hex) => new Border
-    {
-        Width = 14, Height = 14,
-        Background = Solid(hex) ?? Brushes.Transparent,
-        BorderBrush = Brushes.Gray, BorderThickness = new(1),
-    };
-
-    // The palette colours offered in the style menus — the first saved palette, else the built-in one.
-    static ColorPalette ActivePalette() => PaletteStore.LoadAll().FirstOrDefault() ?? PaletteService.BuiltIn();
+    // True when a style carries no overrides at all (every field inherits) — used to drop empty styles.
+    static bool IsEmptyStyle(ElementStyle s) =>
+        s.LineColor is null && s.FillColor is null && s.TextColor is null && s.LineThickness is null;
 
     // Builds a submenu offering the five block kinds, each inserting at the given index.
     MenuItem InsertMenu(string header, List<NsBlock> seq, int index)

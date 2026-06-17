@@ -107,6 +107,22 @@ public static class Loc
         ["Style_Thickness"] = "Line thickness",
         ["Style_Reset"]     = "Reset style",
         ["Style_Inherit"]   = "Inherit (default)",
+        ["Style_Open"]      = "🎨 Style…",
+
+        // Style editor window
+        ["StyleEd_Title"]     = "🎨 Element style",
+        ["StyleEd_Preset"]    = "Preset slot:",
+        ["StyleEd_Apply"]     = "Apply",
+        ["StyleEd_SaveSlot"]  = "💾 Save as slot…",
+        ["StyleEd_Line"]      = "Line colour",
+        ["StyleEd_Fill"]      = "Fill colour",
+        ["StyleEd_Text"]      = "Text colour",
+        ["StyleEd_Thickness"] = "Line thickness",
+        ["StyleEd_Preview"]   = "Preview",
+        ["StyleEd_Sample"]    = "Sample text",
+        ["StyleEd_SlotName"]  = "Slot name:",
+        ["Common_OK"]         = "OK",
+        ["Common_Cancel"]     = "Cancel",
     };
 
     // German overlay; any key not listed here quietly falls through to the English baseline.
@@ -202,6 +218,22 @@ public static class Loc
         ["Style_Thickness"] = "Linienstärke",
         ["Style_Reset"]     = "Stil zurücksetzen",
         ["Style_Inherit"]   = "Erben (Standard)",
+        ["Style_Open"]      = "🎨 Stil…",
+
+        // Style editor window
+        ["StyleEd_Title"]     = "🎨 Element-Stil",
+        ["StyleEd_Preset"]    = "Stil-Slot:",
+        ["StyleEd_Apply"]     = "Anwenden",
+        ["StyleEd_SaveSlot"]  = "💾 Als Slot speichern…",
+        ["StyleEd_Line"]      = "Linienfarbe",
+        ["StyleEd_Fill"]      = "Füllfarbe",
+        ["StyleEd_Text"]      = "Textfarbe",
+        ["StyleEd_Thickness"] = "Linienstärke",
+        ["StyleEd_Preview"]   = "Vorschau",
+        ["StyleEd_Sample"]    = "Beispieltext",
+        ["StyleEd_SlotName"]  = "Slot-Name:",
+        ["Common_OK"]         = "OK",
+        ["Common_Cancel"]     = "Abbrechen",
     };
 
     // Language code -> its string table. Lookups consult the active table, then English.
