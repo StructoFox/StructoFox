@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using StructoFox.Core;
 
 namespace StructoFox.App;
 
@@ -140,7 +141,7 @@ public partial class MainWindow : Window
         _body.Content = BuildHome();
     }
 
-    // The landing surface: the most-recent project up top, the rest below, and "add folder".
+    // The landing surface: actions on top, then the most-recent projects, then each scanned library.
     Control BuildHome()
     {
         var host = new Border();
@@ -151,33 +152,93 @@ public partial class MainWindow : Window
         Ui.Theme(comb, HoneycombBackdrop.LineBrushProperty, "AccentBgBrush");
         layered.Children.Add(comb);
 
-        var col = new StackPanel { Spacing = 12, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, Margin = new(0, 48, 0, 24) };
-        col.Children.Add(Centered(Heading("Open a project"), 26));
+        var col = new StackPanel { Spacing = 12, MaxWidth = 560, HorizontalAlignment = HorizontalAlignment.Center, Margin = new(0, 40, 0, 24) };
+        col.Children.Add(Centered(Heading("Projects"), 14));
+
+        var newBtn = Ui.Btn("➕  New project…", "Create a new project in a folder");
+        newBtn.Click += async (_, _) => await NewProject();
+        var libBtn = Ui.Btn("📁  Add library…", "Register a folder to scan for projects");
+        libBtn.Click += async (_, _) => await AddLibrary();
+        col.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left, Children = { newBtn, libBtn } });
 
         var recents = RecentProjects.Load();
+        var libs    = Libraries.Load();
+
         if (recents.Count > 0)
         {
+            col.Children.Add(SectionLabel("Recent"));
             col.Children.Add(BigProjectCard(recents[0]));
-            if (recents.Count > 1)
-            {
-                col.Children.Add(new TextBlock { Text = "Recently opened", FontSize = 12, Opacity = 0.7, Margin = new(2, 10, 0, 0) });
-                for (int i = 1; i < recents.Count; i++) col.Children.Add(SmallProjectRow(recents[i]));
-            }
-        }
-        else
-        {
-            col.Children.Add(Note("No recent projects yet. Add a folder to get started."));
+            for (int i = 1; i < recents.Count; i++) col.Children.Add(SmallProjectRow(recents[i]));
         }
 
-        var add = Ui.Btn("➕  Add project folder…", "Pick a folder to use as a project");
-        add.HorizontalAlignment = HorizontalAlignment.Left;
-        add.Margin = new(0, 12, 0, 0);
-        add.Click += async (_, _) => await PickFolder();
-        col.Children.Add(add);
+        foreach (var lib in libs) col.Children.Add(LibrarySection(lib));
+
+        if (recents.Count == 0 && libs.Count == 0)
+            col.Children.Add(Note("No projects yet. Create one, or add a library folder to scan."));
 
         layered.Children.Add(new ScrollViewer { Padding = new(24), Content = col, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         host.Child = layered;
         return host;
+    }
+
+    // One library group: a header (folder + remove) over the projects scanned inside it.
+    Control LibrarySection(string lib)
+    {
+        var box = new StackPanel { Spacing = 4, Margin = new(0, 10, 0, 0) };
+
+        var header = new DockPanel();
+        var remove = Ui.Btn("✕", "Remove this library");
+        remove.Padding = new(8, 2);
+        remove.Click += (_, _) => { Libraries.Remove(lib); ShowHome(); };
+        DockPanel.SetDock(remove, Dock.Right);
+        header.Children.Add(remove);
+        var label = new TextBlock { Text = "📁  " + lib, FontSize = 12, Opacity = 0.75, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        Ui.Theme(label, TextBlock.ForegroundProperty, "ContentTextBrush");
+        header.Children.Add(label);
+        box.Children.Add(header);
+
+        var projects = ProjectService.Scan(lib);
+        if (projects.Count == 0) box.Children.Add(Note("  no projects found here"));
+        else foreach (var p in projects) box.Children.Add(SmallProjectRow(p));
+        return box;
+    }
+
+    // A small muted section label.
+    static TextBlock SectionLabel(string text) =>
+        new() { Text = text, FontSize = 12, Opacity = 0.7, Margin = new(2, 10, 0, 0), FontWeight = FontWeight.Bold };
+
+    // Prompts for a name + a parent folder, creates the project there, and opens it.
+    async Task NewProject()
+    {
+        var name = await PromptDialog.Show(this, "Project name:", "My Project", "New project");
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose where to create the project", AllowMultiple = false,
+        });
+        if (picked.Count == 0 || picked[0].TryGetLocalPath() is not { } parent) return;
+
+        var folder = Path.Combine(parent, SafeFolder(name));
+        ProjectService.Create(folder, name);
+        OpenProject(folder);
+    }
+
+    // Registers a folder as a library to scan for projects.
+    async Task AddLibrary()
+    {
+        var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose a library folder to scan for projects", AllowMultiple = false,
+        });
+        if (picked.Count > 0 && picked[0].TryGetLocalPath() is { } local) { Libraries.Add(local); ShowHome(); }
+    }
+
+    // Strips characters that can't appear in a folder name.
+    static string SafeFolder(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return name.Trim();
     }
 
     // The prominent card for the most-recently opened project.
@@ -227,11 +288,21 @@ public partial class MainWindow : Window
 
     // ── Project cockpit ─────────────────────────────────────────────────────
 
-    // Records the project as recent and switches to the cockpit view.
+    // Opens a project: ensure it has a marker, apply its saved preferences, record it, show the cockpit.
     void OpenProject(string path)
     {
+        var info = ProjectService.Load(path) ?? ProjectService.Create(path, "");
         _project = path;
         RecentProjects.Add(path);
+
+        // Per-project preferences (if the marker stored any).
+        if (info.PreferredTheme is { } pt)
+        {
+            var hit = ThemeManager.Available().FirstOrDefault(t => t.Name == pt);
+            if (hit.Path is not null) ThemeManager.Apply(Application.Current!, hit.Path);
+        }
+        if (info.PreferredPalette is { } pp) PaletteStore.ActiveName = pp;
+
         _railButtons.Clear();
         _body.Content = BuildCockpit();
         ShowSection(_section);
@@ -343,8 +414,8 @@ public partial class MainWindow : Window
 
     // ── small helpers ────────────────────────────────────────────────────────
 
-    // Folder name as the project's display name.
-    static string ProjectName(string path) => string.IsNullOrEmpty(path) ? "—" : Path.GetFileName(path.TrimEnd('/', '\\'));
+    // The project's display name (from its marker, else the folder name).
+    static string ProjectName(string path) => string.IsNullOrEmpty(path) ? "—" : ProjectService.DisplayName(path);
 
     static TextBlock Heading(string text)
     {
