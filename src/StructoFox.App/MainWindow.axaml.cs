@@ -7,6 +7,8 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using StructoFox.Core;
 using StructoFox.Core.Models;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace StructoFox.App;
 
@@ -486,7 +488,8 @@ public partial class MainWindow : Window
 
         row.Child = grid;
         ToolTip.SetTip(row, StatsTip(path));
-        row.PointerPressed += (_, _) => OpenProject(path);
+        row.PointerPressed += (_, e) => { if (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) OpenProject(path); };
+        AttachProjectMenu(row, path);
         return row;
     }
 
@@ -543,9 +546,46 @@ public partial class MainWindow : Window
 
         card.Child = stack;
         ToolTip.SetTip(card, StatsTip(path));
-        card.PointerPressed += (_, _) => OpenProject(path);
+        card.PointerPressed += (_, e) => { if (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) OpenProject(path); };
+        AttachProjectMenu(card, path);
         return card;
     }
+
+    // Attaches the per-project right-click menu (rename + open folder) to a tile or row.
+    void AttachProjectMenu(Control c, string path)
+    {
+        var rename = new MenuItem { Header = Loc.S("Proj_Rename") };
+        rename.Click += async (_, _) => await RenameProject(path);
+        var openFolder = new MenuItem { Header = Loc.S("Proj_OpenFolder") };
+        openFolder.Click += (_, _) => OpenInExplorer(path);
+        var cm = new ContextMenu();
+        cm.Items.Add(rename);
+        cm.Items.Add(openFolder);
+        c.ContextMenu = cm;
+    }
+
+    // Renames a project (its display name in the marker — the folder is left untouched), then refreshes.
+    Task RenameProject(string path) => CrashHandler.SafeAsync(async () =>
+    {
+        var name = await PromptDialog.Show(this, Loc.S("Proj_RenamePrompt"), ProjectName(path), Loc.S("Proj_Rename"));
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var info = ProjectService.Load(path) ?? ProjectService.Create(path, name);
+        info.Name = name.Trim();
+        ProjectService.Save(path, info);
+        _body.Content = BuildHome();
+    }, "RenameProject");
+
+    // Opens the project's folder in the OS file explorer (Explorer / Finder / xdg-open).
+    void OpenInExplorer(string path) => CrashHandler.Safe(() =>
+    {
+        if (!Directory.Exists(path)) return;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            Process.Start(new ProcessStartInfo("open", $"\"{path}\"") { UseShellExecute = true });
+        else
+            Process.Start(new ProcessStartInfo("xdg-open", $"\"{path}\"") { UseShellExecute = true });
+    }, "OpenInExplorer");
 
     // A card's top row: the name block on the left, the date tucked into the top-right corner.
     Control HeaderRow(Control nameRow, DateTime date)
@@ -577,12 +617,13 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, 12));
 
         var (s, f, b) = ProjectService.StructureStats(path);
-        stack.Children.Add(Dim($"📦 {s} structures · ⚡ {f} functions · 🗂 {b} boards", 12));
+        stack.Children.Add(Dim($"📦 {s} structures · ⚡ {f} functions · 🗺 {b} boards", 12));
         stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.5, TextWrapping = TextWrapping.Wrap });
 
         card.Child = stack;
         ToolTip.SetTip(card, StatsTip(path));
-        card.PointerPressed += (_, _) => OpenProject(path);
+        card.PointerPressed += (_, e) => { if (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) OpenProject(path); };
+        AttachProjectMenu(card, path);
         return card;
     }
 
@@ -607,7 +648,8 @@ public partial class MainWindow : Window
 
         row.Child = dock;
         ToolTip.SetTip(row, StatsTip(path));
-        row.PointerPressed += (_, _) => OpenProject(path);
+        row.PointerPressed += (_, e) => { if (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) OpenProject(path); };
+        AttachProjectMenu(row, path);
         return row;
     }
 
@@ -698,7 +740,7 @@ public partial class MainWindow : Window
         var stack = new StackPanel { Spacing = 4 };
         (Section sec, string icon, string label)[] items =
         {
-            (Section.Boards,    "🗂", "Boards"),
+            (Section.Boards,    "🗺", "Boards"),
             (Section.Namespace, "Ⓝ", "Namespaces"),
             (Section.Class,     "Ⓒ", "Classes"),
             (Section.Struct,    "Ⓢ", "Structs"),

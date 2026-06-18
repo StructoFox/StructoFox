@@ -293,6 +293,11 @@ public static class Loc
         // App menu
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "About StructoFox",
+
+        // Project context menu (home)
+        ["Proj_Rename"]       = "✎ Rename…",
+        ["Proj_RenamePrompt"] = "Project name:",
+        ["Proj_OpenFolder"]   = "📂 Open folder",
     };
 
     // German overlay; any key not listed here quietly falls through to the English baseline.
@@ -505,6 +510,11 @@ public static class Loc
         // App-Menü
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "Über StructoFox",
+
+        // Projekt-Kontextmenü (Home)
+        ["Proj_Rename"]       = "✎ Umbenennen…",
+        ["Proj_RenamePrompt"] = "Projektname:",
+        ["Proj_OpenFolder"]   = "📂 Ordner öffnen",
     };
 
     // Language code -> its string table. Lookups consult the active table, then English.
