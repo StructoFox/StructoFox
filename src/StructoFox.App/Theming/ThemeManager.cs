@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Styling;
 using OXSUIT.Loaders.Avalonia;
 
 namespace StructoFox.App;
@@ -34,6 +35,23 @@ public static class ThemeManager
         if (_current is not null) app.Resources.MergedDictionaries.Remove(_current);
         app.Resources.MergedDictionaries.Add(dict);
         _current = dict;
+        FixComboGlyph(app);
+    }
+
+    // Fluent paints the ComboBox drop-down chevron from its own light brush (a direct template value
+    // that outside styles can't override), so it vanished on light themes. Point those resource keys
+    // at the active theme's sidebar text colour instead — re-applied on every theme swap.
+    static void FixComboGlyph(Application app)
+    {
+        if (!app.TryGetResource("SidebarTextBrush", null, out var fg) || fg is null) return;
+        foreach (var key in new[]
+                 {
+                     "ComboBoxDropDownGlyphForeground",
+                     "ComboBoxDropDownGlyphForegroundDisabled",
+                     "ComboBoxDropDownGlyphForegroundFocused",
+                     "ComboBoxDropDownGlyphForegroundFocusedPressed",
+                 })
+            app.Resources[key] = fg;
     }
 
     // The theme worn out of the box: a clean light "drawing board" surface for diagrams & code.
