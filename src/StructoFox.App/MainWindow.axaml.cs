@@ -537,9 +537,8 @@ public partial class MainWindow : Window
         Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
         nameRow.Children.Add(name);
 
-        var stack = new StackPanel { Spacing = 3, Children = { nameRow } };
+        var stack = new StackPanel { Spacing = 3, Children = { HeaderRow(nameRow, date) } };
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, big ? 13 : 11));
-        stack.Children.Add(Dim("opened " + Friendly(date), 10));
         if (big) stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.55, TextWrapping = TextWrapping.Wrap });
 
         card.Child = stack;
@@ -548,7 +547,20 @@ public partial class MainWindow : Window
         return card;
     }
 
-    // A large, detail-rich tile: theme swatch + name, description, content counts, opened date and path.
+    // A card's top row: the name block on the left, the date tucked into the top-right corner.
+    Control HeaderRow(Control nameRow, DateTime date)
+    {
+        var when = Dim(Friendly(date), 10);
+        when.VerticalAlignment = VerticalAlignment.Top;
+        when.Margin = new(8, 0, 0, 0);
+        var dock = new DockPanel();
+        DockPanel.SetDock(when, Dock.Right);
+        dock.Children.Add(when);
+        dock.Children.Add(nameRow);
+        return dock;
+    }
+
+    // A large, detail-rich tile: theme swatch + name, description, content counts, date and path.
     Control BigCard(string path, DateTime date)
     {
         var card = new Border { Width = 250, Padding = new(16), Margin = new(5), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
@@ -561,12 +573,11 @@ public partial class MainWindow : Window
         Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
         nameRow.Children.Add(name);
 
-        var stack = new StackPanel { Spacing = 4, Children = { nameRow } };
+        var stack = new StackPanel { Spacing = 4, Children = { HeaderRow(nameRow, date) } };
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, 12));
 
         var (s, f, b) = ProjectService.StructureStats(path);
         stack.Children.Add(Dim($"📦 {s} structures · ⚡ {f} functions · 🗂 {b} boards", 12));
-        stack.Children.Add(Dim("opened " + Friendly(date), 11));
         stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.5, TextWrapping = TextWrapping.Wrap });
 
         card.Child = stack;
