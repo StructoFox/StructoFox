@@ -17,5 +17,27 @@
             <Setter Property="Background" Value="{DynamicResource AccentBgBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource ContentBgBrush}" />
         </Style>
+
+        <!-- Text fields: Fluent overrides the field background per visual state with its own (dark)
+             theme brushes, so a focused/hovered box turned black. Force our InputBg brush onto the
+             template's border element in every state, and keep the text on our themed colour. -->
+        <Style Selector="TextBox /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{DynamicResource InputBgBrush}" />
+        </Style>
+        <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{DynamicResource InputBgBrush}" />
+        </Style>
+        <Style Selector="TextBox:focused /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{DynamicResource InputBgBrush}" />
+        </Style>
+        <Style Selector="TextBox">
+            <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
+        </Style>
+        <Style Selector="TextBox:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
+        </Style>
+        <Style Selector="TextBox:focused">
+            <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
+        </Style>
     </Application.Styles>
 </Application>
