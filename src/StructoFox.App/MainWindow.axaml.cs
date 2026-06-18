@@ -180,29 +180,34 @@ public partial class MainWindow : Window
         return host;
     }
 
-    // Left column: New/Add-library actions + a sources list. No coloured sidebar — buttons sit on the
-    // same surface as everything else.
+    // Left column: New/Add-library actions pinned at the top, the sources list anchored at the bottom.
+    // No coloured sidebar — buttons sit on the same surface as everything else.
     Control BuildHomeNav()
     {
-        var panel = new StackPanel { Spacing = 6, Width = 162, Margin = new(16, 16, 8, 16) };
+        var dock = new DockPanel { LastChildFill = false, Width = 162, Margin = new(16, 16, 8, 16) };
 
+        var top = new StackPanel { Spacing = 6 };
         var newBtn = Ui.Btn("➕  New project");
         newBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
         newBtn.Click += async (_, _) => await NewProject();
         var libBtn = Ui.Btn("📁  Add library");
         libBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
         libBtn.Click += async (_, _) => await AddLibrary();
-        panel.Children.Add(newBtn);
-        panel.Children.Add(libBtn);
+        top.Children.Add(newBtn);
+        top.Children.Add(libBtn);
+        DockPanel.SetDock(top, Dock.Top);
+        dock.Children.Add(top);
 
-        panel.Children.Add(SectionLabel("Sources"));
-        panel.Children.Add(NavEntry("🕘  Recent", null, false));
+        var sources = new StackPanel { Spacing = 6 };
+        sources.Children.Add(SectionLabel("Sources"));
+        sources.Children.Add(NavEntry("🕘  Recent", null, false));
+        foreach (var lib in Libraries.Load()) sources.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
 
-        var libs = Libraries.Load();
-        if (libs.Count > 0)
-            foreach (var lib in libs) panel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
+        var sourcesScroll = new ScrollViewer { Content = sources, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        DockPanel.SetDock(sourcesScroll, Dock.Bottom);
+        dock.Children.Add(sourcesScroll);
 
-        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        return dock;
     }
 
     // One sources entry; clicking selects it as the list source. Libraries get a remove (✕) button.
