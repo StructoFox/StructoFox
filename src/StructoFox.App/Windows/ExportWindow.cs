@@ -60,7 +60,7 @@ public class ExportWindow : Window
         _langCombo.SelectedIndex = 0;
         _langCombo.SelectionChanged += (_, _) => Regenerate();
 
-        Ui.Theme(_preview, TextBox.BackgroundProperty,  "ControlBgBrush");
+        Ui.Theme(_preview, TextBox.BackgroundProperty,  "InputBgBrush");
         Ui.Theme(_preview, TextBox.ForegroundProperty,  "SidebarTextBrush");
         Ui.Theme(_preview, TextBox.BorderBrushProperty, "ControlBorderBrush");
         ScrollViewer.SetHorizontalScrollBarVisibility(_preview, ScrollBarVisibility.Auto);

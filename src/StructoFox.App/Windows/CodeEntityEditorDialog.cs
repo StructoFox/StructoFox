@@ -661,7 +661,7 @@ public class CodeEntityEditorDialog : Window
             Height = multiLine ? 56 : double.NaN,
         };
         if (multiLine) ScrollViewer.SetVerticalScrollBarVisibility(box, ScrollBarVisibility.Auto);
-        Ui.Theme(box, TextBox.BackgroundProperty,  "ControlBgBrush");
+        Ui.Theme(box, TextBox.BackgroundProperty,  "InputBgBrush");
         Ui.Theme(box, TextBox.ForegroundProperty,  "SidebarTextBrush");
         Ui.Theme(box, TextBox.BorderBrushProperty, "ControlBorderBrush");
         return box;
@@ -670,7 +670,7 @@ public class CodeEntityEditorDialog : Window
     TextBox SmallBox(double width, string value)
     {
         var b = new TextBox { Width = width, Text = value, FontSize = 12 };
-        Ui.Theme(b, TextBox.BackgroundProperty,  "ControlBgBrush");
+        Ui.Theme(b, TextBox.BackgroundProperty,  "InputBgBrush");
         Ui.Theme(b, TextBox.ForegroundProperty,  "SidebarTextBrush");
         Ui.Theme(b, TextBox.BorderBrushProperty, "ControlBorderBrush");
         return b;

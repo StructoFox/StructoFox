@@ -18,7 +18,7 @@ public static class PromptDialog
         var box = new TextBox { Text = initial, MinWidth = 320 };
         // Theme the field to the OXSUIT input brushes; otherwise it keeps Fluent's default (dark)
         // colours until first focus, showing black-on-white on a light theme.
-        Ui.Theme(box, TextBox.BackgroundProperty,  "ControlBgBrush");
+        Ui.Theme(box, TextBox.BackgroundProperty,  "InputBgBrush");
         Ui.Theme(box, TextBox.ForegroundProperty,  "SidebarTextBrush");
         Ui.Theme(box, TextBox.BorderBrushProperty, "ControlBorderBrush");
 
