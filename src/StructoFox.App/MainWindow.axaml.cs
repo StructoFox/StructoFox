@@ -619,7 +619,7 @@ public partial class MainWindow : Window
         return rail;
     }
 
-    // The door at the bottom of the rail — leaves the project and returns to the project browser.
+    // The back arrow at the bottom of the rail — returns to the project browser (not a program exit).
     Button ExitButton()
     {
         var b = new Button
@@ -632,7 +632,7 @@ public partial class MainWindow : Window
                 Spacing = 2,
                 Children =
                 {
-                    new TextBlock { Text = "🚪", FontSize = 20, HorizontalAlignment = HorizontalAlignment.Center },
+                    new TextBlock { Text = "←", FontSize = 24, HorizontalAlignment = HorizontalAlignment.Center },
                     new TextBlock { Text = Loc.S("Cockpit_Exit"), FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center },
                 },
             },
