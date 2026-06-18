@@ -18,7 +18,7 @@ namespace StructoFox.App;
 public partial class MainWindow : Window
 {
     enum Section { Boards, Namespace, Class, Struct, Interface, Enum, Function, Object, Export }
-    enum HomeView { Cards, DetailList, MultiList }
+    enum HomeView { Cards, BigCards, DetailList, MultiList }
     enum HomeSort { DateDesc, DateAsc, NameAsc, NameDesc }
 
     static readonly FontFamily Mono = new("Consolas, Menlo, Courier New, monospace");
@@ -233,45 +233,42 @@ public partial class MainWindow : Window
         return host;
     }
 
-    // Left column: New/Add-library actions pinned at the top, the sources list anchored at the bottom.
-    // No coloured sidebar — buttons sit on the same surface as everything else.
+    // Left column: "New project" pinned at the top, the library folders (separate from projects) in the
+    // middle, and "Add library" anchored at the bottom. No "Recent" entry — date sorting covers that;
+    // the default list is the recent projects, and clicking an active library again returns to it.
     Control BuildHomeNav()
     {
         var grid = new Grid { Width = 162, Margin = new(16, 16, 8, 20) };
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // actions (top)
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // libraries (middle)
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // Recent (bottom)
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // New project (top)
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // library folders (middle)
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // Add library (bottom)
 
-        var top = new StackPanel { Spacing = 6 };
         var newBtn = Ui.Btn(Loc.S("Home_NewProject"), Loc.S("Home_NewProjectTip"));
         newBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
         newBtn.Click += async (_, _) => await NewProject();
-        var libBtn = Ui.Btn(Loc.S("Home_AddLibrary"), Loc.S("Home_AddLibraryTip"));
-        libBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
-        libBtn.Click += async (_, _) => await AddLibrary();
-        top.Children.Add(newBtn);
-        top.Children.Add(libBtn);
-        Grid.SetRow(top, 0); grid.Children.Add(top);
+        Grid.SetRow(newBtn, 0); grid.Children.Add(newBtn);
 
-        // Libraries float in the middle, centred, scrolling if many — a button-height gap above & below.
+        // The library folders float in the middle, centred, scrolling if many.
         var libs = Libraries.Load();
         if (libs.Count > 0)
         {
             var libPanel = new StackPanel { Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-            foreach (var lib in libs) libPanel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
-            var libScroll = new ScrollViewer { Content = libPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new(0, 36, 0, 36) };
+            foreach (var lib in libs) libPanel.Children.Add(NavEntry("📁  " + ShortName(lib), lib));
+            var libScroll = new ScrollViewer { Content = libPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new(0, 12, 0, 12) };
             Grid.SetRow(libScroll, 1); grid.Children.Add(libScroll);
         }
 
-        var recent = NavEntry(Loc.S("Home_Recent"), null, false);
-        Grid.SetRow(recent, 2); grid.Children.Add(recent);
+        var libBtn = Ui.Btn(Loc.S("Home_AddLibrary"), Loc.S("Home_AddLibraryTip"));
+        libBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
+        libBtn.Click += async (_, _) => await AddLibrary();
+        Grid.SetRow(libBtn, 2); grid.Children.Add(libBtn);
 
         return grid;
     }
 
-    // One sources entry; left-click selects it as the list source. Libraries are removed via a
-    // right-click context menu (no easy-to-misclick ✕).
-    Control NavEntry(string label, string? source, bool removable)
+    // One library entry; left-click selects it as the list source (click the active one again to go back
+    // to recent). Libraries are removed via a right-click context menu (no easy-to-misclick ✕).
+    Control NavEntry(string label, string source)
     {
         var active = _homeSource == source;
         var b = new Button
@@ -281,17 +278,14 @@ public partial class MainWindow : Window
         };
         Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
         Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
-        b.Click += (_, _) => { _homeSource = source; _body.Content = BuildHome(); };
+        b.Click += (_, _) => { _homeSource = active ? null : source; _body.Content = BuildHome(); };
 
-        if (removable && source is not null)
-        {
-            ToolTip.SetTip(b, source);   // full library path on hover
-            var remove = new MenuItem { Header = Loc.S("Home_RemoveLibrary") };
-            remove.Click += (_, _) => { Libraries.Remove(source); if (_homeSource == source) _homeSource = null; _body.Content = BuildHome(); };
-            var cm = new ContextMenu();
-            cm.Items.Add(remove);
-            b.ContextMenu = cm;
-        }
+        ToolTip.SetTip(b, source);   // full library path on hover
+        var remove = new MenuItem { Header = Loc.S("Home_RemoveLibrary") };
+        remove.Click += (_, _) => { Libraries.Remove(source); if (_homeSource == source) _homeSource = null; _body.Content = BuildHome(); };
+        var cm = new ContextMenu();
+        cm.Items.Add(remove);
+        b.ContextMenu = cm;
         return b;
     }
 
@@ -377,6 +371,7 @@ public partial class MainWindow : Window
             var cm = new ContextMenu();
             void Item(string label, HomeView view) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => { _homeView = view; _body.Content = BuildHome(); }; cm.Items.Add(mi); }
             Item("▦  Kacheln", HomeView.Cards);
+            Item("▣  Große Kacheln", HomeView.BigCards);
             Item("≣  Einspaltige Liste (Details)", HomeView.DetailList);
             Item("☷  Mehrspaltige Liste", HomeView.MultiList);
             cm.Open(b);
@@ -385,7 +380,7 @@ public partial class MainWindow : Window
     }
 
     // The glyph for a view (shown on the dropdown button).
-    static string ViewIcon(HomeView v) => v switch { HomeView.DetailList => "≣", HomeView.MultiList => "☷", _ => "▦" };
+    static string ViewIcon(HomeView v) => v switch { HomeView.BigCards => "▣", HomeView.DetailList => "≣", HomeView.MultiList => "☷", _ => "▦" };
 
     // The collapsible filter + sort bar: a name filter and four sort buttons.
     StackPanel BuildFilterBar()
@@ -459,6 +454,10 @@ public partial class MainWindow : Window
                 var sp = new StackPanel { Spacing = 2 };
                 foreach (var (p, d) in items) sp.Children.Add(DetailRow(p, d));
                 return sp;
+            case HomeView.BigCards:
+                var bigs = new WrapPanel();
+                foreach (var (p, d) in items) bigs.Children.Add(BigCard(p, d));
+                return bigs;
             default:
                 var cards = new WrapPanel();
                 foreach (var (p, d) in items) cards.Children.Add(ProjectCard(p, d, big: false));
@@ -476,11 +475,11 @@ public partial class MainWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
         grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
 
-        var name = new TextBlock { Text = ProjectName(path), FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
+        var name = new TextBlock { Text = ProjectName(path), FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center };
         Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
-        var loc = new TextBlock { Text = path, FontSize = 10, FontFamily = Mono, Opacity = 0.5, VerticalAlignment = VerticalAlignment.Center, Margin = new(10, 0, 10, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+        var loc = new TextBlock { Text = path, FontSize = 12, FontFamily = Mono, Opacity = 0.5, VerticalAlignment = VerticalAlignment.Center, Margin = new(10, 0, 10, 0), TextTrimming = TextTrimming.CharacterEllipsis };
         Ui.Theme(loc, TextBlock.ForegroundProperty, "ContentTextBrush");
-        var when = Dim(Friendly(date), 11); when.VerticalAlignment = VerticalAlignment.Center;
+        var when = Dim(Friendly(date), 13); when.VerticalAlignment = VerticalAlignment.Center;
 
         Grid.SetColumn(name, 0); Grid.SetColumn(loc, 1); Grid.SetColumn(when, 2);
         grid.Children.Add(name); grid.Children.Add(loc); grid.Children.Add(when);
@@ -542,6 +541,33 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, big ? 13 : 11));
         stack.Children.Add(Dim("opened " + Friendly(date), 10));
         if (big) stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.55, TextWrapping = TextWrapping.Wrap });
+
+        card.Child = stack;
+        ToolTip.SetTip(card, StatsTip(path));
+        card.PointerPressed += (_, _) => OpenProject(path);
+        return card;
+    }
+
+    // A large, detail-rich tile: theme swatch + name, description, content counts, opened date and path.
+    Control BigCard(string path, DateTime date)
+    {
+        var card = new Border { Width = 320, Padding = new(16), Margin = new(5), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
+        Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
+
+        var info = ProjectService.Load(path);
+        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        if (ThemeSwatch(info?.PreferredTheme) is { } sw) nameRow.Children.Add(sw);
+        var name = new TextBlock { Text = ProjectName(path), FontSize = 18, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
+        nameRow.Children.Add(name);
+
+        var stack = new StackPanel { Spacing = 4, Children = { nameRow } };
+        if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, 12));
+
+        var (c, f, b) = ProjectService.QuickStats(path);
+        stack.Children.Add(Dim($"📦 {c} classes · ⚡ {f} functions · 🗂 {b} boards", 12));
+        stack.Children.Add(Dim("opened " + Friendly(date), 11));
+        stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.5, TextWrapping = TextWrapping.Wrap });
 
         card.Child = stack;
         ToolTip.SetTip(card, StatsTip(path));
