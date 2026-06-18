@@ -164,10 +164,15 @@ public partial class MainWindow : Window
         layered.Children.Add(comb);
 
         var cols = new Grid();
-        cols.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(220)));
-        cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));   // left nav
+        cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));   // divider
+        cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));   // main
         var nav = BuildHomeNav(); Grid.SetColumn(nav, 0); cols.Children.Add(nav);
-        var main = BuildHomeMain(); Grid.SetColumn(main, 1); cols.Children.Add(main);
+
+        var divider = new Border { Width = 1, Margin = new(0, 16, 0, 16), Background = Brushes.Gray, Opacity = 0.3 };
+        Grid.SetColumn(divider, 1); cols.Children.Add(divider);
+
+        var main = BuildHomeMain(); Grid.SetColumn(main, 2); cols.Children.Add(main);
         layered.Children.Add(cols);
 
         host.Child = layered;
@@ -190,12 +195,12 @@ public partial class MainWindow : Window
         panel.Children.Add(newBtn);
         panel.Children.Add(libBtn);
 
+        panel.Children.Add(SectionLabel("Sources"));
+        panel.Children.Add(NavEntry("🕘  Recent", null, false));
+
         var libs = Libraries.Load();
         if (libs.Count > 0)
-        {
-            panel.Children.Add(SectionLabel("Libraries"));
             foreach (var lib in libs) panel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
-        }
 
         return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
@@ -285,8 +290,6 @@ public partial class MainWindow : Window
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 8, 0, 0) };
 
-        row.Children.Add(SourceBtn("🕘 Recent", null));
-        row.Children.Add(new Border { Width = 1, Margin = new(2, 2, 2, 2), Background = Brushes.Gray, Opacity = 0.3 });
         row.Children.Add(ViewDropdown());
 
         var filter = Ui.Btn("🔎", "Filter & sort"); filter.Padding = new(10, 4);
@@ -297,17 +300,6 @@ public partial class MainWindow : Window
         row.Children.Add(_homeFilterBar);
 
         return new ScrollViewer { Content = row, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
-    }
-
-    // A source toggle button (e.g. Recent), accent-highlighted when it is the active source.
-    Button SourceBtn(string label, string? source)
-    {
-        var b = Ui.Btn(label);
-        var active = _homeSource == source;
-        Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
-        Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
-        b.Click += (_, _) => { _homeSource = source; _body.Content = BuildHome(); };
-        return b;
     }
 
     // A single button showing the current view; opens a menu of the three view modes.
