@@ -190,9 +190,12 @@ public partial class MainWindow : Window
         panel.Children.Add(newBtn);
         panel.Children.Add(libBtn);
 
-        panel.Children.Add(SectionLabel("Sources"));
-        panel.Children.Add(NavEntry("🕘  Recent", null, false));
-        foreach (var lib in Libraries.Load()) panel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
+        var libs = Libraries.Load();
+        if (libs.Count > 0)
+        {
+            panel.Children.Add(SectionLabel("Libraries"));
+            foreach (var lib in libs) panel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
+        }
 
         return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
@@ -259,49 +262,65 @@ public partial class MainWindow : Window
         return card;
     }
 
-    // Bottom two-thirds: a slim toolbar (view dropdown left, filter icon right), the list, and a
-    // collapsible filter+sort row along the bottom.
+    // Bottom two-thirds: the project list above, and a single control row pinned along the very bottom.
     Control BuildHomeBottom()
     {
         _homeList = new ContentControl();   // fresh instance each build (a control has one parent)
 
         var grid = new Grid { Margin = new(0, 8, 0, 0) };
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // toolbar
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // list
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // filter row
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // bottom control row
 
-        var bar = new DockPanel();
-        var filter = Ui.Btn("🔎", "Filter & sort"); filter.Padding = new(10, 4);
-        filter.Click += (_, _) => { _homeFilterOpen = !_homeFilterOpen; if (_homeFilterBar is not null) _homeFilterBar.IsVisible = _homeFilterOpen; };
-        DockPanel.SetDock(filter, Dock.Right);
-        bar.Children.Add(filter);
-        bar.Children.Add(ViewDropdown());   // left
-        Grid.SetRow(bar, 0); grid.Children.Add(bar);
+        var listScroll = new ScrollViewer { Content = _homeList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(listScroll, 0); grid.Children.Add(listScroll);
 
-        var listScroll = new ScrollViewer { Content = _homeList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new(0, 8, 0, 0) };
-        Grid.SetRow(listScroll, 1); grid.Children.Add(listScroll);
-
-        _homeFilterBar = BuildFilterBar(); _homeFilterBar.IsVisible = _homeFilterOpen;
-        Grid.SetRow(_homeFilterBar, 2); grid.Children.Add(_homeFilterBar);
+        var bottom = BuildBottomBar(); Grid.SetRow(bottom, 1); grid.Children.Add(bottom);
 
         RefreshHomeList();
         return grid;
     }
 
-    // A single button (button-width) showing the current view; opens a menu of the four view choices.
+    // The bottom control row: [Recent] | [view ▾] [🔎], with the filter+sort inputs unfolding to the right.
+    Control BuildBottomBar()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 8, 0, 0) };
+
+        row.Children.Add(SourceBtn("🕘 Recent", null));
+        row.Children.Add(new Border { Width = 1, Margin = new(2, 2, 2, 2), Background = Brushes.Gray, Opacity = 0.3 });
+        row.Children.Add(ViewDropdown());
+
+        var filter = Ui.Btn("🔎", "Filter & sort"); filter.Padding = new(10, 4);
+        filter.Click += (_, _) => { _homeFilterOpen = !_homeFilterOpen; if (_homeFilterBar is not null) _homeFilterBar.IsVisible = _homeFilterOpen; };
+        row.Children.Add(filter);
+
+        _homeFilterBar = BuildFilterBar(); _homeFilterBar.IsVisible = _homeFilterOpen;
+        row.Children.Add(_homeFilterBar);
+
+        return new ScrollViewer { Content = row, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    }
+
+    // A source toggle button (e.g. Recent), accent-highlighted when it is the active source.
+    Button SourceBtn(string label, string? source)
+    {
+        var b = Ui.Btn(label);
+        var active = _homeSource == source;
+        Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
+        Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
+        b.Click += (_, _) => { _homeSource = source; _body.Content = BuildHome(); };
+        return b;
+    }
+
+    // A single button showing the current view; opens a menu of the three view modes.
     Control ViewDropdown()
     {
         var b = Ui.Btn(ViewIcon(_homeView) + "  ▾", "View");
-        b.HorizontalAlignment = HorizontalAlignment.Left;
         b.Click += (_, _) =>
         {
             var cm = new ContextMenu();
-            void Item(string label, Action act) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => act(); cm.Items.Add(mi); }
-            Item("🕘  Letzte Zehn", () => { _homeSource = null; _body.Content = BuildHome(); });
-            cm.Items.Add(new Separator());
-            Item("▦  Kacheln", () => { _homeView = HomeView.Cards; _body.Content = BuildHome(); });
-            Item("≣  Einspaltige Liste (Details)", () => { _homeView = HomeView.DetailList; _body.Content = BuildHome(); });
-            Item("☷  Mehrspaltige Liste", () => { _homeView = HomeView.MultiList; _body.Content = BuildHome(); });
+            void Item(string label, HomeView view) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => { _homeView = view; _body.Content = BuildHome(); }; cm.Items.Add(mi); }
+            Item("▦  Kacheln", HomeView.Cards);
+            Item("≣  Einspaltige Liste (Details)", HomeView.DetailList);
+            Item("☷  Mehrspaltige Liste", HomeView.MultiList);
             cm.Open(b);
         };
         return b;
@@ -313,7 +332,7 @@ public partial class MainWindow : Window
     // The collapsible filter + sort bar: a name filter and four sort buttons.
     StackPanel BuildFilterBar()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 8, 0, 0) };
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var nameBox = new TextBox { PlaceholderText = "Filter by name…", Width = 200, Text = _homeFilter };
         nameBox.TextChanged += (_, _) => { _homeFilter = nameBox.Text ?? ""; RefreshHomeList(); };
         bar.Children.Add(nameBox);
