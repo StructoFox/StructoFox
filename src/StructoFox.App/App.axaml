@@ -6,5 +6,16 @@
 
     <Application.Styles>
         <FluentTheme />
+
+        <!-- Hover/pressed: paint with the theme accent and put the background colour on top as text,
+             so it stays readable on light themes (the accents are chosen to contrast the background). -->
+        <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentBgBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ContentBgBrush}" />
+        </Style>
+        <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentBgBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ContentBgBrush}" />
+        </Style>
     </Application.Styles>
 </Application>
