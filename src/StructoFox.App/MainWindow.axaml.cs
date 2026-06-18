@@ -17,7 +17,7 @@ namespace StructoFox.App;
 public partial class MainWindow : Window
 {
     enum Section { Boards, Classes, Functions, Export }
-    enum HomeView { Cards, Grid, List }
+    enum HomeView { Cards, DetailList, MultiList }
     enum HomeSort { DateDesc, DateAsc, NameAsc, NameDesc }
 
     static readonly FontFamily Mono = new("Consolas, Menlo, Courier New, monospace");
@@ -175,13 +175,11 @@ public partial class MainWindow : Window
         return host;
     }
 
-    // Left column: New/Add-library actions + a sources list (Recent + each library; libraries removable).
+    // Left column: New/Add-library actions + a sources list. No coloured sidebar — buttons sit on the
+    // same surface as everything else.
     Control BuildHomeNav()
     {
-        var panel = new StackPanel { Spacing = 6 };
-        var box = new Border { Width = 220, Padding = new(12) };
-        Ui.Theme(box, Border.BackgroundProperty, "SidebarBgBrush");
-        box.Child = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var panel = new StackPanel { Spacing = 6, Width = 162, Margin = new(16, 16, 8, 16) };
 
         var newBtn = Ui.Btn("➕  New project");
         newBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -195,7 +193,8 @@ public partial class MainWindow : Window
         panel.Children.Add(SectionLabel("Sources"));
         panel.Children.Add(NavEntry("🕘  Recent", null, false));
         foreach (var lib in Libraries.Load()) panel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
-        return box;
+
+        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
     // One sources entry; clicking selects it as the list source. Libraries get a remove (✕) button.
@@ -222,62 +221,94 @@ public partial class MainWindow : Window
         return dock;
     }
 
-    // Right column: hero (most-recent project) over a toolbar, an optional filter bar, and the list.
+    // Right column: top third = the most-recent project (hero); bottom two-thirds = the project list.
     Control BuildHomeMain()
     {
-        _homeList = new ContentControl();   // fresh instance each build (a control has one parent)
         var grid = new Grid { Margin = new(20) };
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));   // hero
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));   // toolbar
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));   // filter bar
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));   // list
-
+        grid.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));  // top 1/3
+        grid.RowDefinitions.Add(new RowDefinition(new GridLength(2, GridUnitType.Star)));  // bottom 2/3
         var hero = BuildHero(); Grid.SetRow(hero, 0); grid.Children.Add(hero);
-        var toolbar = BuildHomeToolbar(); Grid.SetRow(toolbar, 1); grid.Children.Add(toolbar);
-        _homeFilterBar = BuildFilterBar(); _homeFilterBar.IsVisible = _homeFilterOpen; Grid.SetRow(_homeFilterBar, 2); grid.Children.Add(_homeFilterBar);
-        var listScroll = new ScrollViewer { Content = _homeList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new(0, 8, 0, 0) };
-        Grid.SetRow(listScroll, 3); grid.Children.Add(listScroll);
+        var bottom = BuildHomeBottom(); Grid.SetRow(bottom, 1); grid.Children.Add(bottom);
         return grid;
     }
 
-    // The "continue" hero: the most-recently opened project, prominently. Empty if there is none.
+    // Top third: the most-recent project as a centred hero card, or a placeholder tile if there is none.
     Control BuildHero()
     {
         var last = RecentProjects.Load().FirstOrDefault();
-        return last is null ? new Border { Height = 0 } : ProjectCard(last.Path, last.Opened, big: true);
+        Control card = last is null ? PlaceholderCard() : ProjectCard(last.Path, last.Opened, big: true);
+        card.HorizontalAlignment = HorizontalAlignment.Center;
+        card.VerticalAlignment   = VerticalAlignment.Center;
+        card.MaxWidth = 520;
+        return card;
     }
 
-    // Toolbar: the source title, the view switcher (cards / multi-list / list), and a filter toggle.
-    Control BuildHomeToolbar()
+    // A card-styled empty state for the hero slot when no project has been opened yet.
+    Control PlaceholderCard()
     {
-        var dock = new DockPanel { Margin = new(0, 14, 0, 0) };
-        var title = new TextBlock { Text = _homeSource is null ? "Recent" : ShortName(_homeSource), FontSize = 16, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center };
-        Ui.Theme(title, TextBlock.ForegroundProperty, "ContentTextBrush");
+        var card = new Border { Padding = new(20), CornerRadius = new(8), MinWidth = 300, MinHeight = 96 };
+        Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
+        Ui.Theme(card, Border.BorderBrushProperty, "AccentBgBrush");
+        card.BorderThickness = new(1);
 
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
-        right.Children.Add(ViewBtn("▦", HomeView.Cards, "Cards"));
-        right.Children.Add(ViewBtn("☷", HomeView.Grid, "Multi-column list"));
-        right.Children.Add(ViewBtn("≣", HomeView.List, "List with date"));
-        var filter = Ui.Btn("🔎 Filter", "Show filter & sort");
+        var t1 = new TextBlock { Text = "Recent", FontSize = 13, Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Center };
+        Ui.Theme(t1, TextBlock.ForegroundProperty, "ContentTextBrush");
+        var t2 = new TextBlock { Text = "No projects", FontSize = 18, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center };
+        Ui.Theme(t2, TextBlock.ForegroundProperty, "ContentTextBrush");
+        card.Child = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center, Children = { t1, t2 } };
+        return card;
+    }
+
+    // Bottom two-thirds: a slim toolbar (view dropdown left, filter icon right), the list, and a
+    // collapsible filter+sort row along the bottom.
+    Control BuildHomeBottom()
+    {
+        _homeList = new ContentControl();   // fresh instance each build (a control has one parent)
+
+        var grid = new Grid { Margin = new(0, 8, 0, 0) };
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // toolbar
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // list
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // filter row
+
+        var bar = new DockPanel();
+        var filter = Ui.Btn("🔎", "Filter & sort"); filter.Padding = new(10, 4);
         filter.Click += (_, _) => { _homeFilterOpen = !_homeFilterOpen; if (_homeFilterBar is not null) _homeFilterBar.IsVisible = _homeFilterOpen; };
-        right.Children.Add(filter);
-        DockPanel.SetDock(right, Dock.Right);
+        DockPanel.SetDock(filter, Dock.Right);
+        bar.Children.Add(filter);
+        bar.Children.Add(ViewDropdown());   // left
+        Grid.SetRow(bar, 0); grid.Children.Add(bar);
 
-        dock.Children.Add(right);
-        dock.Children.Add(title);
-        return dock;
+        var listScroll = new ScrollViewer { Content = _homeList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new(0, 8, 0, 0) };
+        Grid.SetRow(listScroll, 1); grid.Children.Add(listScroll);
+
+        _homeFilterBar = BuildFilterBar(); _homeFilterBar.IsVisible = _homeFilterOpen;
+        Grid.SetRow(_homeFilterBar, 2); grid.Children.Add(_homeFilterBar);
+
+        RefreshHomeList();
+        return grid;
     }
 
-    // One view-switcher button, accent-highlighted when its view is active.
-    Button ViewBtn(string glyph, HomeView view, string tip)
+    // A single button (button-width) showing the current view; opens a menu of the four view choices.
+    Control ViewDropdown()
     {
-        var b = Ui.Btn(glyph, tip); b.Padding = new(9, 4);
-        var active = _homeView == view;
-        Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
-        Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
-        b.Click += (_, _) => { _homeView = view; _body.Content = BuildHome(); };
+        var b = Ui.Btn(ViewIcon(_homeView) + "  ▾", "View");
+        b.HorizontalAlignment = HorizontalAlignment.Left;
+        b.Click += (_, _) =>
+        {
+            var cm = new ContextMenu();
+            void Item(string label, Action act) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => act(); cm.Items.Add(mi); }
+            Item("🕘  Letzte Zehn", () => { _homeSource = null; _body.Content = BuildHome(); });
+            cm.Items.Add(new Separator());
+            Item("▦  Kacheln", () => { _homeView = HomeView.Cards; _body.Content = BuildHome(); });
+            Item("≣  Einspaltige Liste (Details)", () => { _homeView = HomeView.DetailList; _body.Content = BuildHome(); });
+            Item("☷  Mehrspaltige Liste", () => { _homeView = HomeView.MultiList; _body.Content = BuildHome(); });
+            cm.Open(b);
+        };
         return b;
     }
+
+    // The glyph for a view (shown on the dropdown button).
+    static string ViewIcon(HomeView v) => v switch { HomeView.DetailList => "≣", HomeView.MultiList => "☷", _ => "▦" };
 
     // The collapsible filter + sort bar: a name filter and four sort buttons.
     StackPanel BuildFilterBar()
@@ -337,25 +368,50 @@ public partial class MainWindow : Window
         _homeList.Content = BuildProjectList(items);
     }, "RefreshHomeList");
 
-    // Renders the project list per the active view: cards, multi-column rows, or a dated single list.
+    // Renders the project list per the active view: cards, single-column detail rows, or multi-column rows.
     Control BuildProjectList(List<(string path, DateTime date)> items)
     {
         if (items.Count == 0) return Note("No projects.");
         switch (_homeView)
         {
-            case HomeView.Cards:
-                var cards = new WrapPanel();
-                foreach (var (p, d) in items) cards.Children.Add(ProjectCard(p, d, big: false));
-                return cards;
-            case HomeView.Grid:
+            case HomeView.MultiList:
                 var grid = new WrapPanel();
                 foreach (var (p, d) in items) grid.Children.Add(ListRow(p, d, width: 260));
                 return grid;
-            default:
+            case HomeView.DetailList:
                 var sp = new StackPanel { Spacing = 2 };
-                foreach (var (p, d) in items) sp.Children.Add(ListRow(p, d, width: 0, showDate: true));
+                foreach (var (p, d) in items) sp.Children.Add(DetailRow(p, d));
                 return sp;
+            default:
+                var cards = new WrapPanel();
+                foreach (var (p, d) in items) cards.Children.Add(ProjectCard(p, d, big: false));
+                return cards;
         }
+    }
+
+    // A single-column detail row: name, path (muted, mono), and the date right-aligned.
+    Control DetailRow(string path, DateTime date)
+    {
+        var row = new Border { Padding = new(10, 7), CornerRadius = new(6), Cursor = new Cursor(StandardCursorType.Hand) };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+
+        var name = new TextBlock { Text = ProjectName(path), FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
+        Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
+        var loc = new TextBlock { Text = path, FontSize = 10, FontFamily = Mono, Opacity = 0.5, VerticalAlignment = VerticalAlignment.Center, Margin = new(10, 0, 10, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+        Ui.Theme(loc, TextBlock.ForegroundProperty, "ContentTextBrush");
+        var when = Dim(Friendly(date), 11); when.VerticalAlignment = VerticalAlignment.Center;
+
+        Grid.SetColumn(name, 0); Grid.SetColumn(loc, 1); Grid.SetColumn(when, 2);
+        grid.Children.Add(name); grid.Children.Add(loc); grid.Children.Add(when);
+
+        row.Child = grid;
+        ToolTip.SetTip(row, StatsTip(path));
+        row.PointerPressed += (_, _) => OpenProject(path);
+        return row;
     }
 
     // Prompts for a name + a parent folder, creates the project there, and opens it.
