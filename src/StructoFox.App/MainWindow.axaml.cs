@@ -595,19 +595,53 @@ public partial class MainWindow : Window
         return grid;
     }
 
-    // The left icon rail: one button per section, the active one accent-highlighted.
+    // The left icon rail: section buttons at the top, an "exit to projects" door pinned at the bottom.
     Control BuildRail()
     {
         var rail = new Border { Width = 84, Padding = new(6, 10) };
         Ui.Theme(rail, Border.BackgroundProperty, "SidebarBgBrush");
 
-        var stack = new StackPanel { Spacing = 4 };
+        var grid = new Grid();
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // sections
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // exit door
+
+        var stack = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Top };
         stack.Children.Add(RailButton(Section.Boards,    "🗂", "Boards"));
         stack.Children.Add(RailButton(Section.Classes,   "🧩", "Classes"));
         stack.Children.Add(RailButton(Section.Functions, "ƒ",  "Functions"));
         stack.Children.Add(RailButton(Section.Export,    "⇩",  "Export"));
-        rail.Child = stack;
+        Grid.SetRow(stack, 0); grid.Children.Add(stack);
+
+        var exit = ExitButton();
+        Grid.SetRow(exit, 1); grid.Children.Add(exit);
+
+        rail.Child = grid;
         return rail;
+    }
+
+    // The door at the bottom of the rail — leaves the project and returns to the project browser.
+    Button ExitButton()
+    {
+        var b = new Button
+        {
+            Padding = new(0, 8), CornerRadius = new(6),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Content = new StackPanel
+            {
+                Spacing = 2,
+                Children =
+                {
+                    new TextBlock { Text = "🚪", FontSize = 20, HorizontalAlignment = HorizontalAlignment.Center },
+                    new TextBlock { Text = Loc.S("Cockpit_Exit"), FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center },
+                },
+            },
+        };
+        ToolTip.SetTip(b, Loc.S("Cockpit_ExitTip"));
+        Ui.Theme(b, TemplatedControl.BackgroundProperty, "ControlBgBrush");
+        Ui.Theme(b, TemplatedControl.ForegroundProperty, "SidebarTextBrush");
+        b.Click += (_, _) => ShowHome();
+        return b;
     }
 
     // Builds one rail button (icon over label) wired to switch sections.

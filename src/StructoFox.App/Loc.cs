@@ -65,6 +65,10 @@ public static class Loc
         ["Home_NoProjects"]    = "No projects",
         ["Home_NoProjectsHint"] = "No projects here yet — create one with ➕",
 
+        // Cockpit
+        ["Cockpit_Exit"]    = "Exit",
+        ["Cockpit_ExitTip"] = "Back to projects",
+
         // New-project dialog
         ["NewProj_Title"]     = "New project",
         ["NewProj_Name"]      = "Project name:",
