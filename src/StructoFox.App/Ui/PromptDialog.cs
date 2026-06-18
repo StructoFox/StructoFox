@@ -24,6 +24,7 @@ public static class PromptDialog
             CanResize             = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
+        Ui.ThemeWindow(dlg);
 
         var ok     = Ui.Btn("OK");
         var cancel = Ui.Btn("Cancel");

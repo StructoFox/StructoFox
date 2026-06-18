@@ -23,6 +23,9 @@ public partial class MainWindow : Window
 
     static readonly FontFamily Mono = new("Consolas, Menlo, Courier New, monospace");
 
+    /// <summary>Display version of the app, shown in the About box.</summary>
+    public const string Version = "0.5 ALPHA";
+
     string? _project;
     Section _section = Section.Class;
     readonly ContentControl _body = new();       // home browser  OR  project cockpit (added once)
@@ -132,8 +135,53 @@ public partial class MainWindow : Window
         pal.Click += (_, _) => new PaletteEditorWindow().Show();
         cm.Items.Add(pal);
 
+        cm.Items.Add(new Separator());
+
+        var about = new MenuItem { Header = string.Format(Loc.S("Menu_About"), Version) };
+        about.Click += (_, _) => ShowAbout();
+        cm.Items.Add(about);
+
         cm.Open(anchor);
     }
+
+    // A small themed About box: fox, name, version and tagline (à la Theminator / ClaudetRelay).
+    void ShowAbout() => CrashHandler.Safe(() =>
+    {
+        var dlg = new Window
+        {
+            Title = Loc.S("Menu_AboutTitle"),
+            SizeToContent = SizeToContent.WidthAndHeight,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        Ui.ThemeWindow(dlg);
+
+        TextBlock Line(string text, double size, FontWeight weight, double opacity = 1)
+        {
+            var t = new TextBlock { Text = text, FontSize = size, FontWeight = weight, Opacity = opacity, HorizontalAlignment = HorizontalAlignment.Center };
+            Ui.Theme(t, TextBlock.ForegroundProperty, "ContentTextBrush");
+            return t;
+        }
+
+        var ok = Ui.Btn(Loc.S("Common_OK")); ok.IsDefault = true; ok.IsCancel = true;
+        ok.HorizontalAlignment = HorizontalAlignment.Center;
+        ok.Click += (_, _) => dlg.Close();
+
+        dlg.Content = new StackPanel
+        {
+            Margin = new(28, 24), Spacing = 6, MinWidth = 280,
+            Children =
+            {
+                new TextBlock { Text = "🦊", FontSize = 52, HorizontalAlignment = HorizontalAlignment.Center },
+                Line("StructoFox", 22, FontWeight.Bold),
+                Line(Loc.S("App_Tagline"), 12, FontWeight.Normal, 0.7),
+                Line("Version " + Version, 13, FontWeight.SemiBold),
+                new Border { Height = 10 },
+                ok,
+            },
+        };
+        dlg.ShowDialog(this);
+    }, "ShowAbout");
 
     // A small themed window-control button (minimise / maximise / close).
     Button WinButton(string glyph, string tip, Action action)

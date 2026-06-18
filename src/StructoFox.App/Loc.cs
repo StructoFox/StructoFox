@@ -289,6 +289,10 @@ public static class Loc
         ["Export_Open"]     = "⇩ Open exporter",
         ["Export_Empty"]    = "No entities to export yet — add some in the structure sections first.",
         ["Export_Intro"]    = "Generate source skeletons from your structures in 10 languages. Function/method bodies come from their structograms where you've drawn them.",
+
+        // App menu
+        ["Menu_About"]      = "ℹ Info  (v{0})",
+        ["Menu_AboutTitle"] = "About StructoFox",
     };
 
     // German overlay; any key not listed here quietly falls through to the English baseline.
@@ -497,6 +501,10 @@ public static class Loc
         ["Export_Open"]     = "⇩ Exporter öffnen",
         ["Export_Empty"]    = "Noch nichts zu exportieren — lege zuerst in den Struktur-Sektionen etwas an.",
         ["Export_Intro"]    = "Erzeuge Quellcode-Gerüste aus deinen Strukturen in 10 Sprachen. Funktions-/Methodenrümpfe stammen aus den jeweiligen Struktogrammen, wo du sie gezeichnet hast.",
+
+        // App-Menü
+        ["Menu_About"]      = "ℹ Info  (v{0})",
+        ["Menu_AboutTitle"] = "Über StructoFox",
     };
 
     // Language code -> its string table. Lookups consult the active table, then English.
