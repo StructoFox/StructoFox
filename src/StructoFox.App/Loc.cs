@@ -278,6 +278,17 @@ public static class Loc
         ["Code_AllOnBoard"]       = "Every entity is already on this board.",
         ["Code_AddEntityTitle"]   = "Add entity",
         ["Code_NewTypeTitle"]     = "New {0}",
+
+        // Code exporter
+        ["Export_Title"]    = "Export — {0}",
+        ["Export_Language"] = "Language:",
+        ["Export_Count"]    = "{0} entities",
+        ["Export_Copy"]     = "📋 Copy",
+        ["Export_Save"]     = "💾 Save…",
+        ["Export_Close"]    = "Close",
+        ["Export_Open"]     = "⇩ Open exporter",
+        ["Export_Empty"]    = "No entities to export yet — add some in the structure sections first.",
+        ["Export_Intro"]    = "Generate source skeletons from your structures in 10 languages. Function/method bodies come from their structograms where you've drawn them.",
     };
 
     // German overlay; any key not listed here quietly falls through to the English baseline.
@@ -475,6 +486,17 @@ public static class Loc
         ["Code_AllOnBoard"]       = "Alle Entities sind bereits auf diesem Board.",
         ["Code_AddEntityTitle"]   = "Entity hinzufügen",
         ["Code_NewTypeTitle"]     = "Neue(s) {0}",
+
+        // Code-Export
+        ["Export_Title"]    = "Export — {0}",
+        ["Export_Language"] = "Sprache:",
+        ["Export_Count"]    = "{0} Entities",
+        ["Export_Copy"]     = "📋 Kopieren",
+        ["Export_Save"]     = "💾 Speichern…",
+        ["Export_Close"]    = "Schließen",
+        ["Export_Open"]     = "⇩ Exporter öffnen",
+        ["Export_Empty"]    = "Noch nichts zu exportieren — lege zuerst in den Struktur-Sektionen etwas an.",
+        ["Export_Intro"]    = "Erzeuge Quellcode-Gerüste aus deinen Strukturen in 10 Sprachen. Funktions-/Methodenrümpfe stammen aus den jeweiligen Struktogrammen, wo du sie gezeichnet hast.",
     };
 
     // Language code -> its string table. Lookups consult the active table, then English.

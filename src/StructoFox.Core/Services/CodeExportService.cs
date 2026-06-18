@@ -38,7 +38,7 @@ public static class CodeExportService
         string Name(string id) => byId.TryGetValue(id, out var e) ? e.Name : "";
 
         var sb = new StringBuilder();
-        sb.AppendLine("// Auto-generated skeleton from ClaudetRelay code boards. Fill in the logic.");
+        sb.AppendLine("// Auto-generated skeleton from StructoFox. Fill in the logic.");
         if (lang == ExportLanguage.Php) sb.AppendLine("<?php");
         if (lang == ExportLanguage.Python) sb.AppendLine(PythonImports(all));
         sb.AppendLine();

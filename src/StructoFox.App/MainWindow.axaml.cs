@@ -715,7 +715,7 @@ public partial class MainWindow : Window
         root.Children.Add(new TextBlock { Text = ProjectName(_project ?? ""), FontFamily = Mono, FontSize = 11, Opacity = 0.6 });
 
         if (section == Section.Boards) { BuildBoardsView(root); return root; }
-        if (section == Section.Export) { root.Children.Add(Heading("Export")); root.Children.Add(Note(Loc.S("Sec_ExportBlurb"))); return root; }
+        if (section == Section.Export) { BuildExportView(root); return root; }
 
         // Entity section: heading, a "New …" action, then the list of entities of this type.
         root.Children.Add(Heading(PluralLabel(section)));
@@ -843,12 +843,34 @@ public partial class MainWindow : Window
         return tile;
     }
 
-    // Opens a board on its own canvas window (export wiring comes later → null callback for now).
+    // Opens a board on its own canvas window; its export buttons open the exporter on the chosen entities.
     void OpenBoard(CodeBoard board) => CrashHandler.Safe(() =>
     {
         if (_project is null) return;
-        new CodeBoardWindow(_project, board, null).Show();
+        new CodeBoardWindow(_project, board, null,
+            ents => new ExportWindow(_project, ents, board.Name).Show()).Show();
     }, "OpenBoard");
+
+    // ── Export section ─────────────────────────────────────────────────────
+
+    // Intro + an "Open exporter" action that exports every entity in the project.
+    void BuildExportView(StackPanel root)
+    {
+        root.Children.Add(Heading("Export"));
+        root.Children.Add(Note(Loc.S("Export_Intro")));
+
+        var entities = _project is null ? new() : LoadAllEntities(_project).Values.ToList();
+        if (entities.Count == 0) { root.Children.Add(Note(Loc.S("Export_Empty"))); return; }
+
+        var open = Ui.Btn(Loc.S("Export_Open"));
+        open.HorizontalAlignment = HorizontalAlignment.Left;
+        open.Click += (_, _) => CrashHandler.Safe(() =>
+        {
+            if (_project is null) return;
+            new ExportWindow(_project, entities, ProjectName(_project)).Show();
+        }, "OpenExporter");
+        root.Children.Add(open);
+    }
 
     Task NewBoard() => CrashHandler.SafeAsync(async () =>
     {
