@@ -13,6 +13,9 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        // Load translations (and export the English/German starter files) before any UI is built.
+        Loc.Init();
+
         // Dress the app in a default OXSUIT theme before any window appears, so every
         // DynamicResource brush resolves and windows render with real colours.
         ThemeManager.ApplyDefault(this);

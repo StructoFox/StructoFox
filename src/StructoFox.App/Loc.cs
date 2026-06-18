@@ -1,13 +1,51 @@
+using System.Text.Json;
+
 namespace StructoFox.App;
 
 /// <summary>
-/// Tiny localization facade. Mirrors ClaudetRelay's <c>Properties.Loc.S(key)</c> signature
-/// so window code ported from the old app can keep calling <c>Loc.S("Key")</c> untouched.
+/// Tiny localization facade. <c>Loc.S(key)</c> resolves a string: a JSON overlay (Languages/&lt;lang&gt;.json)
+/// first, then the built-in table, then English, then the raw key. On startup it exports the built-in
+/// English (and German) tables to Languages/*.json so translators have a ready file to edit.
 /// </summary>
 public static class Loc
 {
     // Active UI language code ("en", "de", ...). The fox is bilingual for now; more tongues later.
     public static string Lang { get; set; } = "en";
+
+    // User-editable translations, loaded from Languages/<lang>.json — take priority over the built-ins.
+    static Dictionary<string, string> _overlay = new();
+
+    /// <summary>Where the externalised translation files live (next to the app).</summary>
+    public static string LangDir => Path.Combine(AppContext.BaseDirectory, "Languages");
+
+    /// <summary>Exports the built-in tables as starter JSON (if missing) and loads the active overlay.
+    /// Call once at startup.</summary>
+    public static void Init()
+    {
+        try
+        {
+            Directory.CreateDirectory(LangDir);
+            ExportIfMissing("en", En);
+            ExportIfMissing("de", De);
+            _overlay = LoadOverlay(Lang);
+        }
+        catch { /* localization is best-effort; built-ins remain the fallback */ }
+    }
+
+    // Writes a language table to Languages/<lang>.json the first time, as a base for translators.
+    static void ExportIfMissing(string lang, Dictionary<string, string> dict)
+    {
+        var path = Path.Combine(LangDir, lang + ".json");
+        if (!File.Exists(path)) File.WriteAllText(path, JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    // Reads a Languages/<lang>.json overlay, or an empty map if absent/unreadable.
+    static Dictionary<string, string> LoadOverlay(string lang)
+    {
+        var path = Path.Combine(LangDir, lang + ".json");
+        try { return File.Exists(path) ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path)) ?? new() : new(); }
+        catch { return new(); }
+    }
 
     // English baseline — the safety net every key falls back to if a translation is missing.
     static readonly Dictionary<string, string> En = new()
@@ -15,6 +53,27 @@ public static class Loc
         ["App_Title"]    = "StructoFox",
         ["App_Tagline"]  = "Flow · Struct · Code",
         ["Smoke_Header"] = "Core smoke test — C# generated from a sample class:",
+
+        // Home / project browser
+        ["Home_NewProject"]    = "➕  New project",
+        ["Home_AddLibrary"]    = "📁  Add library",
+        ["Home_NewProjectTip"] = "Create a new project — a folder holding its classes, functions, diagrams and boards",
+        ["Home_AddLibraryTip"] = "Register a folder that contains several projects — a shelf StructoFox scans",
+        ["Home_Recent"]        = "🕘  Recent",
+        ["Home_Libraries"]     = "Libraries",
+        ["Home_RemoveLibrary"] = "✕  Remove library",
+        ["Home_NoProjects"]    = "No projects",
+        ["Home_NoProjectsHint"] = "No projects here yet — create one with ➕",
+
+        // New-project dialog
+        ["NewProj_Title"]     = "New project",
+        ["NewProj_Name"]      = "Project name:",
+        ["NewProj_NoLib"]     = "No project library yet. Choose a folder where your projects will live:",
+        ["NewProj_ChooseLib"] = "Create the project in:",
+        ["NewProj_Browse"]    = "Browse…",
+        ["NewProj_FreeFmt"]   = "{0} MB free on {1}",
+        ["Common_OK"]         = "OK",
+        ["Common_Cancel"]     = "Cancel",
 
         // Diagram chooser (DiagramLauncher)
         ["Diag_Title"]     = "Diagram",
@@ -269,6 +328,7 @@ public static class Loc
     /// </summary>
     public static string S(string key)
     {
+        if (_overlay.TryGetValue(key, out var ov)) return ov;
         if (Tables.TryGetValue(Lang, out var t) && t.TryGetValue(key, out var v)) return v;
         if (En.TryGetValue(key, out var en)) return en;
         return key;

@@ -184,38 +184,36 @@ public partial class MainWindow : Window
     // No coloured sidebar — buttons sit on the same surface as everything else.
     Control BuildHomeNav()
     {
-        var dock = new DockPanel { LastChildFill = false, Width = 162, Margin = new(16, 16, 8, 20) };
+        var grid = new Grid { Width = 162, Margin = new(16, 16, 8, 20) };
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // actions (top)
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // libraries (middle)
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // Recent (bottom)
 
         var top = new StackPanel { Spacing = 6 };
-        var newBtn = Ui.Btn("➕  New project");
+        var newBtn = Ui.Btn(Loc.S("Home_NewProject"), Loc.S("Home_NewProjectTip"));
         newBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
         newBtn.Click += async (_, _) => await NewProject();
-        var libBtn = Ui.Btn("📁  Add library");
+        var libBtn = Ui.Btn(Loc.S("Home_AddLibrary"), Loc.S("Home_AddLibraryTip"));
         libBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
         libBtn.Click += async (_, _) => await AddLibrary();
         top.Children.Add(newBtn);
         top.Children.Add(libBtn);
-        DockPanel.SetDock(top, Dock.Top);
-        dock.Children.Add(top);
+        Grid.SetRow(top, 0); grid.Children.Add(top);
 
-        // Recent is pinned at the very bottom (added first → bottom-most in a DockPanel).
-        var recent = NavEntry("🕘  Recent", null, false);
-        DockPanel.SetDock(recent, Dock.Bottom);
-        dock.Children.Add(recent);
-
-        // Libraries sit just above Recent, scrolling if there are many.
+        // Libraries float in the middle, centred, scrolling if many — a button-height gap above & below.
         var libs = Libraries.Load();
         if (libs.Count > 0)
         {
-            var libPanel = new StackPanel { Spacing = 6 };
-            libPanel.Children.Add(SectionLabel("Libraries"));
+            var libPanel = new StackPanel { Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
             foreach (var lib in libs) libPanel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
-            var libScroll = new ScrollViewer { Content = libPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320, Margin = new(0, 0, 0, 6) };
-            DockPanel.SetDock(libScroll, Dock.Bottom);
-            dock.Children.Add(libScroll);
+            var libScroll = new ScrollViewer { Content = libPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new(0, 36, 0, 36) };
+            Grid.SetRow(libScroll, 1); grid.Children.Add(libScroll);
         }
 
-        return dock;
+        var recent = NavEntry(Loc.S("Home_Recent"), null, false);
+        Grid.SetRow(recent, 2); grid.Children.Add(recent);
+
+        return grid;
     }
 
     // One sources entry; left-click selects it as the list source. Libraries are removed via a
@@ -234,7 +232,8 @@ public partial class MainWindow : Window
 
         if (removable && source is not null)
         {
-            var remove = new MenuItem { Header = "✕  Remove library" };
+            ToolTip.SetTip(b, source);   // full library path on hover
+            var remove = new MenuItem { Header = Loc.S("Home_RemoveLibrary") };
             remove.Click += (_, _) => { Libraries.Remove(source); if (_homeSource == source) _homeSource = null; _body.Content = BuildHome(); };
             var cm = new ContextMenu();
             cm.Items.Add(remove);
@@ -439,18 +438,15 @@ public partial class MainWindow : Window
         return row;
     }
 
-    // Prompts for a name + a parent folder, creates the project there, and opens it.
+    // Asks (via NewProjectDialog) where + what to name the project, registers the library, creates & opens it.
     Task NewProject() => CrashHandler.SafeAsync(async () =>
     {
-        var name = await PromptDialog.Show(this, "Project name:", "My Project", "New project");
-        if (string.IsNullOrWhiteSpace(name)) return;
+        var res = await NewProjectDialog.Show(this, Libraries.Load());
+        if (res is not { } r) return;
+        var (parent, name) = r;
+        if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(name)) return;
 
-        var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Choose where to create the project", AllowMultiple = false,
-        });
-        if (picked.Count == 0 || picked[0].TryGetLocalPath() is not { } parent) return;
-
+        Libraries.Add(parent);   // register the chosen folder as a library (no-op if already one)
         var folder = Path.Combine(parent, SafeFolder(name));
         ProjectService.Create(folder, name);
         OpenProject(folder);
