@@ -65,6 +65,28 @@ public static class ProjectService
         return (Count("Class", "*.json"), Count("Function", "*.json"), boards);
     }
 
+    /// <summary>Fuller tally for the big-tile view: every non-function entity type counted as
+    /// "structures", standalone functions, and boards. Covers structs/interfaces/enums/objects/
+    /// namespaces too, which <see cref="QuickStats"/> leaves out.</summary>
+    public static (int structures, int functions, int boards) StructureStats(string folder)
+    {
+        var code = Path.Combine(folder, "PROJECTPLAN", "code");
+        int Count(string sub)
+        {
+            var d = Path.Combine(code, sub);
+            try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, "*.json").Count() : 0; }
+            catch { return 0; }
+        }
+        int structures = 0;
+        foreach (var t in CodeEntityService.EntityTypes)
+            if (t != "Function") structures += Count(t);
+
+        int boards = 0;
+        try { if (Directory.Exists(code)) boards = Directory.EnumerateFiles(code, "_board_*.json").Count(); }
+        catch { /* ignore */ }
+        return (structures, Count("Function"), boards);
+    }
+
     /// <summary>Finds projects in a library root: the root itself if it's a project, plus its
     /// immediate sub-folders that are projects. Empty if the root is gone.</summary>
     public static List<string> Scan(string libraryRoot)

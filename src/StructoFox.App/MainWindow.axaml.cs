@@ -551,7 +551,7 @@ public partial class MainWindow : Window
     // A large, detail-rich tile: theme swatch + name, description, content counts, opened date and path.
     Control BigCard(string path, DateTime date)
     {
-        var card = new Border { Width = 320, Padding = new(16), Margin = new(5), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
+        var card = new Border { Width = 250, Padding = new(16), Margin = new(5), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
         Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
 
         var info = ProjectService.Load(path);
@@ -564,8 +564,8 @@ public partial class MainWindow : Window
         var stack = new StackPanel { Spacing = 4, Children = { nameRow } };
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, 12));
 
-        var (c, f, b) = ProjectService.QuickStats(path);
-        stack.Children.Add(Dim($"📦 {c} classes · ⚡ {f} functions · 🗂 {b} boards", 12));
+        var (s, f, b) = ProjectService.StructureStats(path);
+        stack.Children.Add(Dim($"📦 {s} structures · ⚡ {f} functions · 🗂 {b} boards", 12));
         stack.Children.Add(Dim("opened " + Friendly(date), 11));
         stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.5, TextWrapping = TextWrapping.Wrap });
 
