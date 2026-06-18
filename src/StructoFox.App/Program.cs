@@ -1,4 +1,6 @@
 ﻿using Avalonia;
+using Avalonia.Media;
+using Avalonia.Media.Fonts;
 using System;
 
 namespace StructoFox.App;
@@ -24,5 +26,17 @@ class Program
             .WithDeveloperTools()
 #endif
             .WithInterFont()
+            // Pin a deterministic colour-emoji fallback chain so icon glyphs render the same way on
+            // every layout pass — otherwise Avalonia's fallback resolution can flip emoji between the
+            // colour glyph and a monochrome one (inheriting the themed text colour) after a re-render.
+            .With(new FontManagerOptions
+            {
+                FontFallbacks = new[]
+                {
+                    new FontFallback { FontFamily = new FontFamily("Segoe UI Emoji") },
+                    new FontFallback { FontFamily = new FontFamily("Apple Color Emoji") },
+                    new FontFallback { FontFamily = new FontFamily("Noto Color Emoji") },
+                },
+            })
             .LogToTrace();
 }
