@@ -48,6 +48,23 @@ public static class ProjectService
     public static string DisplayName(string folder) =>
         Load(folder)?.Name ?? Path.GetFileName(folder.TrimEnd('/', '\\'));
 
+    /// <summary>Cheap content counts for a project — classes, functions and boards — by counting files.
+    /// Used for the at-a-glance hover stats on the home screen.</summary>
+    public static (int classes, int functions, int boards) QuickStats(string folder)
+    {
+        var code = Path.Combine(folder, "PROJECTPLAN", "code");
+        int Count(string sub, string pattern)
+        {
+            var d = Path.Combine(code, sub);
+            try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, pattern).Count() : 0; }
+            catch { return 0; }
+        }
+        int boards = 0;
+        try { if (Directory.Exists(code)) boards = Directory.EnumerateFiles(code, "_board_*.json").Count(); }
+        catch { /* ignore */ }
+        return (Count("Class", "*.json"), Count("Function", "*.json"), boards);
+    }
+
     /// <summary>Finds projects in a library root: the root itself if it's a project, plus its
     /// immediate sub-folders that are projects. Empty if the root is gone.</summary>
     public static List<string> Scan(string libraryRoot)
