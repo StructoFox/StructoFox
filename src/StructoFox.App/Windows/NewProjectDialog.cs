@@ -39,7 +39,10 @@ public class NewProjectDialog : Window
         {
             col.Children.Add(WrapText(Loc.S("NewProj_ChooseLib")));
             _folder.Text = libraries[0];
-            foreach (var lib in libraries) col.Children.Add(LibraryChoice(lib));
+            var libPanel = new StackPanel { Spacing = 6 };
+            foreach (var lib in libraries) libPanel.Children.Add(LibraryChoice(lib));
+            // Cap the list: beyond ~4 libraries it scrolls instead of growing the (non-resizable) window.
+            col.Children.Add(new ScrollViewer { Content = libPanel, MaxHeight = 248, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         }
 
         var browse = Ui.Btn(Loc.S("NewProj_Browse"));
