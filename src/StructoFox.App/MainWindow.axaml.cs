@@ -146,11 +146,11 @@ public partial class MainWindow : Window
     // ── Home: project browser ──────────────────────────────────────────────
 
     // Shows the project browser (no project open).
-    void ShowHome()
+    void ShowHome() => CrashHandler.Safe(() =>
     {
         _project = null;
         _body.Content = BuildHome();
-    }
+    }, "ShowHome");
 
     // The landing surface: a two-column hub — sources nav on the left, hero + project list on the right.
     Control BuildHome()
@@ -322,7 +322,7 @@ public partial class MainWindow : Window
     }
 
     // Recomputes the project list from the current source + filter + sort, refreshing it in place.
-    void RefreshHomeList()
+    void RefreshHomeList() => CrashHandler.Safe(() =>
     {
         var items = HomeItems();
         if (!string.IsNullOrWhiteSpace(_homeFilter))
@@ -335,7 +335,7 @@ public partial class MainWindow : Window
             _                 => items.OrderByDescending(it => it.date).ToList(),
         };
         _homeList.Content = BuildProjectList(items);
-    }
+    }, "RefreshHomeList");
 
     // Renders the project list per the active view: cards, multi-column rows, or a dated single list.
     Control BuildProjectList(List<(string path, DateTime date)> items)
@@ -359,7 +359,7 @@ public partial class MainWindow : Window
     }
 
     // Prompts for a name + a parent folder, creates the project there, and opens it.
-    async Task NewProject()
+    Task NewProject() => CrashHandler.SafeAsync(async () =>
     {
         var name = await PromptDialog.Show(this, "Project name:", "My Project", "New project");
         if (string.IsNullOrWhiteSpace(name)) return;
@@ -373,17 +373,17 @@ public partial class MainWindow : Window
         var folder = Path.Combine(parent, SafeFolder(name));
         ProjectService.Create(folder, name);
         OpenProject(folder);
-    }
+    }, "NewProject");
 
     // Registers a folder as a library to scan for projects.
-    async Task AddLibrary()
+    Task AddLibrary() => CrashHandler.SafeAsync(async () =>
     {
         var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = "Choose a library folder to scan for projects", AllowMultiple = false,
         });
         if (picked.Count > 0 && picked[0].TryGetLocalPath() is { } local) { Libraries.Add(local); ShowHome(); }
-    }
+    }, "AddLibrary");
 
     // Strips characters that can't appear in a folder name.
     static string SafeFolder(string name)
@@ -488,7 +488,7 @@ public partial class MainWindow : Window
     // ── Project cockpit ─────────────────────────────────────────────────────
 
     // Opens a project: ensure it has a marker, apply its saved preferences, record it, show the cockpit.
-    void OpenProject(string path)
+    void OpenProject(string path) => CrashHandler.Safe(() =>
     {
         var info = ProjectService.Load(path) ?? ProjectService.Create(path, "");
         _project = path;
@@ -505,7 +505,7 @@ public partial class MainWindow : Window
         _railButtons.Clear();
         _body.Content = BuildCockpit();
         ShowSection(_section);
-    }
+    }, "OpenProject");
 
     // The cockpit: a left icon rail beside the themed, honeycombed content area.
     Control BuildCockpit()
@@ -573,7 +573,7 @@ public partial class MainWindow : Window
     }
 
     // Switches the active section: restyle the rail and rebuild the content view.
-    void ShowSection(Section section)
+    void ShowSection(Section section) => CrashHandler.Safe(() =>
     {
         _section = section;
         foreach (var (s, b) in _railButtons)
@@ -583,7 +583,7 @@ public partial class MainWindow : Window
             Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
         }
         _content.Content = BuildSectionView(section);
-    }
+    }, "ShowSection");
 
     // Builds the view for a section — a heading + (for now) a hint or the working demo actions.
     Control BuildSectionView(Section section)
