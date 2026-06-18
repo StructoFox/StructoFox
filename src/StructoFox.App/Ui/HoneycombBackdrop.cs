@@ -12,9 +12,9 @@ namespace StructoFox.App;
 public class HoneycombBackdrop : Control
 {
     const double R = 10;          // hexagon radius (centre → vertex) — small cells
-    const byte LineAlpha = 7;     // accent line transparency (regardless of source brush)
-    const byte ShadowAlpha = 10;  // dark line, offset down-right — reads on light themes
-    const byte HighlightAlpha = 12; // light line, offset up-left — reads on dark themes
+    const byte LineAlpha = 4;     // accent line transparency (regardless of source brush)
+    const byte ShadowAlpha = 5;   // dark line, offset down-right — reads on light themes
+    const byte HighlightAlpha = 6; // light line, offset up-left — reads on dark themes
 
     /// <summary>The (opaque) source colour for the comb lines — bind to a theme accent brush.</summary>
     public static readonly StyledProperty<IBrush?> LineBrushProperty =
