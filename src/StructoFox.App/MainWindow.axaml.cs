@@ -23,6 +23,10 @@ public partial class MainWindow : Window
 
     static readonly FontFamily Mono = new("Consolas, Menlo, Courier New, monospace");
 
+    /// <summary>A colour-emoji font so the fox keeps its colours even after a re-layout (otherwise
+    /// Avalonia can fall back to a monochrome glyph that inherits the themed text colour).</summary>
+    static readonly FontFamily Emoji = new("Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji");
+
     /// <summary>Display version of the app, shown in the About box.</summary>
     public const string Version = "0.5 ALPHA";
 
@@ -74,7 +78,7 @@ public partial class MainWindow : Window
         Ui.Theme(bar, Border.BackgroundProperty, "SidebarBgBrush");
 
         var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        brand.Children.Add(new TextBlock { Text = "🦊", FontSize = 22, VerticalAlignment = VerticalAlignment.Center });
+        brand.Children.Add(new TextBlock { Text = "🦊", FontFamily = Emoji, FontSize = 22, VerticalAlignment = VerticalAlignment.Center });
         var title = new TextBlock { Text = "StructoFox", FontSize = 17, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center };
         Ui.Theme(title, TextBlock.ForegroundProperty, "SidebarTextBrush");
         var tag = new TextBlock { Text = "Flow · Struct · Code", FontSize = 11, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Bottom, Margin = new(2, 0, 0, 2) };
@@ -172,7 +176,7 @@ public partial class MainWindow : Window
             Margin = new(28, 24), Spacing = 6, MinWidth = 280,
             Children =
             {
-                new TextBlock { Text = "🦊", FontSize = 52, HorizontalAlignment = HorizontalAlignment.Center },
+                new TextBlock { Text = "🦊", FontFamily = Emoji, FontSize = 52, HorizontalAlignment = HorizontalAlignment.Center },
                 Line("StructoFox", 22, FontWeight.Bold),
                 Line(Loc.S("App_Tagline"), 12, FontWeight.Normal, 0.7),
                 Line("Version " + Version, 13, FontWeight.SemiBold),
