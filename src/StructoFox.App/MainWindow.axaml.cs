@@ -617,7 +617,7 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, 12));
 
         var (s, f, b) = ProjectService.StructureStats(path);
-        stack.Children.Add(Dim($"📦 {s} structures · ⚡ {f} functions · 🗺 {b} boards", 12));
+        stack.Children.Add(Dim($"📦 {s} structures · ⚡ {f} functions · 🖼 {b} boards", 12));
         stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.5, TextWrapping = TextWrapping.Wrap });
 
         card.Child = stack;
@@ -740,7 +740,7 @@ public partial class MainWindow : Window
         var stack = new StackPanel { Spacing = 4 };
         (Section sec, string icon, string label)[] items =
         {
-            (Section.Boards,    "🗺", "Boards"),
+            (Section.Boards,    "🖼", "Boards"),
             (Section.Namespace, "Ⓝ", "Namespaces"),
             (Section.Class,     "Ⓒ", "Classes"),
             (Section.Struct,    "Ⓢ", "Structs"),
