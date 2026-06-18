@@ -24,8 +24,8 @@ public partial class MainWindow : Window
 
     string? _project;
     Section _section = Section.Functions;
-    readonly ContentControl _body    = new();   // home browser  OR  project cockpit
-    readonly ContentControl _content = new();   // the active section inside the cockpit
+    readonly ContentControl _body = new();       // home browser  OR  project cockpit (added once)
+    ContentControl _content = new();             // active cockpit section (re-created per cockpit build)
     readonly Dictionary<Section, Button> _railButtons = new();
 
     // Home browser state.
@@ -34,7 +34,7 @@ public partial class MainWindow : Window
     HomeSort _homeSort   = HomeSort.DateDesc;
     string   _homeFilter = "";
     bool     _homeFilterOpen;
-    readonly ContentControl _homeList = new();   // the project-list region (refreshed in place)
+    ContentControl _homeList = new();            // project-list region (re-created per home build)
     StackPanel? _homeFilterBar;
 
     // Builds the shell window and shows the project browser.
@@ -225,6 +225,7 @@ public partial class MainWindow : Window
     // Right column: hero (most-recent project) over a toolbar, an optional filter bar, and the list.
     Control BuildHomeMain()
     {
+        _homeList = new ContentControl();   // fresh instance each build (a control has one parent)
         var grid = new Grid { Margin = new(20) };
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));   // hero
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));   // toolbar
@@ -558,6 +559,7 @@ public partial class MainWindow : Window
     // The content area: a faint themed honeycomb backdrop with the scrollable section view on top.
     Control BuildContentHost()
     {
+        _content = new ContentControl();   // fresh instance each build (a control has one parent)
         var host = new Border();
         Ui.Theme(host, Border.BackgroundProperty, "ContentBgBrush");
 
