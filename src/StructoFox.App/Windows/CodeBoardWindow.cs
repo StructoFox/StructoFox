@@ -1,0 +1,1092 @@
+using Avalonia;
+using Avalonia.Collections;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Shapes;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Reactive;
+using Avalonia.Threading;
+using OXSUIT.Loaders.Avalonia;
+using StructoFox.Core;
+using StructoFox.Core.Models;
+
+namespace StructoFox.App;
+
+/// <summary>
+/// Canvas board for code structure (Classes, Functions, Interfaces, …) with typed input/output
+/// ports and port-to-port connections. Cards are dragged, wired, selected and edited in place.
+/// Avalonia port of ClaudetRelay's CodeBoardWindow — the fox's drafting table for whole programs.
+/// </summary>
+public class CodeBoardWindow : Window
+{
+    // ── State ────────────────────────────────────────────────────────────────
+    readonly string    _projFolder;
+    readonly CodeBoard _board;
+    readonly string?   _themePath;
+    readonly Action<IEnumerable<CodeEntity>>? _onExport;
+    CodeBoardData      _boardData;
+
+    Canvas?       _canvas;
+    ScrollViewer? _scroll;
+
+    readonly Dictionary<string, CodeEntity> _entities  = new();   // entity id → entity
+    readonly Dictionary<string, Border>     _cards     = new();   // entity id → card
+    readonly Dictionary<string, Ellipse>    _portDots  = new();   // "{entityId}:{portId}" → dot
+    readonly Dictionary<string, List<Control>> _relViews = new(); // relation id → line/arrow/hit visuals
+
+    // Connect mode
+    bool    _connectMode;
+    string? _connectFromEntityId;
+    string? _connectFromPortId;
+    Line?   _rubberBand;
+
+    // Selection
+    readonly HashSet<string> _selectedIds = new();
+    string? _selectionAnchor;
+
+    double _zoom = 1.0;
+
+    const double PortRadius  = 6;
+    const double DefaultCardW = 180;
+
+    Button? _connectBtn;
+    ContextMenu? _menu;   // the single open context menu, so opening a new one closes the old
+
+    static readonly FontFamily Mono = new("Consolas, Cascadia Mono, monospace");
+    static readonly BoxShadows SelGlow   = BoxShadows.Parse("0 0 12 0 #CC2196F3");
+    static readonly BoxShadows HoverGlow = BoxShadows.Parse("0 0 8 0 #66FFFFFF");
+
+    void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
+
+    public CodeBoardWindow(string projFolder, CodeBoard board, string? themePath,
+        Action<IEnumerable<CodeEntity>>? onExport = null)
+    {
+        _projFolder = projFolder;
+        _board      = board;
+        _themePath  = themePath;
+        _onExport   = onExport;
+        _boardData  = CodeBoardDataService.Load(projFolder, board.Id);
+
+        Title                 = board.Symbol + "  " + board.Name;
+        Width                 = 1280;
+        Height                = 800;
+        MinWidth              = 640;
+        MinHeight             = 480;
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+
+        if (!string.IsNullOrWhiteSpace(themePath))
+            try { Resources.MergedDictionaries.Add(OxsuitLoader.Load(themePath)); } catch { /* unthemed is fine */ }
+        Ui.ThemeWindow(this);
+
+        BuildContent();
+    }
+
+    void Save() => CodeBoardDataService.Save(_projFolder, _board.Id, _boardData);
+
+    // ── Build ──────────────────────────────────────────────────────────────
+
+    void BuildContent()
+    {
+        // Load every entity so cards, relations and editor dropdowns can resolve ids.
+        foreach (var t in CodeEntityService.EntityTypes)
+            foreach (var e in CodeEntityService.LoadAll(_projFolder, t))
+                _entities[e.Id] = e;
+
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        root.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+        Content = root;
+
+        var toolbar = BuildToolbar();
+        Grid.SetRow(toolbar, 0);
+        root.Children.Add(toolbar);
+
+        _scroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
+        };
+        Grid.SetRow(_scroll, 1);
+        root.Children.Add(_scroll);
+
+        _canvas = new Canvas { Width = 3000, Height = 2000, ClipToBounds = false };
+        Ui.Theme(_canvas, Canvas.BackgroundProperty, "ContentBgBrush");
+        _scroll.Content = _canvas;
+
+        KeyDown += (_, e) => { if (e.Key == Key.Delete && _selectedIds.Count > 0) RemoveSelectedFromBoard(); };
+
+        _canvas.PointerPressed  += Canvas_PointerPressed;
+        _canvas.PointerMoved    += Canvas_PointerMoved;
+        _canvas.PointerReleased += Canvas_PointerReleased;
+
+        // Ctrl + wheel zooms; plain wheel scrolls.
+        _scroll.PointerWheelChanged += (_, e) =>
+        {
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+            _zoom = Math.Clamp(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), 0.25, 3.0);
+            _canvas!.RenderTransform = new ScaleTransform(_zoom, _zoom);
+            e.Handled = true;
+        };
+
+        // Render saved cards (dropping any whose entity vanished from disk).
+        foreach (var kv in _boardData.Positions.ToList())
+        {
+            if (_entities.TryGetValue(kv.Key, out var entity)) RenderCard(entity, kv.Value);
+            else _boardData.Positions.Remove(kv.Key);
+        }
+
+        // Relations need card sizes; draw them once layout has settled.
+        Dispatcher.UIThread.Post(RenderAllRelations, DispatcherPriority.Loaded);
+    }
+
+    Border BuildToolbar()
+    {
+        var bar = new Border { Padding = new(12, 8, 12, 8) };
+        Ui.Theme(bar, Border.BackgroundProperty, "SidebarBgBrush");
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        bar.Child = row;
+
+        var addBtn = Btn(Loc.S("Code_AddToBoard"), Loc.S("Code_AddToBoardTip"));
+        addBtn.Click += (_, _) => ShowAddEntityMenu(addBtn);
+        row.Children.Add(addBtn);
+
+        _connectBtn = Btn(Loc.S("Code_ConnectPorts"), Loc.S("Code_ConnectPortsTip"));
+        _connectBtn.Click += (_, _) => ToggleConnectMode();
+        row.Children.Add(_connectBtn);
+
+        var delBtn = Btn(Loc.S("Code_RemoveCards"), Loc.S("Code_RemoveCardsTip"));
+        delBtn.Click += (_, _) => RemoveSelectedFromBoard();
+        row.Children.Add(delBtn);
+
+        if (_onExport is not null)
+        {
+            row.Children.Add(new Border { Width = 8 });
+            var exportAllBtn = Btn(Loc.S("Code_ExportAll"), Loc.S("Code_ExportAllTip"));
+            exportAllBtn.Click += (_, _) => _onExport!.Invoke(AllBoardEntities());
+            row.Children.Add(exportAllBtn);
+
+            var exportSelBtn = Btn(Loc.S("Code_ExportSelected"), Loc.S("Code_ExportSelectedTip"));
+            exportSelBtn.Click += async (_, _) =>
+            {
+                var sel = SelectedEntities();
+                if (sel.Count == 0) { await MessageDialog.Show(this, Loc.S("Code_NoSelection"), Loc.S("Code_ExportSelected")); return; }
+                _onExport!.Invoke(sel);
+            };
+            row.Children.Add(exportSelBtn);
+        }
+
+        row.Children.Add(new Border { Width = 8 });
+        var zoomBtn = Btn("1:1", Loc.S("Common_ResetZoomTip"));
+        zoomBtn.Click += (_, _) => { _zoom = 1.0; if (_canvas is not null) _canvas.RenderTransform = null; };
+        row.Children.Add(zoomBtn);
+
+        return bar;
+    }
+
+    void ToggleConnectMode()
+    {
+        _connectMode = !_connectMode;
+        _connectFromEntityId = null;
+        _connectFromPortId   = null;
+        RemoveRubberBand();
+        if (_connectBtn is not null)
+        {
+            _connectBtn.FontWeight = _connectMode ? FontWeight.Bold : FontWeight.Normal;
+            Ui.Theme(_connectBtn, TemplatedControl.BackgroundProperty, _connectMode ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(_connectBtn, TemplatedControl.ForegroundProperty, _connectMode ? "AccentTextBrush" : "SidebarTextBrush");
+        }
+        if (_canvas is not null)
+            _canvas.Cursor = new Cursor(_connectMode ? StandardCursorType.Cross : StandardCursorType.Arrow);
+    }
+
+    // ── Card rendering ─────────────────────────────────────────────────────
+
+    void RenderCard(CodeEntity entity, CodeCardPosition pos)
+    {
+        if (_cards.ContainsKey(entity.Id)) return;
+
+        var card = BuildCard(entity);
+        Canvas.SetLeft(card, pos.X);
+        Canvas.SetTop(card,  pos.Y);
+        card.ZIndex = 2;
+        _canvas!.Children.Add(card);
+        _cards[entity.Id] = card;
+
+        WireCard(card, entity);
+
+        // Re-place ports (and any touching relations) whenever the card's measured size changes.
+        card.GetObservable(Visual.BoundsProperty).Subscribe(new AnonymousObserver<Rect>(_ =>
+        {
+            UpdatePortPositions(entity.Id);
+            UpdateRelationsForEntity(entity.Id);
+        }));
+    }
+
+    void WireCard(Border card, CodeEntity entity)
+    {
+        var dragging = false;
+        var offset   = default(Point);
+
+        card.PointerPressed += (_, e) =>
+        {
+            var props = e.GetCurrentPoint(card).Properties;
+            if (props.IsRightButtonPressed) { ShowCardContextMenu(entity, card); e.Handled = true; return; }
+            if (_connectMode) { e.Handled = true; return; }   // port dots handle connecting
+            if (e.ClickCount >= 2) { _ = ShowEntityEditor(entity); e.Handled = true; return; }
+
+            var mods = e.KeyModifiers;
+            if (mods.HasFlag(KeyModifiers.Shift))
+            {
+                SelectRangeTo(entity.Id); RefreshSelectionVisuals(); e.Handled = true; return;
+            }
+            if (mods.HasFlag(KeyModifiers.Control))
+            {
+                if (!_selectedIds.Add(entity.Id)) _selectedIds.Remove(entity.Id);
+                _selectionAnchor = entity.Id; RefreshSelectionVisuals(); e.Handled = true; return;
+            }
+
+            _selectedIds.Clear();
+            _selectedIds.Add(entity.Id);
+            _selectionAnchor = entity.Id;
+            RefreshSelectionVisuals();
+
+            dragging = true;
+            offset   = e.GetPosition(card);
+            e.Pointer.Capture(card);
+            e.Handled = true;
+        };
+
+        card.PointerMoved += (_, e) =>
+        {
+            if (!dragging) return;
+            var pt = e.GetPosition(_canvas);
+            var nx = Snap(Math.Max(0, pt.X - offset.X));
+            var ny = Snap(Math.Max(0, pt.Y - offset.Y));
+            Canvas.SetLeft(card, nx);
+            Canvas.SetTop(card,  ny);
+            GrowCanvasFor(nx, ny, card.Bounds.Width, card.Bounds.Height);
+            UpdatePortPositions(entity.Id);
+            UpdateRelationsForEntity(entity.Id);
+            e.Handled = true;
+        };
+
+        card.PointerReleased += (_, e) =>
+        {
+            if (!dragging) return;
+            dragging = false;
+            e.Pointer.Capture(null);
+            if (_boardData.Positions.TryGetValue(entity.Id, out var p))
+            {
+                p.X = Canvas.GetLeft(card);
+                p.Y = Canvas.GetTop(card);
+            }
+            Save();
+            e.Handled = true;
+        };
+
+        card.PointerEntered += (_, _) => { if (!_selectedIds.Contains(entity.Id)) card.BoxShadow = HoverGlow; };
+        card.PointerExited  += (_, _) => { if (!_selectedIds.Contains(entity.Id)) card.BoxShadow = default; };
+    }
+
+    Border BuildCard(CodeEntity entity)
+    {
+        var (typeColor, typeSymbol) = EntityTypeStyle(entity.EntityType);
+
+        var card = new Border
+        {
+            CornerRadius    = new(6),
+            BorderThickness = new(1),
+            MinWidth        = DefaultCardW,
+            Cursor          = new Cursor(StandardCursorType.SizeAll),
+        };
+        Ui.Theme(card, Border.BackgroundProperty,  "ControlBgBrush");
+        Ui.Theme(card, Border.BorderBrushProperty, "ControlBorderBrush");
+
+        var stack = new StackPanel();
+        card.Child = stack;
+
+        // Header (type-coloured bar with symbol + name).
+        var header = new Border
+        {
+            Background   = new SolidColorBrush(typeColor),
+            CornerRadius = new(5, 5, 0, 0),
+            Padding      = new(8, 5),
+        };
+        header.Child = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 4,
+            Children =
+            {
+                new TextBlock { Text = typeSymbol, FontSize = 12, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = entity.Name, FontSize = 12, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center },
+            },
+        };
+        stack.Children.Add(header);
+
+        // Type badge.
+        var badge = new Border { Background = new SolidColorBrush(Color.FromArgb(30, typeColor.R, typeColor.G, typeColor.B)), Padding = new(8, 2) };
+        badge.Child = new TextBlock { Text = entity.EntityType.ToString(), FontSize = 10, Foreground = new SolidColorBrush(typeColor), FontStyle = FontStyle.Italic };
+        stack.Children.Add(badge);
+
+        // Inheritance / implements (Class / Struct).
+        if (entity.EntityType is CodeEntityType.Class or CodeEntityType.Struct)
+        {
+            var rel = new List<string>();
+            if (!string.IsNullOrEmpty(entity.BaseClassId) && _entities.TryGetValue(entity.BaseClassId, out var baseE))
+                rel.Add($"⊳ {baseE.Name}");
+            var ifaces = entity.ImplementsIds.Where(_entities.ContainsKey).Select(id => _entities[id].Name).ToList();
+            if (ifaces.Count > 0) rel.Add($"◁ {string.Join(", ", ifaces)}");
+            if (rel.Count > 0) stack.Children.Add(SectionText(string.Join("   ", rel), italic: true, opacity: 0.85));
+        }
+
+        // Object: instance-of.
+        if (entity.EntityType == CodeEntityType.Object && !string.IsNullOrEmpty(entity.InstanceOfId)
+            && _entities.TryGetValue(entity.InstanceOfId, out var cls))
+            stack.Children.Add(SectionText($": {cls.Name}", italic: true, opacity: 0.85));
+
+        // Description.
+        if (!string.IsNullOrWhiteSpace(entity.Description))
+        {
+            var d = new TextBlock { Text = entity.Description, FontSize = 11, TextWrapping = TextWrapping.Wrap, MaxWidth = 260, Opacity = 0.75, Margin = new(8, 4) };
+            Ui.Theme(d, TextBlock.ForegroundProperty, "SidebarTextBrush");
+            stack.Children.Add(d);
+        }
+
+        // Fields.
+        if (entity.Fields.Count > 0)
+        {
+            stack.Children.Add(Divider());
+            var fs = new StackPanel { Margin = new(8, 4) };
+            foreach (var f in entity.Fields)
+                fs.Children.Add(MemberLine($"{VisSymbol(f.Visibility)} {(f.IsStatic ? "static " : "")}{f.Name}: {f.DataType}"));
+            stack.Children.Add(fs);
+        }
+
+        // Methods.
+        if (entity.Methods.Count > 0)
+        {
+            stack.Children.Add(Divider());
+            var ms = new StackPanel { Margin = new(8, 4) };
+            foreach (var m in entity.Methods)
+            {
+                var ps = string.Join(", ", m.Parameters.Select(p => $"{ConvSymbol(p.Convention)}{p.DataType} {p.Name}"));
+                var line = m.Kind switch
+                {
+                    MethodKind.Constructor => $"{VisSymbol(m.Visibility)} {entity.Name}({ps})",
+                    MethodKind.Destructor  => $"~{entity.Name}()",
+                    _                      => $"{VisSymbol(m.Visibility)} {(m.IsStatic ? "static " : "")}{m.Name}({ps}): {m.ReturnType}",
+                };
+                ms.Children.Add(MemberLine(line, bold: true));
+            }
+            stack.Children.Add(ms);
+        }
+
+        // Enum values.
+        if (entity.EntityType == CodeEntityType.Enum && entity.EnumValues.Count > 0)
+        {
+            stack.Children.Add(Divider());
+            var es = new StackPanel { Margin = new(8, 4) };
+            foreach (var v in entity.EnumValues) es.Children.Add(MemberLine($"• {v}"));
+            stack.Children.Add(es);
+        }
+
+        // Ports list.
+        var inputs  = entity.Ports.Where(p => p.Direction == PortDirection.Input).ToList();
+        var outputs = entity.Ports.Where(p => p.Direction == PortDirection.Output).ToList();
+        if (inputs.Count > 0 || outputs.Count > 0)
+        {
+            var pb = new Border { Padding = new(8, 4, 8, 6) };
+            var ps = new StackPanel();
+            foreach (var port in inputs)  ps.Children.Add(PortLabel(port, isInput: true));
+            foreach (var port in outputs) ps.Children.Add(PortLabel(port, isInput: false));
+            pb.Child = ps;
+            stack.Children.Add(pb);
+        }
+
+        return card;
+    }
+
+    static TextBlock PortLabel(CodePort port, bool isInput)
+    {
+        var conv = port.Convention switch { PassingConvention.Reference => "&", PassingConvention.Pointer => "*", _ => "" };
+        var text = isInput ? $"→ {port.Name}: {conv}{port.DataType}" : $"{port.Name}: {conv}{port.DataType} →";
+        return new TextBlock
+        {
+            Text = text, FontSize = 10, Opacity = 0.85, Margin = new(0, 1),
+            Foreground = new SolidColorBrush(isInput ? Color.FromRgb(0x42, 0xA5, 0xF5) : Color.FromRgb(0x66, 0xBB, 0x6A)),
+        };
+    }
+
+    // ── UML section helpers ──────────────────────────────────────────────────
+
+    static string VisSymbol(CodeVisibility v) => v switch
+    {
+        CodeVisibility.Public => "+", CodeVisibility.Private => "−", CodeVisibility.Protected => "#", CodeVisibility.Internal => "~", _ => " ",
+    };
+
+    static string ConvSymbol(PassingConvention c) => c switch
+    {
+        PassingConvention.Reference => "&", PassingConvention.Pointer => "*", _ => "",
+    };
+
+    TextBlock SectionText(string text, bool italic = false, double opacity = 1.0)
+    {
+        var tb = new TextBlock { Text = text, FontSize = 10, FontStyle = italic ? FontStyle.Italic : FontStyle.Normal, Opacity = opacity, TextWrapping = TextWrapping.Wrap, MaxWidth = 260, Margin = new(8, 2) };
+        Ui.Theme(tb, TextBlock.ForegroundProperty, "SidebarTextBrush");
+        return tb;
+    }
+
+    TextBlock MemberLine(string text, bool bold = false)
+    {
+        var tb = new TextBlock { Text = text, FontSize = 11, FontFamily = Mono, FontWeight = bold ? FontWeight.SemiBold : FontWeight.Normal, TextWrapping = TextWrapping.Wrap, MaxWidth = 260, Margin = new(0, 1) };
+        Ui.Theme(tb, TextBlock.ForegroundProperty, "SidebarTextBrush");
+        return tb;
+    }
+
+    Border Divider()
+    {
+        var b = new Border { Height = 1, Margin = new(0, 1) };
+        Ui.Theme(b, Border.BackgroundProperty, "ControlBorderBrush");
+        return b;
+    }
+
+    // ── Port dots ────────────────────────────────────────────────────────────
+
+    void GrowCanvasFor(double x, double y, double w, double h)
+    {
+        if (_canvas is null) return;
+        const double margin = 400;
+        if (x + w + margin > _canvas.Width)  _canvas.Width  = x + w + margin;
+        if (y + h + margin > _canvas.Height) _canvas.Height = y + h + margin;
+    }
+
+    void UpdatePortPositions(string entityId)
+    {
+        if (!_cards.TryGetValue(entityId, out var card)) return;
+        if (!_entities.TryGetValue(entityId, out var entity)) return;
+        if (!_boardData.Positions.TryGetValue(entityId, out var pos)) return;
+
+        double x = Canvas.GetLeft(card), y = Canvas.GetTop(card);
+        double w = card.Bounds.Width  > 0 ? card.Bounds.Width  : DefaultCardW;
+        double h = card.Bounds.Height > 0 ? card.Bounds.Height : 80;
+
+        var inputs  = entity.Ports.Where(p => p.Direction == PortDirection.Input).ToList();
+        var outputs = entity.Ports.Where(p => p.Direction == PortDirection.Output).ToList();
+
+        PlacePortDots(entity, inputs,  x, y, w, h, pos.PortOrientation, isInput: true);
+        PlacePortDots(entity, outputs, x, y, w, h, pos.PortOrientation, isInput: false);
+    }
+
+    void PlacePortDots(CodeEntity entity, List<CodePort> ports, double cardX, double cardY, double cardW, double cardH, PortOrientation orientation, bool isInput)
+    {
+        int n = ports.Count;
+        for (int i = 0; i < n; i++)
+        {
+            var dot = GetOrCreatePortDot(entity.Id, ports[i]);
+            double cx, cy;
+            if (orientation == PortOrientation.Horizontal)
+            {
+                cx = isInput ? cardX - PortRadius : cardX + cardW - PortRadius;
+                cy = cardY + cardH * (i + 1.0) / (n + 1.0) - PortRadius;
+            }
+            else
+            {
+                cx = cardX + cardW * (i + 1.0) / (n + 1.0) - PortRadius;
+                cy = isInput ? cardY - PortRadius : cardY + cardH - PortRadius;
+            }
+            Canvas.SetLeft(dot, cx);
+            Canvas.SetTop(dot,  cy);
+        }
+    }
+
+    Ellipse GetOrCreatePortDot(string entityId, CodePort port)
+    {
+        var key = $"{entityId}:{port.Id}";
+        if (_portDots.TryGetValue(key, out var existing)) return existing;
+
+        var isInput = port.Direction == PortDirection.Input;
+        var dot = new Ellipse
+        {
+            Width = PortRadius * 2, Height = PortRadius * 2,
+            Fill = new SolidColorBrush(isInput ? Color.FromRgb(0x42, 0xA5, 0xF5) : Color.FromRgb(0x66, 0xBB, 0x6A)),
+            Stroke = Brushes.White, StrokeThickness = 1.5,
+            Cursor = new Cursor(StandardCursorType.Cross),
+        };
+        ToolTip.SetTip(dot, BuildPortTooltip(port));
+        dot.ZIndex = 5;
+        _canvas!.Children.Add(dot);
+        _portDots[key] = dot;
+
+        dot.PointerPressed += (_, e) =>
+        {
+            if (!_connectMode) return;
+            HandlePortClick(entityId, port.Id, port.Direction);
+            e.Handled = true;
+        };
+        return dot;
+    }
+
+    static string BuildPortTooltip(CodePort port)
+    {
+        var conv = port.Convention switch { PassingConvention.Reference => "ref ", PassingConvention.Pointer => "ptr ", _ => "" };
+        return $"{port.Direction}: {port.Name} ({conv}{port.DataType})";
+    }
+
+    // ── Connect mode ───────────────────────────────────────────────────────
+
+    async void HandlePortClick(string entityId, string portId, PortDirection direction)
+    {
+        if (_connectFromEntityId is null)
+        {
+            if (direction != PortDirection.Output)
+            {
+                await MessageDialog.Show(this, Loc.S("Code_ConnStartOutput"), Loc.S("Code_ConnTitle"));
+                return;
+            }
+            _connectFromEntityId = entityId;
+            _connectFromPortId   = portId;
+            EnsureRubberBand();
+            return;
+        }
+
+        if (direction != PortDirection.Input)
+        {
+            await MessageDialog.Show(this, Loc.S("Code_ConnEndInput"), Loc.S("Code_ConnTitle"));
+            return;
+        }
+        if (entityId == _connectFromEntityId)
+        {
+            _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
+            return;
+        }
+
+        // Type-safety: convention AND data type must match, so mismatches can't be wired by accident.
+        var srcPort = FindPort(_connectFromEntityId!, _connectFromPortId!);
+        var dstPort = FindPort(entityId, portId);
+        if (srcPort is not null && dstPort is not null)
+        {
+            if (srcPort.Convention != dstPort.Convention)
+            {
+                await MessageDialog.Show(this, string.Format(Loc.S("Code_MismatchConv"), srcPort.Name, srcPort.Convention, dstPort.Name, dstPort.Convention), Loc.S("Code_MismatchTitle"));
+                _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
+                return;
+            }
+            if (!NormType(srcPort.DataType).Equals(NormType(dstPort.DataType), StringComparison.OrdinalIgnoreCase))
+            {
+                await MessageDialog.Show(this, string.Format(Loc.S("Code_MismatchType"), srcPort.Name, srcPort.DataType, dstPort.Name, dstPort.DataType), Loc.S("Code_MismatchTitle"));
+                _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
+                return;
+            }
+        }
+
+        var rel = new CodeRelation { FromId = _connectFromEntityId!, FromPortId = _connectFromPortId!, ToId = entityId, ToPortId = portId };
+        _boardData.Relations.Add(rel);
+        Save();
+        RenderRelation(rel);
+
+        _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
+    }
+
+    CodePort? FindPort(string entityId, string portId) =>
+        _entities.TryGetValue(entityId, out var e) ? e.Ports.FirstOrDefault(p => p.Id == portId) : null;
+
+    static string NormType(string t) => (t ?? "").Trim().TrimEnd('*', '&', ' ');
+
+    void EnsureRubberBand()
+    {
+        if (_rubberBand is not null) return;
+        _rubberBand = new Line
+        {
+            Stroke = Brushes.DodgerBlue, StrokeThickness = 1.5,
+            StrokeDashArray = new AvaloniaList<double> { 4, 4 }, IsHitTestVisible = false,
+        };
+        _rubberBand.ZIndex = 20;
+        _canvas!.Children.Add(_rubberBand);
+    }
+
+    void RemoveRubberBand()
+    {
+        if (_rubberBand is null) return;
+        _canvas?.Children.Remove(_rubberBand);
+        _rubberBand = null;
+    }
+
+    // ── Relation rendering ───────────────────────────────────────────────────
+
+    void RenderAllRelations()
+    {
+        foreach (var rel in _boardData.Relations) RenderRelation(rel);
+    }
+
+    void RenderRelation(CodeRelation rel)
+    {
+        if (_relViews.TryGetValue(rel.Id, out var old))
+            foreach (var v in old) _canvas!.Children.Remove(v);
+        _relViews.Remove(rel.Id);
+
+        var p1 = GetPortCenter(rel.FromId, rel.FromPortId);
+        var p2 = GetPortCenter(rel.ToId,   rel.ToPortId);
+        if (p1 is null || p2 is null) return;
+
+        var color   = ParseColor(rel.LineColor);
+        var brush   = new SolidColorBrush(color);
+        var visuals = new List<Control>();
+
+        var points = new List<Point> { p1.Value };
+        foreach (var wp in rel.Waypoints) points.Add(new Point(wp.X, wp.Y));
+        points.Add(p2.Value);
+
+        for (int i = 0; i < points.Count - 1; i++)
+        {
+            var line = new Line { StartPoint = points[i], EndPoint = points[i + 1], Stroke = brush, StrokeThickness = rel.Thickness, IsHitTestVisible = false };
+            ApplyLineStyle(line, rel.LineStyle);
+            line.ZIndex = 1;
+            _canvas!.Children.Add(line); visuals.Add(line);
+        }
+
+        // Fat transparent hit-zone for right-click delete.
+        var hit = new Line { StartPoint = p1.Value, EndPoint = p2.Value, Stroke = Brushes.Transparent, StrokeThickness = 12, Cursor = new Cursor(StandardCursorType.Hand) };
+        hit.ZIndex = 3;
+        var capRel = rel;
+        hit.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(hit).Properties.IsRightButtonPressed) { ShowRelationContextMenu(capRel, hit); e.Handled = true; }
+        };
+        _canvas!.Children.Add(hit); visuals.Add(hit);
+
+        if (rel.HasArrow)
+        {
+            var arrow = BuildArrow(points[^2], points[^1], brush);
+            arrow.ZIndex = 2;
+            _canvas.Children.Add(arrow); visuals.Add(arrow);
+        }
+
+        _relViews[rel.Id] = visuals;
+    }
+
+    Point? GetPortCenter(string entityId, string portId)
+    {
+        var key = $"{entityId}:{portId}";
+        if (!_portDots.TryGetValue(key, out var dot)) return null;
+        return new Point(Canvas.GetLeft(dot) + PortRadius, Canvas.GetTop(dot) + PortRadius);
+    }
+
+    void UpdateRelationsForEntity(string entityId)
+    {
+        foreach (var rel in _boardData.Relations)
+            if (rel.FromId == entityId || rel.ToId == entityId) RenderRelation(rel);
+    }
+
+    static Polygon BuildArrow(Point from, Point to, IBrush brush)
+    {
+        var poly = new Polygon { Fill = brush, IsHitTestVisible = false };
+        double dx = to.X - from.X, dy = to.Y - from.Y;
+        double len = Math.Sqrt(dx * dx + dy * dy);
+        if (len < 0.001) return poly;
+        double ux = dx / len, uy = dy / len, px = -uy, py = ux;
+        const double aw = 6, al = 10;
+        poly.Points.Add(to);
+        poly.Points.Add(new(to.X - ux * al + px * aw, to.Y - uy * al + py * aw));
+        poly.Points.Add(new(to.X - ux * al - px * aw, to.Y - uy * al - py * aw));
+        return poly;
+    }
+
+    static void ApplyLineStyle(Line line, BoardLineStyle style)
+    {
+        line.StrokeDashArray = style switch
+        {
+            BoardLineStyle.Dotted  => new AvaloniaList<double> { 2, 3 },
+            BoardLineStyle.Dashed  => new AvaloniaList<double> { 6, 3 },
+            BoardLineStyle.DotDash => new AvaloniaList<double> { 6, 3, 2, 3 },
+            _                      => null,
+        };
+    }
+
+    // ── Canvas mouse (rubber-band select / deselect / add menu) ──────────────
+
+    bool   _rubberSelecting;
+    Point  _rubberStart;
+    Rectangle? _rubberRect;
+
+    void Canvas_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _menu?.Close();
+        var props = e.GetCurrentPoint(_canvas).Properties;
+
+        if (props.IsRightButtonPressed)
+        {
+            if (_connectMode) { _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand(); return; }
+            ShowCanvasAddMenu(e.GetPosition(_canvas));
+            e.Handled = true;
+            return;
+        }
+
+        if (_connectMode) return;
+
+        _selectedIds.Clear();
+        _selectionAnchor = null;
+        RefreshSelectionVisuals();
+        _rubberStart = e.GetPosition(_canvas);
+        _rubberSelecting = true;
+        e.Pointer.Capture(_canvas);
+        e.Handled = true;
+    }
+
+    void Canvas_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_connectMode && _connectFromEntityId is not null && _rubberBand is not null)
+        {
+            if (GetPortCenter(_connectFromEntityId, _connectFromPortId!) is { } c) _rubberBand.StartPoint = c;
+            _rubberBand.EndPoint = e.GetPosition(_canvas);
+            return;
+        }
+
+        if (_rubberSelecting)
+        {
+            var cur = e.GetPosition(_canvas);
+            if (_rubberRect is null)
+            {
+                _rubberRect = new Rectangle
+                {
+                    Stroke = Brushes.DodgerBlue, StrokeDashArray = new AvaloniaList<double> { 4, 2 }, StrokeThickness = 1,
+                    Fill = new SolidColorBrush(Color.FromArgb(30, 30, 144, 255)), IsHitTestVisible = false,
+                };
+                _rubberRect.ZIndex = 50;
+                _canvas!.Children.Add(_rubberRect);
+            }
+            double x = Math.Min(_rubberStart.X, cur.X), y = Math.Min(_rubberStart.Y, cur.Y);
+            Canvas.SetLeft(_rubberRect, x); Canvas.SetTop(_rubberRect, y);
+            _rubberRect.Width  = Math.Abs(cur.X - _rubberStart.X);
+            _rubberRect.Height = Math.Abs(cur.Y - _rubberStart.Y);
+        }
+    }
+
+    void Canvas_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_rubberSelecting) return;
+        _rubberSelecting = false;
+        e.Pointer.Capture(null);
+        if (_rubberRect is null) return;
+
+        double rx = Canvas.GetLeft(_rubberRect), ry = Canvas.GetTop(_rubberRect);
+        double rw = _rubberRect.Width, rh = _rubberRect.Height;
+        foreach (var (id, card) in _cards)
+        {
+            double cx = Canvas.GetLeft(card), cy = Canvas.GetTop(card);
+            if (cx >= rx && cy >= ry && cx + card.Bounds.Width <= rx + rw && cy + card.Bounds.Height <= ry + rh)
+                _selectedIds.Add(id);
+        }
+        _canvas!.Children.Remove(_rubberRect);
+        _rubberRect = null;
+        RefreshSelectionVisuals();
+    }
+
+    void ShowCanvasAddMenu(Point dropPoint)
+    {
+        var cm = new ContextMenu();
+        foreach (var t in CodeEntityService.EntityTypes)
+        {
+            var capType = t;
+            var mi = new MenuItem { Header = string.Format(Loc.S("Code_AddType"), capType) };
+            mi.Click += async (_, _) => await AddEntityOfType(capType, dropPoint);
+            cm.Items.Add(mi);
+        }
+        OpenMenu(cm, _canvas!);
+    }
+
+    // ── Context menus ────────────────────────────────────────────────────────
+
+    void ShowCardContextMenu(CodeEntity entity, Control anchor)
+    {
+        var cm = new ContextMenu();
+
+        var editMi = new MenuItem { Header = Loc.S("Code_Edit") };
+        editMi.Click += async (_, _) => await ShowEntityEditor(entity);
+        cm.Items.Add(editMi);
+
+        if (entity.EntityType == CodeEntityType.Function)
+        {
+            var flowMi = new MenuItem { Header = Loc.S("Code_SketchFlow") };
+            flowMi.Click += (_, _) => _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, entity.Id, entity.Name, _themePath);
+            cm.Items.Add(flowMi);
+        }
+
+        if (_onExport is not null)
+        {
+            var exportMi = new MenuItem { Header = Loc.S("Code_ExportThis") };
+            exportMi.Click += (_, _) => _onExport!.Invoke(new[] { entity });
+            cm.Items.Add(exportMi);
+        }
+
+        cm.Items.Add(new Separator());
+
+        if (_boardData.Positions.TryGetValue(entity.Id, out var pos))
+        {
+            var orientMi = new MenuItem
+            {
+                Header = pos.PortOrientation == PortOrientation.Horizontal ? Loc.S("Code_SwitchVertical") : Loc.S("Code_SwitchHorizontal"),
+            };
+            orientMi.Click += (_, _) =>
+            {
+                pos.PortOrientation = pos.PortOrientation == PortOrientation.Horizontal ? PortOrientation.Vertical : PortOrientation.Horizontal;
+                Save();
+                UpdatePortPositions(entity.Id);
+                UpdateRelationsForEntity(entity.Id);
+            };
+            cm.Items.Add(orientMi);
+            cm.Items.Add(new Separator());
+        }
+
+        var removeMi = new MenuItem { Header = Loc.S("Code_RemoveFromBoard") };
+        removeMi.Click += (_, _) => RemoveFromBoard(new[] { entity.Id });
+        cm.Items.Add(removeMi);
+
+        var deleteMi = new MenuItem { Header = Loc.S("Code_DeletePerm") };
+        deleteMi.Click += async (_, _) =>
+        {
+            var res = await MessageDialog.Show(this, string.Format(Loc.S("Code_DeletePermConfirm"), entity.Name), Loc.S("Code_DeleteEntityTitle"), DialogButtons.YesNo);
+            if (res != DialogResult.Yes) return;
+            CodeEntityService.Delete(_projFolder, entity.EntityType.ToString(), entity.Id);
+            _entities.Remove(entity.Id);
+            RemoveFromBoard(new[] { entity.Id });
+        };
+        cm.Items.Add(deleteMi);
+
+        OpenMenu(cm, anchor);
+    }
+
+    void ShowRelationContextMenu(CodeRelation rel, Control anchor)
+    {
+        var cm = new ContextMenu();
+        var delMi = new MenuItem { Header = Loc.S("Code_DeleteConnection") };
+        delMi.Click += (_, _) =>
+        {
+            _boardData.Relations.Remove(rel);
+            Save();
+            if (_relViews.TryGetValue(rel.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
+            _relViews.Remove(rel.Id);
+        };
+        cm.Items.Add(delMi);
+        OpenMenu(cm, anchor);
+    }
+
+    // ── Add entity ─────────────────────────────────────────────────────────
+
+    void ShowAddEntityMenu(Button anchor)
+    {
+        var cm = new ContextMenu();
+        foreach (var t in CodeEntityService.EntityTypes)
+        {
+            var capType = t;
+            var mi = new MenuItem { Header = capType };
+            mi.Click += async (_, _) => await AddEntityOfType(capType, new Point(60, 60));
+            cm.Items.Add(mi);
+        }
+        cm.Items.Add(new Separator());
+        var existMi = new MenuItem { Header = Loc.S("Code_AddExisting") };
+        existMi.Click += async (_, _) => await ShowAddExistingEntityDialog();
+        cm.Items.Add(existMi);
+        OpenMenu(cm, anchor);
+    }
+
+    async Task AddEntityOfType(string entityTypeName, Point dropPoint)
+    {
+        if (!Enum.TryParse<CodeEntityType>(entityTypeName, out var et)) return;
+        var name = await PromptDialog.Show(this, Loc.S("Common_NameColon"), "", string.Format(Loc.S("Code_NewTypeTitle"), entityTypeName));
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var entity = new CodeEntity { Name = name.Trim(), EntityType = et };
+        _entities[entity.Id] = entity;
+        CodeEntityService.Save(_projFolder, entityTypeName, entity);
+
+        var pos = new CodeCardPosition { X = dropPoint.X, Y = dropPoint.Y };
+        _boardData.Positions[entity.Id] = pos;
+        Save();
+        RenderCard(entity, pos);
+    }
+
+    async Task ShowAddExistingEntityDialog()
+    {
+        var onBoard = _boardData.Positions.Keys.ToHashSet();
+
+        // Re-scan from disk in case entities were added elsewhere since this board opened.
+        foreach (var t in CodeEntityService.EntityTypes)
+            foreach (var e in CodeEntityService.LoadAll(_projFolder, t))
+                _entities[e.Id] = e;
+
+        var available = _entities.Values.Where(e => !onBoard.Contains(e.Id))
+            .OrderBy(e => e.EntityType.ToString()).ThenBy(e => e.Name).ToList();
+
+        if (available.Count == 0)
+        {
+            await MessageDialog.Show(this, Loc.S("Code_AllOnBoard"), Loc.S("Code_AddEntityTitle"));
+            return;
+        }
+
+        var picked = await PickExistingEntity(available);
+        if (picked is null) return;
+
+        var pos = new CodeCardPosition { X = 80, Y = 80 };
+        _boardData.Positions[picked.Id] = pos;
+        Save();
+        RenderCard(picked, pos);
+    }
+
+    // A small modal list picker for entities not yet on the board.
+    Task<CodeEntity?> PickExistingEntity(List<CodeEntity> available)
+    {
+        var dlg = new Window
+        {
+            Title = Loc.S("Code_AddExistingTitle"), Width = 360, Height = 440,
+            CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        Ui.ThemeWindow(dlg);
+
+        var list = new ListBox { SelectionMode = SelectionMode.Single };
+        Ui.Theme(list, TemplatedControl.BackgroundProperty,  "ControlBgBrush");
+        Ui.Theme(list, TemplatedControl.ForegroundProperty,  "SidebarTextBrush");
+        Ui.Theme(list, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
+        foreach (var e in available)
+            list.Items.Add(new ListBoxItem { Content = $"{e.EntityType}  {e.Name}", Tag = e });
+
+        CodeEntity? result = null;
+        void Commit() { if (list.SelectedItem is ListBoxItem { Tag: CodeEntity e }) { result = e; dlg.Close(); } }
+
+        var add = Ui.Btn(Loc.S("Common_Add")); add.IsDefault = true; add.Click += (_, _) => Commit();
+        var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true; cancel.Click += (_, _) => dlg.Close();
+        list.DoubleTapped += (_, _) => Commit();
+
+        var grid = new Grid { Margin = new(12), RowDefinitions = new RowDefinitions("*,Auto") };
+        Grid.SetRow(list, 0); grid.Children.Add(list);
+        var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new(0, 8, 0, 0), Children = { cancel, add } };
+        Grid.SetRow(btnRow, 1); grid.Children.Add(btnRow);
+        dlg.Content = grid;
+
+        return dlg.ShowDialog<CodeEntity?>(this).ContinueWith(_ => result, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    // ── Entity editor (shared standalone dialog) ─────────────────────────────
+
+    async Task ShowEntityEditor(CodeEntity entity)
+    {
+        // Make sure dropdowns can see every entity (base class / interface / instance-of).
+        foreach (var t in CodeEntityService.EntityTypes)
+            foreach (var e in CodeEntityService.LoadAll(_projFolder, t))
+                _entities.TryAdd(e.Id, e);
+
+        var saved = await CodeEntityEditorDialog.Edit(this, _projFolder, entity, _entities, _themePath);
+        if (!saved) return;
+
+        _entities[entity.Id] = entity;
+
+        // Rebuild the card (and its ports) from scratch.
+        if (_cards.TryGetValue(entity.Id, out var oldCard)) { _canvas!.Children.Remove(oldCard); _cards.Remove(entity.Id); }
+        foreach (var key in _portDots.Keys.Where(k => k.StartsWith(entity.Id + ":")).ToList())
+        {
+            _canvas!.Children.Remove(_portDots[key]);
+            _portDots.Remove(key);
+        }
+        if (_boardData.Positions.TryGetValue(entity.Id, out var pos))
+        {
+            RenderCard(entity, pos);
+            Dispatcher.UIThread.Post(() => { UpdatePortPositions(entity.Id); UpdateRelationsForEntity(entity.Id); }, DispatcherPriority.Loaded);
+        }
+    }
+
+    // ── Selection & removal ──────────────────────────────────────────────────
+
+    List<CodeEntity> AllBoardEntities() =>
+        _boardData.Positions.Keys.Where(_entities.ContainsKey).Select(id => _entities[id]).ToList();
+
+    List<CodeEntity> SelectedEntities() =>
+        _selectedIds.Where(_entities.ContainsKey).Select(id => _entities[id]).ToList();
+
+    // Selects the reading-order (top→bottom, left→right) range from the anchor to the given id.
+    void SelectRangeTo(string id)
+    {
+        if (_selectionAnchor is null || !_cards.ContainsKey(_selectionAnchor))
+        {
+            _selectedIds.Clear(); _selectedIds.Add(id); _selectionAnchor = id; return;
+        }
+        var ordered = _cards.Keys.OrderBy(k => Canvas.GetTop(_cards[k])).ThenBy(k => Canvas.GetLeft(_cards[k])).ToList();
+        int a = ordered.IndexOf(_selectionAnchor), b = ordered.IndexOf(id);
+        if (a < 0 || b < 0) { _selectedIds.Add(id); return; }
+        if (a > b) (a, b) = (b, a);
+        _selectedIds.Clear();
+        for (int i = a; i <= b; i++) _selectedIds.Add(ordered[i]);
+    }
+
+    void RemoveSelectedFromBoard() => RemoveFromBoard(_selectedIds.ToList());
+
+    void RemoveFromBoard(IEnumerable<string> ids)
+    {
+        foreach (var id in ids)
+        {
+            _boardData.Positions.Remove(id);
+
+            if (_cards.TryGetValue(id, out var card)) { _canvas!.Children.Remove(card); _cards.Remove(id); }
+
+            foreach (var key in _portDots.Keys.Where(k => k.StartsWith(id + ":")).ToList())
+            {
+                _canvas!.Children.Remove(_portDots[key]);
+                _portDots.Remove(key);
+            }
+
+            foreach (var rel in _boardData.Relations.Where(r => r.FromId == id || r.ToId == id).ToList())
+            {
+                _boardData.Relations.Remove(rel);
+                if (_relViews.TryGetValue(rel.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
+                _relViews.Remove(rel.Id);
+            }
+        }
+        _selectedIds.Clear();
+        Save();
+        RefreshSelectionVisuals();
+    }
+
+    void RefreshSelectionVisuals()
+    {
+        bool any = _selectedIds.Count > 0;
+        foreach (var (id, card) in _cards)
+        {
+            bool sel = _selectedIds.Contains(id);
+            card.Opacity   = any && !sel ? 0.45 : 1.0;
+            card.BoxShadow = sel ? SelGlow : default;
+            card.BorderThickness = new(sel ? 2 : 1);
+            if (sel) card.BorderBrush = new SolidColorBrush(Color.FromRgb(0x21, 0x96, 0xF3));
+            else Ui.Theme(card, Border.BorderBrushProperty, "ControlBorderBrush");
+        }
+    }
+
+    // ── Misc helpers ──────────────────────────────────────────────────────────
+
+    double Snap(double v) =>
+        !_boardData.SnapToGrid || _boardData.GridSize < 1 ? v : Math.Round(v / _boardData.GridSize) * _boardData.GridSize;
+
+    static (Color color, string symbol) EntityTypeStyle(CodeEntityType t) => t switch
+    {
+        CodeEntityType.Class     => (Color.FromRgb(0x19, 0x76, 0xD2), "🧱"),
+        CodeEntityType.Struct    => (Color.FromRgb(0x00, 0x89, 0x7B), "📦"),
+        CodeEntityType.Interface => (Color.FromRgb(0x6A, 0x1B, 0x9A), "🔷"),
+        CodeEntityType.Enum      => (Color.FromRgb(0xE6, 0x51, 0x00), "📋"),
+        CodeEntityType.Function  => (Color.FromRgb(0x2E, 0x7D, 0x32), "⚡"),
+        CodeEntityType.Namespace => (Color.FromRgb(0x37, 0x47, 0x4F), "📁"),
+        _                        => (Color.FromRgb(0x55, 0x55, 0x55), "⚙"),
+    };
+
+    static Color ParseColor(string hex)
+    {
+        try { return Color.Parse(hex); } catch { return Colors.DodgerBlue; }
+    }
+
+    Button Btn(string label, string? tooltip = null)
+    {
+        var b = Ui.Btn(label, tooltip);
+        b.Padding  = new(10, 5);
+        b.FontSize = 12;
+        return b;
+    }
+}

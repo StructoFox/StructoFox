@@ -714,7 +714,7 @@ public partial class MainWindow : Window
         var root = new StackPanel { Spacing = 12, MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Left };
         root.Children.Add(new TextBlock { Text = ProjectName(_project ?? ""), FontFamily = Mono, FontSize = 11, Opacity = 0.6 });
 
-        if (section == Section.Boards) { root.Children.Add(Heading("Boards")); root.Children.Add(Note(Loc.S("Sec_BoardsBlurb"))); return root; }
+        if (section == Section.Boards) { BuildBoardsView(root); return root; }
         if (section == Section.Export) { root.Children.Add(Heading("Export")); root.Children.Add(Note(Loc.S("Sec_ExportBlurb"))); return root; }
 
         // Entity section: heading, a "New …" action, then the list of entities of this type.
@@ -788,6 +788,102 @@ public partial class MainWindow : Window
                 all[ent.Id] = ent;
         return all;
     }
+
+    // ── Boards gallery ───────────────────────────────────────────────────────
+
+    // Lists the project's code boards as cards with a "New board" action; clicking a card opens it.
+    void BuildBoardsView(StackPanel root)
+    {
+        root.Children.Add(Heading("Boards"));
+
+        var add = Ui.Btn(Loc.S("Boards_New"));
+        add.HorizontalAlignment = HorizontalAlignment.Left;
+        add.Click += async (_, _) => await NewBoard();
+        root.Children.Add(add);
+
+        var boards = _project is null ? new() : CodeBoardRegistryService.Load(_project);
+        if (boards.Count == 0)
+        {
+            root.Children.Add(Note(Loc.S("Boards_Empty")));
+            return;
+        }
+
+        var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var b in boards.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+            wrap.Children.Add(BoardCard(b));
+        root.Children.Add(wrap);
+    }
+
+    // One board tile: symbol + name; left-click opens it, right-click renames/deletes.
+    Control BoardCard(CodeBoard board)
+    {
+        var tile = new Border { Width = 200, Padding = new(14), Margin = new(0, 0, 10, 10), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
+        Ui.Theme(tile, Border.BackgroundProperty, "ControlBgBrush");
+
+        tile.Child = new StackPanel
+        {
+            Spacing = 6,
+            Children =
+            {
+                new TextBlock { Text = board.Symbol, FontSize = 28 },
+                new TextBlock { Text = board.Name, FontWeight = FontWeight.Bold, FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis },
+            },
+        };
+
+        tile.PointerPressed += (_, ev) => { if (ev.GetCurrentPoint(tile).Properties.IsLeftButtonPressed) OpenBoard(board); };
+
+        var rename = new MenuItem { Header = Loc.S("Boards_Rename") };
+        rename.Click += async (_, _) => await RenameBoard(board);
+        var delete = new MenuItem { Header = Loc.S("Boards_Delete") };
+        delete.Click += async (_, _) => await DeleteBoard(board);
+        var cm = new ContextMenu();
+        cm.Items.Add(rename); cm.Items.Add(delete);
+        tile.ContextMenu = cm;
+
+        return tile;
+    }
+
+    // Opens a board on its own canvas window (export wiring comes later → null callback for now).
+    void OpenBoard(CodeBoard board) => CrashHandler.Safe(() =>
+    {
+        if (_project is null) return;
+        new CodeBoardWindow(_project, board, null).Show();
+    }, "OpenBoard");
+
+    Task NewBoard() => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null) return;
+        var name = await PromptDialog.Show(this, Loc.S("Boards_NewPrompt"), Loc.S("Boards_Default"), Loc.S("Boards_New"));
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var boards = CodeBoardRegistryService.Load(_project);
+        boards.Add(new CodeBoard { Name = name.Trim() });
+        CodeBoardRegistryService.Save(_project, boards);
+        ShowSection(Section.Boards);
+    }, "NewBoard");
+
+    Task RenameBoard(CodeBoard board) => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null) return;
+        var name = await PromptDialog.Show(this, Loc.S("Boards_NewPrompt"), board.Name, Loc.S("Boards_Rename"));
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var boards = CodeBoardRegistryService.Load(_project);
+        var match = boards.FirstOrDefault(b => b.Id == board.Id);
+        if (match is null) return;
+        match.Name = name.Trim();
+        CodeBoardRegistryService.Save(_project, boards);
+        ShowSection(Section.Boards);
+    }, "RenameBoard");
+
+    Task DeleteBoard(CodeBoard board) => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null) return;
+        var res = await MessageDialog.Show(this, string.Format(Loc.S("Boards_DeleteConfirm"), board.Name), Loc.S("Boards_DeleteTitle"), DialogButtons.YesNo);
+        if (res != DialogResult.Yes) return;
+        var boards = CodeBoardRegistryService.Load(_project);
+        boards.RemoveAll(b => b.Id == board.Id);
+        CodeBoardRegistryService.Save(_project, boards);
+        ShowSection(Section.Boards);
+    }, "DeleteBoard");
 
     // A short, type-appropriate summary of an entity's contents.
     static string EntitySummary(CodeEntity e) => e.EntityType switch
