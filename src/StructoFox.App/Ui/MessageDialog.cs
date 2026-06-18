@@ -34,6 +34,7 @@ public static class MessageDialog
             MinWidth              = 320,
             MaxWidth              = 560,
         };
+        Ui.ThemeWindow(dlg);
 
         var row = new StackPanel
         {

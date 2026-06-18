@@ -39,5 +39,14 @@
         <Style Selector="TextBox:focus-within">
             <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
         </Style>
+
+        <!-- ComboBox drop-down chevron: Fluent colours it from its own (light) theme brush, so it went
+             near-invisible on light themes. Tie the glyph to our themed text colour. -->
+        <Style Selector="ComboBox /template/ PathIcon">
+            <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
+        </Style>
+        <Style Selector="ComboBox /template/ Path">
+            <Setter Property="Fill" Value="{DynamicResource SidebarTextBrush}" />
+        </Style>
     </Application.Styles>
 </Application>
