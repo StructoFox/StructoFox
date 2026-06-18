@@ -198,19 +198,28 @@ public partial class MainWindow : Window
         DockPanel.SetDock(top, Dock.Top);
         dock.Children.Add(top);
 
-        var sources = new StackPanel { Spacing = 6 };
-        sources.Children.Add(SectionLabel("Sources"));
-        sources.Children.Add(NavEntry("🕘  Recent", null, false));
-        foreach (var lib in Libraries.Load()) sources.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
+        // Recent is pinned at the very bottom (added first → bottom-most in a DockPanel).
+        var recent = NavEntry("🕘  Recent", null, false);
+        DockPanel.SetDock(recent, Dock.Bottom);
+        dock.Children.Add(recent);
 
-        var sourcesScroll = new ScrollViewer { Content = sources, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        DockPanel.SetDock(sourcesScroll, Dock.Bottom);
-        dock.Children.Add(sourcesScroll);
+        // Libraries sit just above Recent, scrolling if there are many.
+        var libs = Libraries.Load();
+        if (libs.Count > 0)
+        {
+            var libPanel = new StackPanel { Spacing = 6 };
+            libPanel.Children.Add(SectionLabel("Libraries"));
+            foreach (var lib in libs) libPanel.Children.Add(NavEntry("📁  " + ShortName(lib), lib, true));
+            var libScroll = new ScrollViewer { Content = libPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320, Margin = new(0, 0, 0, 6) };
+            DockPanel.SetDock(libScroll, Dock.Bottom);
+            dock.Children.Add(libScroll);
+        }
 
         return dock;
     }
 
-    // One sources entry; clicking selects it as the list source. Libraries get a remove (✕) button.
+    // One sources entry; left-click selects it as the list source. Libraries are removed via a
+    // right-click context menu (no easy-to-misclick ✕).
     Control NavEntry(string label, string? source, bool removable)
     {
         var active = _homeSource == source;
@@ -223,15 +232,15 @@ public partial class MainWindow : Window
         Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
         b.Click += (_, _) => { _homeSource = source; _body.Content = BuildHome(); };
 
-        if (!removable) return b;
-
-        var dock = new DockPanel();
-        var x = Ui.Btn("✕", "Remove this library"); x.Padding = new(6, 2);
-        x.Click += (_, _) => { if (source is not null) Libraries.Remove(source); if (_homeSource == source) _homeSource = null; _body.Content = BuildHome(); };
-        DockPanel.SetDock(x, Dock.Right);
-        dock.Children.Add(x);
-        dock.Children.Add(b);
-        return dock;
+        if (removable && source is not null)
+        {
+            var remove = new MenuItem { Header = "✕  Remove library" };
+            remove.Click += (_, _) => { Libraries.Remove(source); if (_homeSource == source) _homeSource = null; _body.Content = BuildHome(); };
+            var cm = new ContextMenu();
+            cm.Items.Add(remove);
+            b.ContextMenu = cm;
+        }
+        return b;
     }
 
     // Right column: top third = the most-recent project (hero); bottom two-thirds = the project list.
