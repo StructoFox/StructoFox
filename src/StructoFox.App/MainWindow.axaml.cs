@@ -184,7 +184,7 @@ public partial class MainWindow : Window
     // No coloured sidebar — buttons sit on the same surface as everything else.
     Control BuildHomeNav()
     {
-        var dock = new DockPanel { LastChildFill = false, Width = 162, Margin = new(16, 16, 8, 16) };
+        var dock = new DockPanel { LastChildFill = false, Width = 162, Margin = new(16, 16, 8, 20) };
 
         var top = new StackPanel { Spacing = 6 };
         var newBtn = Ui.Btn("➕  New project");
