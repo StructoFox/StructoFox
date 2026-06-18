@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using StructoFox.Core;
+using StructoFox.Core.Models;
 
 namespace StructoFox.App;
 
@@ -16,14 +17,14 @@ namespace StructoFox.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    enum Section { Boards, Classes, Functions, Export }
+    enum Section { Boards, Namespace, Class, Struct, Interface, Enum, Function, Object, Export }
     enum HomeView { Cards, DetailList, MultiList }
     enum HomeSort { DateDesc, DateAsc, NameAsc, NameDesc }
 
     static readonly FontFamily Mono = new("Consolas, Menlo, Courier New, monospace");
 
     string? _project;
-    Section _section = Section.Functions;
+    Section _section = Section.Class;
     readonly ContentControl _body = new();       // home browser  OR  project cockpit (added once)
     ContentControl _content = new();             // active cockpit section (re-created per cockpit build)
     readonly Dictionary<Section, Button> _railButtons = new();
@@ -605,12 +606,22 @@ public partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // sections
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // exit door
 
-        var stack = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Top };
-        stack.Children.Add(RailButton(Section.Boards,    "🗂", "Boards"));
-        stack.Children.Add(RailButton(Section.Classes,   "🧩", "Classes"));
-        stack.Children.Add(RailButton(Section.Functions, "ƒ",  "Functions"));
-        stack.Children.Add(RailButton(Section.Export,    "⇩",  "Export"));
-        Grid.SetRow(stack, 0); grid.Children.Add(stack);
+        var stack = new StackPanel { Spacing = 4 };
+        (Section sec, string icon, string label)[] items =
+        {
+            (Section.Boards,    "🗂", "Boards"),
+            (Section.Namespace, "Ⓝ", "Namespaces"),
+            (Section.Class,     "Ⓒ", "Classes"),
+            (Section.Struct,    "Ⓢ", "Structs"),
+            (Section.Interface, "Ⓘ", "Interfaces"),
+            (Section.Enum,      "Ⓔ", "Enums"),
+            (Section.Function,  "ƒ",  "Functions"),
+            (Section.Object,    "Ⓞ", "Objects"),
+            (Section.Export,    "⇩",  "Export"),
+        };
+        foreach (var (sec, icon, label) in items) stack.Children.Add(RailButton(sec, icon, label));
+        var sectionsScroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(sectionsScroll, 0); grid.Children.Add(sectionsScroll);
 
         var exit = ExitButton();
         Grid.SetRow(exit, 1); grid.Children.Add(exit);
@@ -696,32 +707,91 @@ public partial class MainWindow : Window
         _content.Content = BuildSectionView(section);
     }, "ShowSection");
 
-    // Builds the view for a section — a heading + (for now) a hint or the working demo actions.
+    // Builds a section view: Boards/Export are placeholders; entity sections list their entities
+    // (loaded from the project) with a "New …" action.
     Control BuildSectionView(Section section)
     {
-        var root = new StackPanel { Spacing = 12, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
-
+        var root = new StackPanel { Spacing = 12, MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Left };
         root.Children.Add(new TextBlock { Text = ProjectName(_project ?? ""), FontFamily = Mono, FontSize = 11, Opacity = 0.6 });
 
-        var (title, blurb) = section switch
-        {
-            Section.Boards    => ("Boards",    "Structure boards — arrange entities on a canvas. (Board canvas port coming.)"),
-            Section.Classes   => ("Classes",   "Namespaces, classes, structs, interfaces, enums & objects. (Entity editor port coming.)"),
-            Section.Functions => ("Functions", "Functions & methods — sketch their logic as a flowchart or structogram."),
-            _                 => ("Export",    "Generate source from your structures in 10 languages. (Wiring coming.)"),
-        };
-        root.Children.Add(Heading(title));
-        root.Children.Add(Note(blurb));
+        if (section == Section.Boards) { root.Children.Add(Heading("Boards")); root.Children.Add(Note(Loc.S("Sec_BoardsBlurb"))); return root; }
+        if (section == Section.Export) { root.Children.Add(Heading("Export")); root.Children.Add(Note(Loc.S("Sec_ExportBlurb"))); return root; }
 
-        if (section == Section.Functions && _project is not null)
+        // Entity section: heading, a "New …" action, then the list of entities of this type.
+        root.Children.Add(Heading(PluralLabel(section)));
+        var add = Ui.Btn(string.Format(Loc.S("Sec_New"), SingularLabel(section)));
+        add.HorizontalAlignment = HorizontalAlignment.Left;
+        add.Click += async (_, _) => await NewEntity(section);
+        root.Children.Add(add);
+
+        var entities = _project is null ? new() : CodeEntityService.LoadAll(_project, section.ToString());
+        if (entities.Count == 0)
+            root.Children.Add(Note(string.Format(Loc.S("Sec_Empty"), PluralLabel(section))));
+        else
         {
-            var open = Ui.Btn("🔁 New diagram (demo)", "Open the PAP / structogram chooser");
-            open.HorizontalAlignment = HorizontalAlignment.Left;
-            open.Click += async (_, _) => await DiagramLauncher.ChooseAndOpen(this, _project!, "demo", "Greeter.Greet()", null);
-            root.Children.Add(open);
+            var list = new StackPanel { Spacing = 4 };
+            foreach (var e in entities.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+                list.Children.Add(EntityRow(e, section));
+            root.Children.Add(list);
         }
         return root;
     }
+
+    // One entity row: name + a small summary; functions open the diagram chooser; right-click to delete.
+    Control EntityRow(CodeEntity e, Section section)
+    {
+        var row = new Border { Padding = new(10, 7), CornerRadius = new(6), Cursor = new Cursor(StandardCursorType.Hand) };
+        Ui.Theme(row, Border.BackgroundProperty, "ControlBgBrush");
+
+        var name = new TextBlock { Text = e.Name, FontSize = 13, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
+        var sum = Dim(EntitySummary(e), 11); sum.VerticalAlignment = VerticalAlignment.Center;
+
+        var dock = new DockPanel();
+        DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
+        DockPanel.SetDock(name, Dock.Left); dock.Children.Add(name);
+        row.Child = dock;
+
+        if (section == Section.Function && _project is not null)
+            row.PointerPressed += (_, ev) => { if (ev.GetCurrentPoint(row).Properties.IsLeftButtonPressed) _ = DiagramLauncher.ChooseAndOpen(this, _project!, e.Id, e.Name, null); };
+
+        var del = new MenuItem { Header = Loc.S("Sec_Delete") };
+        del.Click += (_, _) => { if (_project is not null) CodeEntityService.Delete(_project, section.ToString(), e.Id); ShowSection(section); };
+        var cm = new ContextMenu(); cm.Items.Add(del);
+        row.ContextMenu = cm;
+        return row;
+    }
+
+    // A short, type-appropriate summary of an entity's contents.
+    static string EntitySummary(CodeEntity e) => e.EntityType switch
+    {
+        CodeEntityType.Enum     => $"{e.EnumValues.Count} values",
+        CodeEntityType.Function => $"{e.Ports.Count} ports",
+        CodeEntityType.Object   => string.IsNullOrEmpty(e.InstanceOfId) ? "object" : "instance",
+        _                       => $"{e.Fields.Count} fields · {e.Methods.Count} methods",
+    };
+
+    // Prompts for a name and creates a bare entity of the section's type (full editing comes later).
+    Task NewEntity(Section section) => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null) return;
+        var name = await PromptDialog.Show(this, string.Format(Loc.S("Sec_NewPrompt"), SingularLabel(section)), SingularLabel(section), SingularLabel(section));
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var entity = new CodeEntity { Name = name.Trim(), EntityType = Enum.Parse<CodeEntityType>(section.ToString()) };
+        CodeEntityService.Save(_project, section.ToString(), entity);
+        ShowSection(section);
+    }, "NewEntity");
+
+    // Plural heading label for a section.
+    static string PluralLabel(Section s) => s switch
+    {
+        Section.Namespace => "Namespaces", Section.Class => "Classes", Section.Struct => "Structs",
+        Section.Interface => "Interfaces", Section.Enum => "Enums", Section.Function => "Functions",
+        Section.Object => "Objects", Section.Boards => "Boards", _ => "Export",
+    };
+
+    // Singular label (the entity type name) for "New …" actions.
+    static string SingularLabel(Section s) => s.ToString();
 
     // ── small helpers ────────────────────────────────────────────────────────
 

@@ -68,6 +68,12 @@ public static class Loc
         // Cockpit
         ["Cockpit_Exit"]    = "Back",
         ["Cockpit_ExitTip"] = "Back to projects",
+        ["Sec_New"]         = "＋ New {0}",
+        ["Sec_NewPrompt"]   = "{0} name:",
+        ["Sec_Empty"]       = "No {0} yet.",
+        ["Sec_Delete"]      = "✕  Delete",
+        ["Sec_BoardsBlurb"] = "Structure boards — arrange entities on a canvas. (Board canvas port coming.)",
+        ["Sec_ExportBlurb"] = "Generate source from your structures in 10 languages. (Wiring coming.)",
 
         // New-project dialog
         ["NewProj_Title"]     = "New project",
