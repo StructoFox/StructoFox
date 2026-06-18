@@ -27,7 +27,7 @@
         <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
             <Setter Property="Background" Value="{DynamicResource InputBgBrush}" />
         </Style>
-        <Style Selector="TextBox:focused /template/ Border#PART_BorderElement">
+        <Style Selector="TextBox:focus-within /template/ Border#PART_BorderElement">
             <Setter Property="Background" Value="{DynamicResource InputBgBrush}" />
         </Style>
         <Style Selector="TextBox">
@@ -36,7 +36,7 @@
         <Style Selector="TextBox:pointerover">
             <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
         </Style>
-        <Style Selector="TextBox:focused">
+        <Style Selector="TextBox:focus-within">
             <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
         </Style>
     </Application.Styles>
