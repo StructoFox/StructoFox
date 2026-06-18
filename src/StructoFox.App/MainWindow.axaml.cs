@@ -752,14 +752,41 @@ public partial class MainWindow : Window
         DockPanel.SetDock(name, Dock.Left); dock.Children.Add(name);
         row.Child = dock;
 
-        if (section == Section.Function && _project is not null)
-            row.PointerPressed += (_, ev) => { if (ev.GetCurrentPoint(row).Properties.IsLeftButtonPressed) _ = DiagramLauncher.ChooseAndOpen(this, _project!, e.Id, e.Name, null); };
+        // Functions open the diagram chooser; every other entity opens the full structure editor.
+        if (_project is not null)
+            row.PointerPressed += (_, ev) =>
+            {
+                if (!ev.GetCurrentPoint(row).Properties.IsLeftButtonPressed) return;
+                if (section == Section.Function)
+                    _ = DiagramLauncher.ChooseAndOpen(this, _project!, e.Id, e.Name, null);
+                else
+                    _ = EditEntity(e, section);
+            };
 
         var del = new MenuItem { Header = Loc.S("Sec_Delete") };
         del.Click += (_, _) => { if (_project is not null) CodeEntityService.Delete(_project, section.ToString(), e.Id); ShowSection(section); };
         var cm = new ContextMenu(); cm.Items.Add(del);
         row.ContextMenu = cm;
         return row;
+    }
+
+    // Opens the structure editor for an entity; on save (which may change its type) refreshes the list.
+    Task EditEntity(CodeEntity e, Section section) => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null) return;
+        var known = LoadAllEntities(_project);
+        var saved = await CodeEntityEditorDialog.Edit(this, _project, e, known, null);
+        if (saved) ShowSection(section);
+    }, "EditEntity");
+
+    // Every entity in the project, keyed by id — the candidate pool for inheritance / instance combos.
+    static IReadOnlyDictionary<string, CodeEntity> LoadAllEntities(string projFolder)
+    {
+        var all = new Dictionary<string, CodeEntity>();
+        foreach (var t in Enum.GetValues<CodeEntityType>())
+            foreach (var ent in CodeEntityService.LoadAll(projFolder, t.ToString()))
+                all[ent.Id] = ent;
+        return all;
     }
 
     // A short, type-appropriate summary of an entity's contents.
