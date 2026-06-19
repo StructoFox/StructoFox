@@ -78,7 +78,7 @@ public static class CodeExportService
         return sb.ToString().TrimEnd() + "\n";
     }
 
-    private static int SortRank(CodeEntity e) => e.EntityType switch
+    private static int SortRank(CodeEntity e) => e.IsEntryPoint ? -1 : e.EntityType switch
     {
         CodeEntityType.Enum => 0, CodeEntityType.Interface => 1, CodeEntityType.Struct => 2,
         CodeEntityType.Class => 3, CodeEntityType.Function => 4, CodeEntityType.Object => 5, _ => 6
@@ -87,6 +87,26 @@ public static class CodeExportService
     private static void EmitEntity(StringBuilder sb, CodeEntity e, ExportLanguage lang, string ind, Func<string, string> name)
     {
         Doc(sb, e, ind);
+
+        // The entry point is flagged and, in languages where main must live inside a class
+        // (Java; classic C#), wrapped in a holder class. Elsewhere it stays a free function.
+        if (e.EntityType == CodeEntityType.Function && e.IsEntryPoint)
+        {
+            sb.AppendLine($"{ind}// ▶ Entry point (main)");
+            if (lang is ExportLanguage.Java or ExportLanguage.CSharp)
+            {
+                sb.AppendLine($"{ind}public class Program");
+                sb.AppendLine($"{ind}{{");
+                EmitByLang(sb, e, lang, ind + "    ", name);
+                sb.AppendLine($"{ind}}}");
+                return;
+            }
+        }
+        EmitByLang(sb, e, lang, ind, name);
+    }
+
+    private static void EmitByLang(StringBuilder sb, CodeEntity e, ExportLanguage lang, string ind, Func<string, string> name)
+    {
         switch (lang)
         {
             case ExportLanguage.CSharp:     EmitCSharp(sb, e, ind, name); break;

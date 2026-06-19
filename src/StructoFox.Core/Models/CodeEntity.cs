@@ -81,6 +81,10 @@ public class CodeEntity
 
     /// <summary>Optional containing namespace name.</summary>
     public string         Namespace     { get; set; } = "";
+
+    /// <summary>True for the project's single entry-point function (main). Surfaced in its own cockpit
+    /// tab so it doesn't drown among the other functions, and wrapped per language on export.</summary>
+    public bool           IsEntryPoint  { get; set; } = false;
 }
 
 public class CodeBoard

@@ -19,7 +19,7 @@ namespace StructoFox.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    enum Section { Boards, Namespace, Class, Struct, Interface, Enum, Function, Object, Export }
+    enum Section { Boards, Main, Namespace, Class, Struct, Interface, Enum, Function, Object, Export }
     enum HomeView { Cards, BigCards, DetailList, MultiList }
     enum HomeSort { DateDesc, DateAsc, NameAsc, NameDesc }
 
@@ -749,6 +749,7 @@ public partial class MainWindow : Window
         (Section sec, string icon, string label)[] items =
         {
             (Section.Boards,    "🖼", "Boards"),
+            (Section.Main,      "▶", "Main"),
             (Section.Namespace, "Ⓝ", "Namespaces"),
             (Section.Class,     "Ⓒ", "Classes"),
             (Section.Struct,    "Ⓢ", "Structs"),
@@ -854,6 +855,7 @@ public partial class MainWindow : Window
         root.Children.Add(new TextBlock { Text = ProjectName(_project ?? ""), FontFamily = Mono, FontSize = 11, Opacity = 0.6 });
 
         if (section == Section.Boards) { BuildBoardsView(root); return root; }
+        if (section == Section.Main)   { BuildMainView(root); return root; }
         if (section == Section.Export) { BuildExportView(root); return root; }
 
         // Entity section: heading, a "New …" action, then the list of entities of this type.
@@ -864,6 +866,8 @@ public partial class MainWindow : Window
         root.Children.Add(add);
 
         var entities = _project is null ? new() : CodeEntityService.LoadAll(_project, section.ToString());
+        // The entry-point function lives in its own "Main" tab, so it doesn't appear in the Functions list.
+        if (section == Section.Function) entities = entities.Where(e => !e.IsEntryPoint).ToList();
         if (entities.Count == 0)
             root.Children.Add(Note(string.Format(Loc.S("Sec_Empty"), PluralLabel(section))));
         else
@@ -902,12 +906,87 @@ public partial class MainWindow : Window
                     _ = EditEntity(e, section);
             };
 
+        var cm = new ContextMenu();
+        if (section == Section.Function)
+        {
+            var setMain = new MenuItem { Header = Loc.S("Main_SetAs") };
+            setMain.Click += (_, _) => SetAsMain(e);
+            cm.Items.Add(setMain);
+            cm.Items.Add(new Separator());
+        }
         var del = new MenuItem { Header = Loc.S("Sec_Delete") };
         del.Click += (_, _) => { if (_project is not null) CodeEntityService.Delete(_project, section.ToString(), e.Id); ShowSection(section); };
-        var cm = new ContextMenu(); cm.Items.Add(del);
+        cm.Items.Add(del);
         row.ContextMenu = cm;
         return row;
     }
+
+    // ── Main (entry point) ───────────────────────────────────────────────────
+
+    // The Main tab: the project's single entry-point function, surfaced on its own so it stays visible.
+    void BuildMainView(StackPanel root)
+    {
+        root.Children.Add(Heading("Main"));
+        root.Children.Add(Note(Loc.S("Main_Blurb")));
+        if (_project is null) return;
+
+        var main = CodeEntityService.LoadAll(_project, "Function").FirstOrDefault(e => e.IsEntryPoint);
+        if (main is null)
+        {
+            var create = Ui.Btn(Loc.S("Main_Create"));
+            create.HorizontalAlignment = HorizontalAlignment.Left;
+            create.Click += (_, _) => CreateMain();
+            root.Children.Add(create);
+            return;
+        }
+
+        var card = new Border { Padding = new(14), CornerRadius = new(8), BorderThickness = new(1) };
+        Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
+        Ui.Theme(card, Border.BorderBrushProperty, "AccentBgBrush");
+
+        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        nameRow.Children.Add(new TextBlock { Text = "▶", FontSize = 16, VerticalAlignment = VerticalAlignment.Center });
+        var nm = new TextBlock { Text = main.Name, FontSize = 16, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center };
+        Ui.Theme(nm, TextBlock.ForegroundProperty, "ContentTextBrush");
+        nameRow.Children.Add(nm);
+
+        var edit = Ui.Btn(Loc.S("Code_Edit"));   edit.Click += async (_, _) => await EditEntity(main, Section.Main);
+        var flow = Ui.Btn(Loc.S("Code_SketchFlow")); flow.Click += (_, _) => _ = DiagramLauncher.ChooseAndOpen(this, _project!, main.Id, main.Name, null);
+        var unset = Ui.Btn(Loc.S("Main_Unset")); unset.Click += (_, _) => UnsetMain(main);
+        var btns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { edit, flow, unset } };
+
+        card.Child = new StackPanel { Spacing = 10, Children = { nameRow, Dim(EntitySummary(main), 11), btns } };
+        root.Children.Add(card);
+    }
+
+    // Creates a fresh entry-point function named "main".
+    void CreateMain() => CrashHandler.Safe(() =>
+    {
+        if (_project is null) return;
+        CodeEntityService.Save(_project, "Function", new CodeEntity { Name = "main", EntityType = CodeEntityType.Function, IsEntryPoint = true });
+        ShowSection(Section.Main);
+    }, "CreateMain");
+
+    // Promotes a function to THE entry point, clearing the flag from any previous main (single main).
+    void SetAsMain(CodeEntity e) => CrashHandler.Safe(() =>
+    {
+        if (_project is null) return;
+        foreach (var fn in CodeEntityService.LoadAll(_project, "Function"))
+        {
+            var shouldBe = fn.Id == e.Id;
+            if (fn.IsEntryPoint != shouldBe) { fn.IsEntryPoint = shouldBe; CodeEntityService.Save(_project, "Function", fn); }
+        }
+        ShowSection(Section.Main);
+    }, "SetAsMain");
+
+    // Demotes the entry point back to an ordinary function (it returns to the Functions tab).
+    void UnsetMain(CodeEntity e) => CrashHandler.Safe(() =>
+    {
+        if (_project is null) return;
+        e.IsEntryPoint = false;
+        CodeEntityService.Save(_project, "Function", e);
+        ShowSection(Section.Function);
+    }, "UnsetMain");
 
     // Opens the structure editor for an entity; on save (which may change its type) refreshes the list.
     Task EditEntity(CodeEntity e, Section section) => CrashHandler.SafeAsync(async () =>

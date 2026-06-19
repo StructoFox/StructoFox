@@ -65,6 +65,12 @@ public static class Loc
         ["Home_NoProjects"]    = "No projects",
         ["Home_NoProjectsHint"] = "No projects here yet — create one with ➕",
 
+        // Main (entry point) tab
+        ["Main_Blurb"]  = "The program's entry point — its main(). One per project; it gets its own tab so it stays in sight.",
+        ["Main_Create"] = "▶ Create main",
+        ["Main_Unset"]  = "Unset as main",
+        ["Main_SetAs"]  = "▶ Set as main",
+
         // Cockpit
         ["Cockpit_Exit"]    = "Back",
         ["Cockpit_ExitTip"] = "Back to projects",
@@ -317,6 +323,12 @@ public static class Loc
         // Common
         ["Common_Untitled"] = "Unbenannt",
         ["Flow_EditText"]   = "✎ Text bearbeiten…",
+
+        // Main (entry point) tab
+        ["Main_Blurb"]  = "Der Einstiegspunkt des Programms — die main(). Eine pro Projekt; sie bekommt einen eigenen Reiter, damit sie sichtbar bleibt.",
+        ["Main_Create"] = "▶ Main anlegen",
+        ["Main_Unset"]  = "Als Main entfernen",
+        ["Main_SetAs"]  = "▶ Als Main setzen",
 
         // Structogram editor
         ["Struct_Title"]          = "▦  Struktogramm — {0}",
