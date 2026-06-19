@@ -911,6 +911,9 @@ public partial class MainWindow : Window
         row.Child = dock;
         _sectionRows.Add((e, row));
 
+        var pressPos = default(Point);
+        PointerPressedEventArgs? pressArgs = null;   // kept so a drag can start from PointerMoved
+
         row.PointerPressed += (_, ev) =>
         {
             var pt = ev.GetCurrentPoint(row);
@@ -925,13 +928,37 @@ public partial class MainWindow : Window
             var mods = ev.KeyModifiers;
             if (mods.HasFlag(KeyModifiers.Shift)) SelectEntityRangeTo(e.Id);
             else if (mods.HasFlag(KeyModifiers.Control)) { if (!_selEntities.Add(e.Id)) _selEntities.Remove(e.Id); _selAnchor = e.Id; }
-            else { _selEntities.Clear(); _selEntities.Add(e.Id); _selAnchor = e.Id; }
+            // Plain press on an already-selected row keeps the (multi-)selection so it can be dragged;
+            // pressing an unselected row selects it exclusively.
+            else if (!_selEntities.Contains(e.Id)) { _selEntities.Clear(); _selEntities.Add(e.Id); _selAnchor = e.Id; }
             RefreshEntitySelection();
+            pressArgs = ev; pressPos = ev.GetPosition(row);
             ev.Handled = true;
         };
+        row.PointerMoved += (_, ev) =>
+        {
+            if (pressArgs is null || !ev.GetCurrentPoint(row).Properties.IsLeftButtonPressed) return;
+            var d = ev.GetPosition(row) - pressPos;
+            if (Math.Abs(d.X) < 4 && Math.Abs(d.Y) < 4) return;   // movement threshold
+            var args = pressArgs; pressArgs = null;
+            StartEntityDrag(args);
+        };
+        row.PointerReleased += (_, _) => pressArgs = null;
 
         row.ContextMenu = BuildEntityMenu(e, section);
         return row;
+    }
+
+    // Starts a drag carrying the current entity selection (project + ids), so they can be dropped onto
+    // an open board window as cards. (Avalonia 12 needs the originating PointerPressedEventArgs.)
+    void StartEntityDrag(PointerPressedEventArgs press)
+    {
+        if (_project is null || _selEntities.Count == 0) return;
+        var item = new DataTransferItem();
+        item.Set(CodeBoardWindow.EntityDragFormat, _project + CodeBoardWindow.DragSep + string.Join(",", _selEntities));
+        var transfer = new DataTransfer();
+        transfer.Add(item);
+        _ = DragDrop.DoDragDropAsync(press, transfer, DragDropEffects.Copy);
     }
 
     // The per-entity right-click menu: Edit (+ Sketch flow / Set as main for functions), then — below a

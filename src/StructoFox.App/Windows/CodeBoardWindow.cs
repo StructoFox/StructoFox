@@ -125,6 +125,11 @@ public class CodeBoardWindow : Window
         _canvas.PointerMoved    += Canvas_PointerMoved;
         _canvas.PointerReleased += Canvas_PointerReleased;
 
+        // Accept entities dragged in from the cockpit's entity lists.
+        DragDrop.SetAllowDrop(_canvas, true);
+        _canvas.AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        _canvas.AddHandler(DragDrop.DropEvent, OnDrop);
+
         // Ctrl + wheel zooms; plain wheel scrolls.
         _scroll.PointerWheelChanged += (_, e) =>
         {
@@ -1046,6 +1051,51 @@ public class CodeBoardWindow : Window
         dlg.Content = grid;
 
         return dlg.ShowDialog<CodeEntity?>(this).ContinueWith(_ => result, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    // ── Drag-and-drop from the cockpit entity lists ──────────────────────────
+
+    /// <summary>Clipboard/drag format: "{projectFolder}{id,id,…}". The cockpit packs the selected
+    /// entity ids; the board only accepts a drop from the SAME project.</summary>
+    public static readonly DataFormat<string> EntityDragFormat = DataFormat.CreateInProcessFormat<string>("structofox-entities");
+    public const char DragSep = '\n';   // separates the project folder from the id list in the payload
+
+    void OnDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(EntityDragFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    void OnDrop(object? sender, DragEventArgs e)
+    {
+        if (e.DataTransfer.TryGetValue(EntityDragFormat) is not string payload) return;
+        var sep = payload.IndexOf(DragSep);
+        if (sep < 0) return;
+        var proj = payload[..sep];
+        if (!string.Equals(proj, _projFolder, StringComparison.OrdinalIgnoreCase)) return;   // different project
+        var ids = payload[(sep + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries);
+        AddEntitiesById(ids, e.GetPosition(_canvas));
+        e.Handled = true;
+    }
+
+    // Places dropped entities as cards from the drop point, cascading so they don't stack exactly.
+    void AddEntitiesById(IEnumerable<string> ids, Point at)
+    {
+        foreach (var t in CodeEntityService.EntityTypes)
+            foreach (var ent in CodeEntityService.LoadAll(_projFolder, t))
+                _entities[ent.Id] = ent;
+
+        double off = 0;
+        foreach (var id in ids)
+        {
+            if (_boardData.Positions.ContainsKey(id)) continue;       // already on the board
+            if (!_entities.TryGetValue(id, out var ent)) continue;
+            var pos = new CodeCardPosition { X = Math.Max(0, at.X + off), Y = Math.Max(0, at.Y + off) };
+            _boardData.Positions[id] = pos;
+            RenderCard(ent, pos);
+            off += 26;
+        }
+        Save();
     }
 
     // ── Entity editor (shared standalone dialog) ─────────────────────────────
