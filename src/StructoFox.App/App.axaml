@@ -18,6 +18,17 @@
             <Setter Property="Foreground" Value="{DynamicResource ContentBgBrush}" />
         </Style>
 
+        <!-- ToggleButton isn't matched by the "Button" type selector above, so mirror the hover/pressed
+             contrast rule for it too (otherwise Fluent's pale default hover shows through). -->
+        <Style Selector="ToggleButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentBgBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ContentBgBrush}" />
+        </Style>
+        <Style Selector="ToggleButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentBgBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ContentBgBrush}" />
+        </Style>
+
         <!-- Text fields: Fluent overrides the field background per visual state with its own (dark)
              theme brushes, so a focused/hovered box turned black. Force our InputBg brush onto the
              template's border element in every state, and keep the text on our themed colour. -->
