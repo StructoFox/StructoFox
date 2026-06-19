@@ -41,6 +41,10 @@ public class CodeBoardWindow : Window
     string? _connectFromEntityId;
     string? _connectFromPortId;
     Line?   _rubberBand;
+    readonly List<Control> _dragMarkers = new();   // ✕ overlays shown on invalid target ports while wiring
+
+    // How well a candidate target port matches the source: same type + convention, type only, or neither.
+    enum PortMatch { Exact, ConvMismatch, TypeMismatch }
 
     // Selection
     readonly HashSet<string> _selectedIds = new();
@@ -192,6 +196,7 @@ public class CodeBoardWindow : Window
         _connectFromEntityId = null;
         _connectFromPortId   = null;
         RemoveRubberBand();
+        ClearDragHighlights();
         if (_connectBtn is not null)
         {
             _connectBtn.FontWeight = _connectMode ? FontWeight.Bold : FontWeight.Normal;
@@ -537,63 +542,112 @@ public class CodeBoardWindow : Window
 
     // ── Connect mode ───────────────────────────────────────────────────────
 
-    async void HandlePortClick(string entityId, string portId, PortDirection direction)
+    void HandlePortClick(string entityId, string portId, PortDirection direction)
     {
+        // A connection starts at an output port; arming it lights up the valid targets across the board.
         if (_connectFromEntityId is null)
         {
-            if (direction != PortDirection.Output)
-            {
-                await MessageDialog.Show(this, Loc.S("Code_ConnStartOutput"), Loc.S("Code_ConnTitle"));
-                return;
-            }
+            if (direction != PortDirection.Output) return;
             _connectFromEntityId = entityId;
             _connectFromPortId   = portId;
             EnsureRubberBand();
+            ApplyDragHighlights();
             return;
         }
 
-        if (direction != PortDirection.Input)
-        {
-            await MessageDialog.Show(this, Loc.S("Code_ConnEndInput"), Loc.S("Code_ConnTitle"));
-            return;
-        }
-        if (entityId == _connectFromEntityId)
-        {
-            _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
-            return;
-        }
+        if (entityId == _connectFromEntityId) { CancelConnect(); return; }   // back on the source → cancel
+        if (direction != PortDirection.Input) return;                       // must land on an input
 
-        // Type-safety: convention AND data type must match, so mismatches can't be wired by accident.
-        var srcPort = FindPort(_connectFromEntityId!, _connectFromPortId!);
-        var dstPort = FindPort(entityId, portId);
-        if (srcPort is not null && dstPort is not null)
-        {
-            if (srcPort.Convention != dstPort.Convention)
-            {
-                await MessageDialog.Show(this, string.Format(Loc.S("Code_MismatchConv"), srcPort.Name, srcPort.Convention, dstPort.Name, dstPort.Convention), Loc.S("Code_MismatchTitle"));
-                _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
-                return;
-            }
-            if (!NormType(srcPort.DataType).Equals(NormType(dstPort.DataType), StringComparison.OrdinalIgnoreCase))
-            {
-                await MessageDialog.Show(this, string.Format(Loc.S("Code_MismatchType"), srcPort.Name, srcPort.DataType, dstPort.Name, dstPort.DataType), Loc.S("Code_MismatchTitle"));
-                _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
-                return;
-            }
-        }
+        var src = FindPort(_connectFromEntityId!, _connectFromPortId!);
+        var dst = FindPort(entityId, portId);
+        // Only an exact match wires up — the red/amber ✕ already shows why the others can't.
+        if (src is null || dst is null || PortMatchOf(src, dst) != PortMatch.Exact) return;
 
         var rel = new CodeRelation { FromId = _connectFromEntityId!, FromPortId = _connectFromPortId!, ToId = entityId, ToPortId = portId };
         _boardData.Relations.Add(rel);
         Save();
         RenderRelation(rel);
+        CancelConnect();
+    }
 
-        _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand();
+    // Drops the in-progress connection and clears its rubber band + target highlights.
+    void CancelConnect()
+    {
+        _connectFromEntityId = null;
+        _connectFromPortId   = null;
+        RemoveRubberBand();
+        ClearDragHighlights();
     }
 
     CodePort? FindPort(string entityId, string portId) =>
         _entities.TryGetValue(entityId, out var e) ? e.Ports.FirstOrDefault(p => p.Id == portId) : null;
 
     static string NormType(string t) => (t ?? "").Trim().TrimEnd('*', '&', ' ');
+
+    // Same data type AND convention = Exact; same type, different convention = ConvMismatch; else TypeMismatch.
+    static PortMatch PortMatchOf(CodePort src, CodePort dst)
+    {
+        if (!NormType(src.DataType).Equals(NormType(dst.DataType), StringComparison.OrdinalIgnoreCase)) return PortMatch.TypeMismatch;
+        if (src.Convention != dst.Convention) return PortMatch.ConvMismatch;
+        return PortMatch.Exact;
+    }
+
+    // While wiring, recolour every port: green = connectable, amber ✕ = type ok but wrong passing
+    // convention, red ✕ = wrong type; non-targets (outputs, same card) are dimmed.
+    void ApplyDragHighlights()
+    {
+        ClearDragHighlights();
+        if (_connectFromEntityId is null || _connectFromPortId is null) return;
+        var src = FindPort(_connectFromEntityId, _connectFromPortId);
+        if (src is null) return;
+
+        foreach (var (key, dot) in _portDots)
+        {
+            var sep    = key.IndexOf(':');
+            var entId  = key[..sep];
+            var portId = key[(sep + 1)..];
+
+            if (entId == _connectFromEntityId)            // the source card: keep the chosen dot lit, dim the rest
+            {
+                dot.Opacity = portId == _connectFromPortId ? 1 : 0.3;
+                continue;
+            }
+            var port = FindPort(entId, portId);
+            if (port is null || port.Direction != PortDirection.Input) { dot.Opacity = 0.3; continue; }
+
+            switch (PortMatchOf(src, port))
+            {
+                case PortMatch.Exact:
+                    dot.Stroke = Brushes.LimeGreen; dot.StrokeThickness = 3; dot.Opacity = 1;
+                    break;
+                case PortMatch.ConvMismatch:
+                    dot.Opacity = 0.55; AddCross(dot, Color.FromRgb(0xF5, 0xC2, 0x00));  // amber
+                    break;
+                case PortMatch.TypeMismatch:
+                    dot.Opacity = 0.45; AddCross(dot, Color.FromRgb(0xE5, 0x39, 0x35));  // red
+                    break;
+            }
+        }
+    }
+
+    // Places a small ✕ over a port dot (the marker is purely decorative — clicks pass through).
+    void AddCross(Ellipse dot, Color color)
+    {
+        var x = new TextBlock { Text = "✕", FontSize = 11, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(color), IsHitTestVisible = false };
+        Canvas.SetLeft(x, Canvas.GetLeft(dot) + PortRadius - 5);
+        Canvas.SetTop(x,  Canvas.GetTop(dot)  + PortRadius - 8);
+        x.ZIndex = 6;
+        _canvas!.Children.Add(x);
+        _dragMarkers.Add(x);
+    }
+
+    // Removes the ✕ overlays and restores every dot to its resting look.
+    void ClearDragHighlights()
+    {
+        foreach (var m in _dragMarkers) _canvas?.Children.Remove(m);
+        _dragMarkers.Clear();
+        foreach (var dot in _portDots.Values) { dot.Stroke = Brushes.White; dot.StrokeThickness = 1.5; dot.Opacity = 1; }
+    }
 
     void EnsureRubberBand()
     {
@@ -718,7 +772,7 @@ public class CodeBoardWindow : Window
 
         if (props.IsRightButtonPressed)
         {
-            if (_connectMode) { _connectFromEntityId = null; _connectFromPortId = null; RemoveRubberBand(); return; }
+            if (_connectMode) { CancelConnect(); return; }
             ShowCanvasAddMenu(e.GetPosition(_canvas));
             e.Handled = true;
             return;
