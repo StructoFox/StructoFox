@@ -27,9 +27,26 @@ public class DiagramStyle
     /// <summary>Base font size for diagram text, in px.</summary>
     public double FontSize { get; set; } = 12;
 
+    // ── Decoration (branding for the plan / its export) ──────────────────────
+
+    /// <summary>Render the diagram's title as a heading on the plan.</summary>
+    public bool ShowTitle { get; set; } = false;
+
+    /// <summary>A faint diagonal watermark text (e.g. "DRAFT", a company name); empty = none.</summary>
+    public string Watermark { get; set; } = "";
+
+    /// <summary>Path to a logo image to place in a corner; empty/missing = none.</summary>
+    public string LogoPath { get; set; } = "";
+
+    /// <summary>Which corner the logo sits in.</summary>
+    public DecorCorner LogoCorner { get; set; } = DecorCorner.TopRight;
+
     // Hands back a fresh copy of the default "drawing-board" look: white paper, dark thin lines.
     public static DiagramStyle Default() => new();
 }
+
+/// <summary>The corner a diagram logo is anchored to.</summary>
+public enum DecorCorner { TopLeft, TopRight, BottomLeft, BottomRight }
 
 /// <summary>
 /// Optional per-element appearance overrides (one block / node). Every field is nullable and

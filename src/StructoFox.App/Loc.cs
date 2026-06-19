@@ -189,6 +189,18 @@ public static class Loc
         ["NodeTxt_Underline"]          = "Underline",
         ["NodeTxt_Strike"]             = "Strikethrough",
 
+        // Diagram decoration (title / watermark / logo)
+        ["Decor_Title"]      = "Plan decoration",
+        ["Decor_Open"]       = "🏷 Decoration…",
+        ["Decor_OpenTip"]    = "Title, watermark and logo on the plan",
+        ["Decor_TitleText"]  = "Title:",
+        ["Decor_ShowTitle"]  = "Show the title on the plan",
+        ["Decor_Watermark"]  = "Watermark (faint diagonal text):",
+        ["Decor_Logo"]       = "Logo image:",
+        ["Decor_Browse"]     = "Browse…",
+        ["Decor_ClearLogo"]  = "Clear",
+        ["Decor_Corner"]     = "Logo corner:",
+
         // Per-element styling
         ["Style_Menu"]      = "🎨 Style",
         ["Style_Line"]      = "Line colour",
@@ -415,6 +427,18 @@ public static class Loc
         ["NodeTxt_Italic"]             = "Kursiv",
         ["NodeTxt_Underline"]          = "Unterstrichen",
         ["NodeTxt_Strike"]             = "Durchgestrichen",
+
+        // Diagramm-Deko (Titel / Wasserzeichen / Logo)
+        ["Decor_Title"]      = "Plan-Dekoration",
+        ["Decor_Open"]       = "🏷 Dekoration…",
+        ["Decor_OpenTip"]    = "Titel, Wasserzeichen und Logo auf dem Plan",
+        ["Decor_TitleText"]  = "Titel:",
+        ["Decor_ShowTitle"]  = "Titel auf dem Plan anzeigen",
+        ["Decor_Watermark"]  = "Wasserzeichen (blasser diagonaler Text):",
+        ["Decor_Logo"]       = "Logo-Bild:",
+        ["Decor_Browse"]     = "Durchsuchen…",
+        ["Decor_ClearLogo"]  = "Leeren",
+        ["Decor_Corner"]     = "Logo-Ecke:",
 
         // Per-element styling
         ["Style_Menu"]      = "🎨 Stil",

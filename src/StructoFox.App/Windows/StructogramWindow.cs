@@ -71,6 +71,7 @@ public class StructogramWindow : Window
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(GridLength.Star));
         Content = root;
+        _root = root;
 
         // Toolbar: a background-colour button plus a usage hint.
         var bar = new Border { Padding = new(12, 8, 12, 8) };
@@ -95,10 +96,21 @@ public class StructogramWindow : Window
         };
         Ui.Theme(hint, TextBlock.ForegroundProperty, "SidebarTextBrush");
 
+        var decorBtn = Ui.Btn(Loc.S("Decor_Open"), Loc.S("Decor_OpenTip"));
+        decorBtn.Click += async (_, _) =>
+        {
+            var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style);
+            if (newTitle is null) return;
+            _data.Title = newTitle;
+            Save();
+            RefreshDecor();
+            Title = string.Format(Loc.S("Struct_Title"), string.IsNullOrEmpty(newTitle) ? Loc.S("Common_Untitled") : newTitle);
+        };
+
         bar.Child = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 10,
-            Children = { bgBtn, hint },
+            Children = { bgBtn, decorBtn, hint },
         };
 
         // Scrollable diagram host — the structogram can grow past the window.
@@ -126,6 +138,20 @@ public class StructogramWindow : Window
         scroll.Content = _hostBorder;
 
         Rebuild();
+        RefreshDecor();
+    }
+
+    Grid? _root;
+    Control? _decor;
+
+    // Rebuilds the title/watermark/logo overlay over the canvas from the current diagram style.
+    void RefreshDecor()
+    {
+        if (_root is null) return;
+        if (_decor is not null) _root.Children.Remove(_decor);
+        _decor = DiagramDecor.Build(_data.Title, _style);
+        Grid.SetRow(_decor, 1);
+        _root.Children.Add(_decor);
     }
 
     // Re-renders the whole tree from the model — cheap enough to do on every change.

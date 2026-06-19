@@ -83,6 +83,7 @@ public class FlowChartWindow : Window
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(GridLength.Star));
         Content = root;
+        _root = root;
 
         var toolbar = BuildToolbar();
         Grid.SetRow(toolbar, 0);
@@ -133,6 +134,20 @@ public class FlowChartWindow : Window
 
         foreach (var n in _data.Nodes) RenderNode(n);
         RenderAllConnections();
+        RefreshDecor();
+    }
+
+    Grid? _root;
+    Control? _decor;
+
+    // Rebuilds the title/watermark/logo overlay over the canvas from the current diagram style.
+    void RefreshDecor()
+    {
+        if (_root is null) return;
+        if (_decor is not null) _root.Children.Remove(_decor);
+        _decor = DiagramDecor.Build(_data.Title, _style);
+        Grid.SetRow(_decor, 1);
+        _root.Children.Add(_decor);
     }
 
     // Builds the toolbar: shape-add buttons, the three modes, the → structogram action and zoom reset.
@@ -188,6 +203,18 @@ public class FlowChartWindow : Window
             Save();
         };
         row.Children.Add(bgBtn);
+
+        var decorBtn = TBtn(Loc.S("Decor_Open"), Loc.S("Decor_OpenTip"));
+        decorBtn.Click += async (_, _) =>
+        {
+            var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style);
+            if (newTitle is null) return;
+            _data.Title = newTitle;
+            Save();
+            RefreshDecor();
+            Title = string.Format(Loc.S("Flow_Title"), string.IsNullOrEmpty(newTitle) ? Loc.S("Common_Untitled") : newTitle);
+        };
+        row.Children.Add(decorBtn);
 
         var zoomBtn = TBtn("1:1", Loc.S("Common_ResetZoomTip"));
         zoomBtn.Click += (_, _) => { _zoom = 1.0; if (_canvas is not null) _canvas.RenderTransform = null; };
