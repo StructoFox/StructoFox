@@ -32,6 +32,7 @@ public class ExportWindow : Window
         (ExportLanguage.CSharp, "C#"), (ExportLanguage.Cpp, "C++"), (ExportLanguage.Java, "Java"),
         (ExportLanguage.TypeScript, "TypeScript"), (ExportLanguage.Python, "Python"), (ExportLanguage.Kotlin, "Kotlin"),
         (ExportLanguage.Swift, "Swift"), (ExportLanguage.Php, "PHP"), (ExportLanguage.Go, "Go"), (ExportLanguage.Rust, "Rust"),
+        (ExportLanguage.Verse, "Verse"),
     };
 
     public ExportWindow(string projFolder, IEnumerable<CodeEntity> entities, string title)

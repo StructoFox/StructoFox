@@ -3,7 +3,7 @@ using StructoFox.Core.Models;
 
 namespace StructoFox.Core;
 
-public enum ExportLanguage { CSharp, Cpp, Java, TypeScript, Python, Kotlin, Swift, Php, Go, Rust }
+public enum ExportLanguage { CSharp, Cpp, Java, TypeScript, Python, Kotlin, Swift, Php, Go, Rust, Verse }
 
 /// <summary>
 /// Generates code skeletons from CodeEntity definitions for several languages.
@@ -24,8 +24,12 @@ public static class CodeExportService
         ExportLanguage.Php        => "php",
         ExportLanguage.Go         => "go",
         ExportLanguage.Rust       => "rs",
+        ExportLanguage.Verse      => "verse",
         _                         => "txt"
     };
+
+    /// <summary>The line-comment token for a language (Python and Verse use '#', the rest '//').</summary>
+    private static string Cmt(ExportLanguage lang) => lang is ExportLanguage.Python or ExportLanguage.Verse ? "#" : "//";
 
     /// <summary>Project folder used to load per-method structograms for body generation. Null = skeleton bodies only.</summary>
     private static string? _projForBodies;
@@ -38,7 +42,7 @@ public static class CodeExportService
         string Name(string id) => byId.TryGetValue(id, out var e) ? e.Name : "";
 
         var sb = new StringBuilder();
-        sb.AppendLine("// Auto-generated skeleton from StructoFox. Fill in the logic.");
+        sb.AppendLine($"{Cmt(lang)} Auto-generated skeleton from StructoFox. Fill in the logic.");
         if (lang == ExportLanguage.Php) sb.AppendLine("<?php");
         if (lang == ExportLanguage.Python) sb.AppendLine(PythonImports(all));
         sb.AppendLine();
@@ -62,7 +66,7 @@ public static class CodeExportService
                 else
                 {
                     // package/module style can't repeat per group in one file → comment marker
-                    sb.AppendLine($"// namespace / package: {grp.Key}");
+                    sb.AppendLine($"{Cmt(lang)} namespace / package: {grp.Key}");
                 }
             }
 
@@ -86,13 +90,13 @@ public static class CodeExportService
 
     private static void EmitEntity(StringBuilder sb, CodeEntity e, ExportLanguage lang, string ind, Func<string, string> name)
     {
-        Doc(sb, e, ind);
+        Doc(sb, e, ind, Cmt(lang));
 
         // The entry point is flagged and, in languages where main must live inside a class
         // (Java; classic C#), wrapped in a holder class. Elsewhere it stays a free function.
         if (e.EntityType == CodeEntityType.Function && e.IsEntryPoint)
         {
-            sb.AppendLine($"{ind}// ▶ Entry point (main)");
+            sb.AppendLine($"{ind}{Cmt(lang)} ▶ Entry point (main)");
             if (lang is ExportLanguage.Java or ExportLanguage.CSharp)
             {
                 sb.AppendLine($"{ind}public class Program");
@@ -119,6 +123,7 @@ public static class CodeExportService
             case ExportLanguage.Php:        EmitPhp(sb, e, ind, name); break;
             case ExportLanguage.Go:         EmitGo(sb, e, ind, name); break;
             case ExportLanguage.Rust:       EmitRust(sb, e, ind, name); break;
+            case ExportLanguage.Verse:      EmitVerse(sb, e, ind, name); break;
         }
     }
 
@@ -1132,6 +1137,173 @@ public static class CodeExportService
                 }
                 break;
             }
+        }
+    }
+
+    // ── Verse (Epic's functional-logic language; for Unreal / UEFN) ──────────
+
+    private static void EmitVerse(StringBuilder sb, CodeEntity e, string ind, Func<string, string> name)
+    {
+        // Access specifiers sit after the identifier: Name<public>:type. Internal is the default (omitted).
+        string Acc(CodeVisibility v) => v switch
+        {
+            CodeVisibility.Public    => "<public>",
+            CodeVisibility.Private   => "<private>",
+            CodeVisibility.Protected => "<protected>",
+            _                        => "",          // Internal = default
+        };
+        // Verse has a void type; a present return type is written ":T".
+        string Ret(string r) => r.Trim() is "void" or "" ? ":void" : ":" + r.Trim();
+        var inner = ind + "    ";
+
+        switch (e.EntityType)
+        {
+            case CodeEntityType.Enum:
+                sb.AppendLine($"{ind}{e.Name} := enum:");
+                if (e.EnumValues.Count == 0) sb.AppendLine($"{inner}# (no values)");
+                else foreach (var v in e.EnumValues) sb.AppendLine($"{inner}{v}");
+                break;
+
+            case CodeEntityType.Function:
+            {
+                var (ins, ret) = FuncSig(e);
+                var ps = string.Join(", ", ins.Select(p => $"{p.Name}:{p.DataType}"));
+                sb.AppendLine($"{ind}{e.Name}({ps}){Ret(ret)} =");
+                if (!TryVerseBody(e.Id, sb, inner)) sb.AppendLine($"{inner}# TODO: implement");
+                break;
+            }
+
+            case CodeEntityType.Object:
+                if (string.IsNullOrEmpty(e.InstanceOfId))
+                    sb.AppendLine($"{ind}# instance {e.Name}: set its class via 'instance of'");
+                else
+                {
+                    var t = name(e.InstanceOfId);
+                    sb.AppendLine($"{ind}{e.Name}:{t} = {t}{{}}");
+                }
+                break;
+
+            case CodeEntityType.Interface:
+                sb.AppendLine($"{ind}{e.Name} := interface:");
+                if (e.Methods.Count == 0) sb.AppendLine($"{inner}# (no methods)");
+                foreach (var m in e.Methods)
+                {
+                    var ps = string.Join(", ", m.Parameters.Select(p => $"{p.Name}:{p.DataType}"));
+                    sb.AppendLine($"{inner}{m.Name}({ps}){Ret(m.ReturnType)}");
+                }
+                break;
+
+            default: // Class / Struct
+            {
+                bool strct = e.EntityType == CodeEntityType.Struct;
+                var bases   = Bases(e, name);   // base class + interfaces
+                // Structs are value types and don't inherit; only classes take a (base, iface…) list.
+                var head = (!strct && bases.Count > 0)
+                    ? $"{ind}{e.Name} := class({string.Join(", ", bases)}):"
+                    : $"{ind}{e.Name} := {(strct ? "struct" : "class")}:";
+                sb.AppendLine(head);
+
+                bool any = false;
+                foreach (var f in e.Fields)
+                {
+                    // Struct fields are immutable by default; class fields commonly change → 'var'.
+                    var mut = strct ? "" : "var ";
+                    var def = string.IsNullOrWhiteSpace(f.DefaultValue) ? "" : $" = {f.DefaultValue}";
+                    sb.AppendLine($"{inner}{mut}{f.Name}{Acc(f.Visibility)}:{f.DataType}{def}");
+                    any = true;
+                }
+                foreach (var m in e.Methods)
+                {
+                    if (m.Kind == MethodKind.Destructor)
+                    {
+                        sb.AppendLine($"{inner}# destructor — Verse is garbage-collected; no equivalent");
+                        any = true; continue;
+                    }
+                    if (m.Kind == MethodKind.Constructor)
+                    {
+                        // Constructors are module-scope <constructor> functions in Verse, not class members.
+                        var cps = string.Join(", ", m.Parameters.Select(p => $"{p.Name}:{p.DataType}"));
+                        sb.AppendLine($"{inner}# constructor → at module scope: Make{e.Name}<constructor>({cps}) := {e.Name}{{ … }}");
+                        any = true; continue;
+                    }
+                    var ps = string.Join(", ", m.Parameters.Select(p => $"{p.Name}:{p.DataType}"));
+                    sb.AppendLine($"{inner}{m.Name}{Acc(m.Visibility)}({ps}){Ret(m.ReturnType)} =");
+                    if (!TryVerseBody($"{e.Id}#{m.Id}", sb, inner + "    ")) sb.AppendLine($"{inner}    # TODO: implement");
+                    any = true;
+                }
+                if (!any) sb.AppendLine($"{inner}# (empty)");
+                break;
+            }
+        }
+    }
+
+    // ── Verse body (indentation blocks; no while → loop; case with => arms) ──
+
+    private static bool TryVerseBody(string key, StringBuilder sb, string ind)
+    {
+        if (_projForBodies is null || !StructogramService.Exists(_projForBodies, key)) return false;
+        var sd = StructogramService.Load(_projForBodies, key);
+        if (sd.Root.Count == 0) return false;
+        RenderVerseSeq(sb, sd.Root, ind);
+        return true;
+    }
+
+    private static void RenderVerseSeq(StringBuilder sb, List<Models.NsBlock> blocks, string ind)
+    {
+        foreach (var b in blocks) RenderVerseBlock(sb, b, ind);
+    }
+
+    private static void RenderVerseSeqOrComment(StringBuilder sb, List<Models.NsBlock> blocks, string ind)
+    {
+        if (blocks.Count == 0) { sb.AppendLine($"{ind}# (empty)"); return; }
+        RenderVerseSeq(sb, blocks, ind);
+    }
+
+    private static void RenderVerseBlock(StringBuilder sb, Models.NsBlock b, string ind)
+    {
+        var inner = ind + "    ";
+        switch (b.Kind)
+        {
+            case Models.NsBlockKind.Statement:
+                var s = (b.Text ?? "").Trim();
+                if (s.Length > 0) sb.AppendLine($"{ind}{s}");
+                break;
+
+            case Models.NsBlockKind.If:
+                sb.AppendLine($"{ind}if ({CondText(b.Text)}):");
+                RenderVerseSeqOrComment(sb, b.Body, inner);
+                if (b.Else.Count > 0)
+                {
+                    sb.AppendLine($"{ind}else:");
+                    RenderVerseSeqOrComment(sb, b.Else, inner);
+                }
+                break;
+
+            case Models.NsBlockKind.While:   // Verse has no while → loop, breaking when the test fails
+                sb.AppendLine($"{ind}loop:");
+                sb.AppendLine($"{inner}if ({CondText(b.Text)}):");
+                RenderVerseSeqOrComment(sb, b.Body, inner + "    ");
+                sb.AppendLine($"{inner}else:");
+                sb.AppendLine($"{inner}    break");
+                break;
+
+            case Models.NsBlockKind.DoWhile: // body first, then loop while the test holds
+                sb.AppendLine($"{ind}loop:");
+                RenderVerseSeqOrComment(sb, b.Body, inner);
+                sb.AppendLine($"{inner}if ({CondText(b.Text)}):");
+                sb.AppendLine($"{inner}    # keep looping");
+                sb.AppendLine($"{inner}else:");
+                sb.AppendLine($"{inner}    break");
+                break;
+
+            case Models.NsBlockKind.Case:
+                sb.AppendLine($"{ind}case ({CondText(b.Text)}):");
+                foreach (var arm in b.Arms)
+                {
+                    sb.AppendLine($"{inner}{arm.Label} => block:");
+                    RenderVerseSeqOrComment(sb, arm.Body, inner + "    ");
+                }
+                break;
         }
     }
 }
