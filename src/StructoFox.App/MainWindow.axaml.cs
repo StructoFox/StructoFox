@@ -657,6 +657,7 @@ public partial class MainWindow : Window
         int N(string k) => t.TryGetValue(k, out var n) ? n : 0;
         return string.Join("\n", new[]
         {
+            $"Namespaces: {N("Namespace")}",
             $"Classes: {N("Class")}",
             $"Structs: {N("Struct")}",
             $"Interfaces: {N("Interface")}",
