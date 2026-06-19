@@ -65,6 +65,25 @@ public static class ProjectService
         return (Count("Class", "*.json"), Count("Function", "*.json"), boards);
     }
 
+    /// <summary>Per-entity-type file counts plus boards, for the hover tooltip on the home screen.
+    /// Keyed by the entity-type name (Namespace, Class, Struct, …); the boards count rides alongside.</summary>
+    public static (Dictionary<string, int> byType, int boards) ContentCounts(string folder)
+    {
+        var code = Path.Combine(folder, "PROJECTPLAN", "code");
+        int Count(string sub)
+        {
+            var d = Path.Combine(code, sub);
+            try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, "*.json").Count() : 0; }
+            catch { return 0; }
+        }
+        var byType = CodeEntityService.EntityTypes.ToDictionary(t => t, Count);
+
+        int boards = 0;
+        try { if (Directory.Exists(code)) boards = Directory.EnumerateFiles(code, "_board_*.json").Count(); }
+        catch { /* ignore */ }
+        return (byType, boards);
+    }
+
     /// <summary>Finds projects in a library root: the root itself if it's a project, plus its
     /// immediate sub-folders that are projects. Empty if the root is gone.</summary>
     public static List<string> Scan(string libraryRoot)

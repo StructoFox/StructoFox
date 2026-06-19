@@ -650,11 +650,21 @@ public partial class MainWindow : Window
         return row;
     }
 
-    // A hover tooltip with the project's at-a-glance content counts + path.
+    // A hover tooltip with the project's at-a-glance content counts (one line per kind).
     static string StatsTip(string path)
     {
-        var (c, f, b) = ProjectService.QuickStats(path);
-        return $"{c} classes · {f} functions · {b} boards\n{path}";
+        var (t, boards) = ProjectService.ContentCounts(path);
+        int N(string k) => t.TryGetValue(k, out var n) ? n : 0;
+        return string.Join("\n", new[]
+        {
+            $"Classes: {N("Class")}",
+            $"Structs: {N("Struct")}",
+            $"Interfaces: {N("Interface")}",
+            $"Enums: {N("Enum")}",
+            $"Objects: {N("Object")}",
+            $"Functions: {N("Function")}",
+            $"Boards: {boards}",
+        });
     }
 
     // A small colour chip of a project's preferred theme accent, or null if none/unresolvable.
