@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -46,6 +47,11 @@ public partial class MainWindow : Window
     bool     _homeFilterOpen;
     ContentControl _homeList = new();            // project-list region (re-created per home build)
     StackPanel? _homeFilterBar;
+
+    // Cockpit entity selection (for the currently shown entity section).
+    readonly HashSet<string> _selEntities = new();
+    string? _selAnchor;
+    readonly List<(CodeEntity e, Border row)> _sectionRows = new();
 
     // Builds the shell window and shows the project browser.
     public MainWindow()
@@ -851,6 +857,7 @@ public partial class MainWindow : Window
     // (loaded from the project) with a "New …" action.
     Control BuildSectionView(Section section)
     {
+        _sectionRows.Clear(); _selEntities.Clear(); _selAnchor = null;   // selection is per shown section
         var root = new StackPanel { Spacing = 12, MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Left };
         root.Children.Add(new TextBlock { Text = ProjectName(_project ?? ""), FontFamily = Mono, FontSize = 11, Opacity = 0.6 });
 
@@ -875,15 +882,23 @@ public partial class MainWindow : Window
             var list = new StackPanel { Spacing = 4 };
             foreach (var e in entities.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
                 list.Children.Add(EntityRow(e, section));
-            root.Children.Add(list);
+
+            // A transparent holder + overlay canvas gives the list a rubber-band selection like the board.
+            var overlay = new Canvas { IsHitTestVisible = false };
+            var holder  = new Grid { Background = Brushes.Transparent };
+            holder.Children.Add(list);
+            holder.Children.Add(overlay);
+            WireListRubberBand(holder, overlay);
+            root.Children.Add(holder);
         }
         return root;
     }
 
-    // One entity row: name + a small summary; functions open the diagram chooser; right-click to delete.
+    // One entity row: name + summary. Left-click selects (Ctrl toggles, Shift ranges), double-click or
+    // right-click → Edit opens it; delete sits below a separator in the menu to dodge mis-clicks.
     Control EntityRow(CodeEntity e, Section section)
     {
-        var row = new Border { Padding = new(10, 7), CornerRadius = new(6), Cursor = new Cursor(StandardCursorType.Hand) };
+        var row = new Border { Padding = new(10, 7), CornerRadius = new(6), BorderThickness = new(2), BorderBrush = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
         Ui.Theme(row, Border.BackgroundProperty, "ControlBgBrush");
 
         var name = new TextBlock { Text = e.Name, FontSize = 13, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -894,31 +909,135 @@ public partial class MainWindow : Window
         DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
         DockPanel.SetDock(name, Dock.Left); dock.Children.Add(name);
         row.Child = dock;
+        _sectionRows.Add((e, row));
 
-        // Functions open the diagram chooser; every other entity opens the full structure editor.
-        if (_project is not null)
-            row.PointerPressed += (_, ev) =>
+        row.PointerPressed += (_, ev) =>
+        {
+            var pt = ev.GetCurrentPoint(row);
+            if (pt.Properties.IsRightButtonPressed)
             {
-                if (!ev.GetCurrentPoint(row).Properties.IsLeftButtonPressed) return;
-                if (section == Section.Function)
-                    _ = DiagramLauncher.ChooseAndOpen(this, _project!, e.Id, e.Name, null);
-                else
-                    _ = EditEntity(e, section);
-            };
+                if (!_selEntities.Contains(e.Id)) { _selEntities.Clear(); _selEntities.Add(e.Id); _selAnchor = e.Id; RefreshEntitySelection(); }
+                return;   // let the ContextMenu open via ContextRequested
+            }
+            if (!pt.Properties.IsLeftButtonPressed) return;
+            if (ev.ClickCount >= 2) { _ = EditEntity(e, section); ev.Handled = true; return; }
 
+            var mods = ev.KeyModifiers;
+            if (mods.HasFlag(KeyModifiers.Shift)) SelectEntityRangeTo(e.Id);
+            else if (mods.HasFlag(KeyModifiers.Control)) { if (!_selEntities.Add(e.Id)) _selEntities.Remove(e.Id); _selAnchor = e.Id; }
+            else { _selEntities.Clear(); _selEntities.Add(e.Id); _selAnchor = e.Id; }
+            RefreshEntitySelection();
+            ev.Handled = true;
+        };
+
+        row.ContextMenu = BuildEntityMenu(e, section);
+        return row;
+    }
+
+    // The per-entity right-click menu: Edit (+ Sketch flow / Set as main for functions), then — below a
+    // separator to reduce mis-clicks — Delete (which removes the whole selection, with confirmation).
+    ContextMenu BuildEntityMenu(CodeEntity e, Section section)
+    {
         var cm = new ContextMenu();
+        var edit = new MenuItem { Header = Loc.S("Code_Edit") };
+        edit.Click += async (_, _) => await EditEntity(e, section);
+        cm.Items.Add(edit);
+
         if (section == Section.Function)
         {
+            var flow = new MenuItem { Header = Loc.S("Code_SketchFlow") };
+            flow.Click += (_, _) => { if (_project is not null) _ = DiagramLauncher.ChooseAndOpen(this, _project!, e.Id, e.Name, null); };
+            cm.Items.Add(flow);
             var setMain = new MenuItem { Header = Loc.S("Main_SetAs") };
             setMain.Click += (_, _) => SetAsMain(e);
             cm.Items.Add(setMain);
-            cm.Items.Add(new Separator());
         }
+
+        cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Sec_Delete") };
-        del.Click += (_, _) => { if (_project is not null) CodeEntityService.Delete(_project, section.ToString(), e.Id); ShowSection(section); };
+        del.Click += async (_, _) =>
+        {
+            var ids = _selEntities.Contains(e.Id) && _selEntities.Count > 0 ? _selEntities.ToList() : new() { e.Id };
+            await DeleteEntities(section, ids);
+        };
         cm.Items.Add(del);
-        row.ContextMenu = cm;
-        return row;
+        return cm;
+    }
+
+    // Repaints each row's border to reflect the current selection (transparent → accent).
+    void RefreshEntitySelection()
+    {
+        foreach (var (ent, r) in _sectionRows)
+        {
+            if (_selEntities.Contains(ent.Id)) Ui.Theme(r, Border.BorderBrushProperty, "AccentBgBrush");
+            else r.BorderBrush = Brushes.Transparent;
+        }
+    }
+
+    // Selects the display-order range from the anchor to the given id (inclusive).
+    void SelectEntityRangeTo(string id)
+    {
+        var order = _sectionRows.Select(t => t.e.Id).ToList();
+        if (_selAnchor is null || !order.Contains(_selAnchor)) { _selEntities.Clear(); _selEntities.Add(id); _selAnchor = id; return; }
+        int a = order.IndexOf(_selAnchor), b = order.IndexOf(id);
+        if (a < 0 || b < 0) { _selEntities.Add(id); return; }
+        if (a > b) (a, b) = (b, a);
+        _selEntities.Clear();
+        for (int i = a; i <= b; i++) _selEntities.Add(order[i]);
+    }
+
+    // Deletes a set of entities (the current multi-selection) after a single confirmation.
+    Task DeleteEntities(Section section, IReadOnlyList<string> ids) => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null || ids.Count == 0) return;
+        var msg = ids.Count == 1
+            ? string.Format(Loc.S("Sec_DeleteConfirm1"), _sectionRows.FirstOrDefault(t => t.e.Id == ids[0]).e?.Name ?? "")
+            : string.Format(Loc.S("Sec_DeleteConfirmN"), ids.Count);
+        if (await MessageDialog.Show(this, msg, Loc.S("Sec_DeleteTitle"), DialogButtons.YesNo) != DialogResult.Yes) return;
+        foreach (var id in ids) CodeEntityService.Delete(_project, section.ToString(), id);
+        ShowSection(section);
+    }, "DeleteEntities");
+
+    // Rubber-band selection over the entity list: drag on empty space to box-select rows.
+    void WireListRubberBand(Grid holder, Canvas overlay)
+    {
+        var selecting = false;
+        var start = default(Point);
+        Avalonia.Controls.Shapes.Rectangle? rect = null;
+
+        holder.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(holder).Properties.IsLeftButtonPressed) return;   // row presses are handled, won't reach here
+            _selEntities.Clear(); _selAnchor = null; RefreshEntitySelection();
+            start = e.GetPosition(holder); selecting = true; e.Pointer.Capture(holder);
+        };
+        holder.PointerMoved += (_, e) =>
+        {
+            if (!selecting) return;
+            var cur = e.GetPosition(holder);
+            if (rect is null)
+            {
+                rect = new Avalonia.Controls.Shapes.Rectangle { Stroke = Brushes.DodgerBlue, StrokeThickness = 1, StrokeDashArray = new AvaloniaList<double> { 4, 2 }, Fill = new SolidColorBrush(Color.FromArgb(30, 30, 144, 255)), IsHitTestVisible = false };
+                overlay.Children.Add(rect);
+            }
+            double x = Math.Min(start.X, cur.X), y = Math.Min(start.Y, cur.Y);
+            Canvas.SetLeft(rect, x); Canvas.SetTop(rect, y);
+            rect.Width = Math.Abs(cur.X - start.X); rect.Height = Math.Abs(cur.Y - start.Y);
+        };
+        holder.PointerReleased += (_, e) =>
+        {
+            if (!selecting) return;
+            selecting = false; e.Pointer.Capture(null);
+            if (rect is null) return;
+            double rx = Canvas.GetLeft(rect), ry = Canvas.GetTop(rect), rw = rect.Width, rh = rect.Height;
+            foreach (var (ent, r) in _sectionRows)
+            {
+                var b = r.Bounds;
+                if (b.X < rx + rw && b.X + b.Width > rx && b.Y < ry + rh && b.Y + b.Height > ry) _selEntities.Add(ent.Id);
+            }
+            overlay.Children.Remove(rect); rect = null;
+            RefreshEntitySelection();
+        };
     }
 
     // ── Main (entry point) ───────────────────────────────────────────────────

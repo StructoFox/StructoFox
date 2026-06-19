@@ -74,10 +74,16 @@ public static class Loc
         // Cockpit
         ["Cockpit_Exit"]    = "Back",
         ["Cockpit_ExitTip"] = "Back to projects",
+        ["Sec_DeleteTitle"]    = "Löschen",
+        ["Sec_DeleteConfirm1"] = "„{0}“ löschen? Alles, was daran hängt (Member, Diagramme), geht mit.",
+        ["Sec_DeleteConfirmN"] = "{0} ausgewählte Entities löschen? Alles, was daran hängt, geht mit.",
         ["Sec_New"]         = "＋ New {0}",
         ["Sec_NewPrompt"]   = "{0} name:",
         ["Sec_Empty"]       = "No {0} yet.",
         ["Sec_Delete"]      = "✕  Delete",
+        ["Sec_DeleteTitle"]    = "Delete",
+        ["Sec_DeleteConfirm1"] = "Delete “{0}”? Everything attached to it (members, diagrams) goes too.",
+        ["Sec_DeleteConfirmN"] = "Delete {0} selected entities? Everything attached to them goes too.",
         ["Sec_BoardsBlurb"] = "Structure boards — arrange entities on a canvas. (Board canvas port coming.)",
         ["Sec_ExportBlurb"] = "Generate source from your structures in 10 languages. (Wiring coming.)",
 
