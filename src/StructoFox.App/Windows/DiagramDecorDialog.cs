@@ -18,6 +18,7 @@ public class DiagramDecorDialog : Window
     readonly TextBox  _title     = new() { MinWidth = 280 };
     readonly CheckBox _showTitle = new();
     readonly TextBox  _watermark = new() { MinWidth = 280 };
+    readonly TextBox  _watermarkImg = new() { MinWidth = 280 };
     readonly TextBox  _logo      = new() { MinWidth = 280 };
     readonly ComboBox _corner    = Ui.Combo(160);
 
@@ -37,9 +38,10 @@ public class DiagramDecorDialog : Window
         _title.Text = title;
         _showTitle.Content = Loc.S("Decor_ShowTitle");
         _showTitle.IsChecked = style.ShowTitle;
-        ThemeInput(_title); ThemeInput(_watermark); ThemeInput(_logo);
+        ThemeInput(_title); ThemeInput(_watermark); ThemeInput(_watermarkImg); ThemeInput(_logo);
         Ui.Theme(_showTitle, CheckBox.ForegroundProperty, "ContentTextBrush");
         _watermark.Text = style.Watermark;
+        _watermarkImg.Text = style.WatermarkImage;
         _logo.Text = style.LogoPath;
         foreach (var c in Enum.GetValues<DecorCorner>()) _corner.Items.Add(c);
         _corner.SelectedItem = style.LogoCorner;
@@ -48,6 +50,11 @@ public class DiagramDecorDialog : Window
         browse.Click += async (_, _) => { var p = await PickImageAsync(); if (p is not null) _logo.Text = p; };
         var clear = Ui.Btn(Loc.S("Decor_ClearLogo"));
         clear.Click += (_, _) => _logo.Text = "";
+
+        var browseWm = Ui.Btn(Loc.S("Decor_Browse"));
+        browseWm.Click += async (_, _) => { var p = await PickImageAsync(); if (p is not null) _watermarkImg.Text = p; };
+        var clearWm = Ui.Btn(Loc.S("Decor_ClearLogo"));
+        clearWm.Click += (_, _) => _watermarkImg.Text = "";
 
         var ok = Ui.Btn(Loc.S("Common_OK")); ok.IsDefault = true; ok.Click += (_, _) => Apply();
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true; cancel.Click += (_, _) => Close(null);
@@ -60,6 +67,8 @@ public class DiagramDecorDialog : Window
                 Label(Loc.S("Decor_TitleText")), _title,
                 _showTitle,
                 Label(Loc.S("Decor_Watermark")), _watermark,
+                Label(Loc.S("Decor_WatermarkImg")),
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _watermarkImg, browseWm, clearWm } },
                 Label(Loc.S("Decor_Logo")),
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _logo, browse, clear } },
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
@@ -72,9 +81,10 @@ public class DiagramDecorDialog : Window
     // Writes the edits back into the style and closes with the (possibly changed) title.
     void Apply()
     {
-        _style.ShowTitle  = _showTitle.IsChecked == true;
-        _style.Watermark  = (_watermark.Text ?? "").Trim();
-        _style.LogoPath   = (_logo.Text ?? "").Trim();
+        _style.ShowTitle      = _showTitle.IsChecked == true;
+        _style.Watermark      = (_watermark.Text ?? "").Trim();
+        _style.WatermarkImage = (_watermarkImg.Text ?? "").Trim();
+        _style.LogoPath       = (_logo.Text ?? "").Trim();
         _style.LogoCorner = _corner.SelectedItem is DecorCorner c ? c : _style.LogoCorner;
         Close((_title.Text ?? "").Trim());
     }

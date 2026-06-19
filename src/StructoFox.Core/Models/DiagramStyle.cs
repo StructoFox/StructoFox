@@ -35,6 +35,10 @@ public class DiagramStyle
     /// <summary>A faint diagonal watermark text (e.g. "DRAFT", a company name); empty = none.</summary>
     public string Watermark { get; set; } = "";
 
+    /// <summary>Path to a faint centred watermark image; empty/missing = none. Works alongside or
+    /// instead of the text watermark.</summary>
+    public string WatermarkImage { get; set; } = "";
+
     /// <summary>Path to a logo image to place in a corner; empty/missing = none.</summary>
     public string LogoPath { get; set; } = "";
 

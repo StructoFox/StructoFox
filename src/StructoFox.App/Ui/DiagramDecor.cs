@@ -19,7 +19,21 @@ public static class DiagramDecor
     {
         var layer = new Panel { IsHitTestVisible = false };
 
-        // Watermark — large, faint, rotated, centred behind everything.
+        // Image watermark — large, faint, centred behind everything.
+        if (!string.IsNullOrWhiteSpace(style.WatermarkImage) && File.Exists(style.WatermarkImage))
+        {
+            try
+            {
+                layer.Children.Add(new Image
+                {
+                    Source = new Bitmap(style.WatermarkImage), Width = 440, Stretch = Stretch.Uniform, Opacity = 0.08,
+                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                });
+            }
+            catch { /* unreadable image → no watermark */ }
+        }
+
+        // Text watermark — large, faint, rotated, centred behind everything.
         if (!string.IsNullOrWhiteSpace(style.Watermark))
         {
             layer.Children.Add(new TextBlock
