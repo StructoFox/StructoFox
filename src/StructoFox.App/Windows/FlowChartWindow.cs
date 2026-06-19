@@ -294,6 +294,10 @@ public class FlowChartWindow : Window
         if (_nodeViews.ContainsKey(node.Id)) return;
 
         var (fill, stroke) = NodeColors(node.Kind);
+        // Per-node overrides are opt-in; the kind's standard colours stay the default when unset.
+        if (ParseOpt(node.Style?.FillColor) is { } fc) fill = fc;
+        if (ParseOpt(node.Style?.LineColor) is { } lc) stroke = lc;
+        var textColor = ParseOpt(node.Style?.TextColor) ?? stroke;
         var inner = new Grid();
 
         Control shape = node.Kind switch
@@ -314,7 +318,7 @@ public class FlowChartWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment   = VerticalAlignment.Center,
             Margin              = new(6, 2, 6, 2),
-            Foreground          = new SolidColorBrush(stroke),
+            Foreground          = new SolidColorBrush(textColor),
         };
         ApplyTextFormat(label, node);   // text + font/size/style/decorations (multiline-aware)
         inner.Children.Add(label);
@@ -384,10 +388,27 @@ public class FlowChartWindow : Window
         var edit = new MenuItem { Header = Loc.S("Flow_EditText") };
         edit.Click += (_, _) => _ = EditNodeText(node, label);
         cm.Items.Add(edit);
+        var style = new MenuItem { Header = Loc.S("Style_Open") };
+        style.Click += (_, _) => _ = EditNodeStyle(node);
+        cm.Items.Add(style);
+        cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Flow_DeleteNode") };
         del.Click += (_, _) => { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); };
         cm.Items.Add(del);
         OpenMenu(cm, anchor);
+    }
+
+    // Opens the element-style editor for a node's colour overrides; an all-inherit result clears them
+    // (so the node falls back to its standard kind colours). Re-renders the node and saves.
+    async Task EditNodeStyle(FlowNode node)
+    {
+        var edited = await StyleEditorWindow.Edit(this, node.Style ?? new ElementStyle());
+        if (edited is null) return;
+        node.Style = edited.LineColor is null && edited.FillColor is null && edited.TextColor is null && edited.LineThickness is null ? null : edited;
+        if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
+        RenderNode(node);
+        UpdateConnectionsFor(node.Id);
+        Save();
     }
 
     // Opens the rich node-text editor (text + font/size/style, multiline); re-applies and saves on OK.
@@ -698,6 +719,13 @@ public class FlowChartWindow : Window
     static Color ParseColor(string hex)
     {
         try { return Color.Parse(hex); } catch { return Colors.Gray; }
+    }
+
+    // Parses an optional override hex colour: null/blank/invalid → null (inherit the standard colour).
+    static Color? ParseOpt(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return null;
+        try { return Color.Parse(hex); } catch { return null; }
     }
 
     // Snaps a coordinate to the grid when snapping is enabled, else returns it unchanged.

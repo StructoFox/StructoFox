@@ -30,6 +30,10 @@ public class FlowNode
     public bool    Italic        { get; set; }
     public bool    Underline     { get; set; }
     public bool    Strikethrough { get; set; }
+
+    /// <summary>Optional per-node colour overrides (line/fill/text). Null = keep the kind's standard
+    /// colours, which stay the default for every newly placed node. Purely presentational.</summary>
+    public ElementStyle? Style { get; set; }
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>

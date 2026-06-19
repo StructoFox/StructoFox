@@ -59,6 +59,19 @@ public static class ThemeManager
             "ComboBoxDropDownGlyphForeground", "ComboBoxDropDownGlyphForegroundDisabled",
             "ComboBoxDropDownGlyphForegroundFocused", "ComboBoxDropDownGlyphForegroundFocusedPressed");
 
+        // ComboBox closed-box text + the drop-down popup (was white-on-white on light themes)
+        Set(text, "ComboBoxForeground", "ComboBoxForegroundFocused", "ComboBoxForegroundFocusedPressed");
+        var surface = B("ControlBgBrush");
+        Set(surface, "ComboBoxDropDownBackground");
+        Set(text, "ComboBoxItemForeground");
+        // Hovered / selected items: accent fill with the background colour as readable text on top.
+        Set(accent,
+            "ComboBoxItemBackgroundPointerOver", "ComboBoxItemBackgroundPressed",
+            "ComboBoxItemBackgroundSelected", "ComboBoxItemBackgroundSelectedPointerOver", "ComboBoxItemBackgroundSelectedPressed");
+        Set(onAccent,
+            "ComboBoxItemForegroundPointerOver", "ComboBoxItemForegroundPressed",
+            "ComboBoxItemForegroundSelected", "ComboBoxItemForegroundSelectedPointerOver", "ComboBoxItemForegroundSelectedPressed");
+
         // CheckBox label text (the "static" caption went white, also on hover)
         Set(text,
             "CheckBoxForegroundUnchecked", "CheckBoxForegroundUncheckedPointerOver", "CheckBoxForegroundUncheckedPressed",
