@@ -72,6 +72,16 @@ public static class ThemeManager
             "ComboBoxItemForegroundPointerOver", "ComboBoxItemForegroundPressed",
             "ComboBoxItemForegroundSelected", "ComboBoxItemForegroundSelectedPointerOver", "ComboBoxItemForegroundSelectedPressed");
 
+        // Expander (the colour-field "cards" in the style editor were Fluent's dark default chrome)
+        var border = B("ControlBorderBrush");
+        Set(surface,
+            "ExpanderHeaderBackground", "ExpanderHeaderBackgroundPointerOver", "ExpanderHeaderBackgroundPressed",
+            "ExpanderContentBackground");
+        Set(text,
+            "ExpanderHeaderForeground", "ExpanderHeaderForegroundPointerOver", "ExpanderHeaderForegroundPressed",
+            "ExpanderChevronForeground", "ExpanderChevronForegroundPointerOver", "ExpanderChevronForegroundPressed");
+        Set(border, "ExpanderHeaderBorderBrush", "ExpanderContentBorderBrush", "ExpanderChevronBorderBrush");
+
         // CheckBox label text (the "static" caption went white, also on hover)
         Set(text,
             "CheckBoxForegroundUnchecked", "CheckBoxForegroundUncheckedPointerOver", "CheckBoxForegroundUncheckedPressed",

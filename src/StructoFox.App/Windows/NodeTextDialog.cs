@@ -93,6 +93,12 @@ public class NodeTextDialog : Window
         Close(true);
     }
 
-    // A small square style toggle button for a text attribute.
-    static ToggleButton Toggle(string glyph) => new() { Content = glyph, Width = 34, FontWeight = FontWeight.Bold };
+    // A small square style toggle button for a text attribute (themed so its glyph stays readable).
+    static ToggleButton Toggle(string glyph)
+    {
+        var b = new ToggleButton { Content = glyph, Width = 34, FontWeight = FontWeight.Bold };
+        Ui.Theme(b, TemplatedControl.BackgroundProperty, "ControlBgBrush");
+        Ui.Theme(b, TemplatedControl.ForegroundProperty, "SidebarTextBrush");
+        return b;
+    }
 }
