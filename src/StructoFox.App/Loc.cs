@@ -254,8 +254,9 @@ public static class Loc
         ["Boards_DeleteTitle"]   = "Delete board",
 
         // Code board canvas
-        ["Code_AddToBoard"]       = "＋ Add entity",
+        ["Code_AddToBoard"]       = "＋ Add",
         ["Code_AddToBoardTip"]    = "Add a new or existing entity to this board",
+        ["Code_AllTypes"]         = "(all types)",
         ["Code_ConnectPorts"]     = "→ Connect ports",
         ["Code_ConnectPortsTip"]  = "Click an output port, then a matching input port, to wire them",
         ["Code_RemoveCards"]      = "✕ Remove from board",
@@ -282,7 +283,7 @@ public static class Loc
         ["Code_DeletePermConfirm"]= "Permanently delete \"{0}\" from the project? This cannot be undone.",
         ["Code_DeleteEntityTitle"]= "Delete entity",
         ["Code_DeleteConnection"] = "✕ Delete connection",
-        ["Code_AddExisting"]      = "Add existing entity…",
+        ["Code_AddExisting"]      = "Add existing…",
         ["Code_AddExistingTitle"] = "Add existing entity",
         ["Code_AllOnBoard"]       = "Every entity is already on this board.",
         ["Code_AddEntityTitle"]   = "Add entity",
@@ -480,8 +481,9 @@ public static class Loc
         ["Boards_DeleteTitle"]   = "Board löschen",
 
         // Code-Board-Leinwand
-        ["Code_AddToBoard"]       = "＋ Entity hinzufügen",
+        ["Code_AddToBoard"]       = "＋ Hinzufügen",
         ["Code_AddToBoardTip"]    = "Eine neue oder vorhandene Entity zu diesem Board hinzufügen",
+        ["Code_AllTypes"]         = "(alle Typen)",
         ["Code_ConnectPorts"]     = "→ Ports verbinden",
         ["Code_ConnectPortsTip"]  = "Erst einen Ausgangs-Port, dann einen passenden Eingangs-Port klicken",
         ["Code_RemoveCards"]      = "✕ Vom Board entfernen",
@@ -508,7 +510,7 @@ public static class Loc
         ["Code_DeletePermConfirm"]= "„{0}“ dauerhaft aus dem Projekt löschen? Das kann nicht rückgängig gemacht werden.",
         ["Code_DeleteEntityTitle"]= "Entity löschen",
         ["Code_DeleteConnection"] = "✕ Verbindung löschen",
-        ["Code_AddExisting"]      = "Vorhandene Entity hinzufügen…",
+        ["Code_AddExisting"]      = "Vorhandene hinzufügen…",
         ["Code_AddExistingTitle"] = "Vorhandene Entity hinzufügen",
         ["Code_AllOnBoard"]       = "Alle Entities sind bereits auf diesem Board.",
         ["Code_AddEntityTitle"]   = "Entity hinzufügen",

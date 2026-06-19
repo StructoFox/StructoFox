@@ -966,13 +966,16 @@ public class CodeBoardWindow : Window
     {
         var onBoard = _boardData.Positions.Keys.ToHashSet();
 
-        // Re-scan from disk in case entities were added elsewhere since this board opened.
+        // Build the list from a FRESH disk scan, so entities deleted elsewhere don't linger (and the
+        // render cache stays current). Anything already on the board is excluded.
+        var available = new List<CodeEntity>();
         foreach (var t in CodeEntityService.EntityTypes)
             foreach (var e in CodeEntityService.LoadAll(_projFolder, t))
+            {
                 _entities[e.Id] = e;
-
-        var available = _entities.Values.Where(e => !onBoard.Contains(e.Id))
-            .OrderBy(e => e.EntityType.ToString()).ThenBy(e => e.Name).ToList();
+                if (!onBoard.Contains(e.Id)) available.Add(e);
+            }
+        available = available.OrderBy(e => e.EntityType.ToString()).ThenBy(e => e.Name).ToList();
 
         if (available.Count == 0)
         {
@@ -1003,8 +1006,24 @@ public class CodeBoardWindow : Window
         Ui.Theme(list, TemplatedControl.BackgroundProperty,  "ControlBgBrush");
         Ui.Theme(list, TemplatedControl.ForegroundProperty,  "SidebarTextBrush");
         Ui.Theme(list, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
-        foreach (var e in available)
-            list.Items.Add(new ListBoxItem { Content = $"{e.EntityType}  {e.Name}", Tag = e });
+
+        // A type filter keeps the list usable when a project has dozens of each kind.
+        var typeCombo = Ui.Combo();
+        typeCombo.Items.Add(Loc.S("Code_AllTypes"));
+        foreach (var t in CodeEntityService.EntityTypes) typeCombo.Items.Add(t);
+        typeCombo.SelectedIndex = 0;
+
+        void Rebuild()
+        {
+            var sel = typeCombo.SelectedItem as string;
+            var all = sel is null || sel == Loc.S("Code_AllTypes");
+            list.Items.Clear();
+            foreach (var e in available)
+                if (all || e.EntityType.ToString() == sel)
+                    list.Items.Add(new ListBoxItem { Content = $"{e.EntityType}  {e.Name}", Tag = e });
+        }
+        typeCombo.SelectionChanged += (_, _) => Rebuild();
+        Rebuild();
 
         CodeEntity? result = null;
         void Commit() { if (list.SelectedItem is ListBoxItem { Tag: CodeEntity e }) { result = e; dlg.Close(); } }
@@ -1013,10 +1032,17 @@ public class CodeBoardWindow : Window
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true; cancel.Click += (_, _) => dlg.Close();
         list.DoubleTapped += (_, _) => Commit();
 
-        var grid = new Grid { Margin = new(12), RowDefinitions = new RowDefinitions("*,Auto") };
-        Grid.SetRow(list, 0); grid.Children.Add(list);
+        var filterRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 0, 0, 8),
+            Children = { new TextBlock { Text = Loc.S("CodeEdit_Type"), VerticalAlignment = VerticalAlignment.Center }, typeCombo },
+        };
+
+        var grid = new Grid { Margin = new(12), RowDefinitions = new RowDefinitions("Auto,*,Auto") };
+        Grid.SetRow(filterRow, 0); grid.Children.Add(filterRow);
+        Grid.SetRow(list, 1); grid.Children.Add(list);
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new(0, 8, 0, 0), Children = { cancel, add } };
-        Grid.SetRow(btnRow, 1); grid.Children.Add(btnRow);
+        Grid.SetRow(btnRow, 2); grid.Children.Add(btnRow);
         dlg.Content = grid;
 
         return dlg.ShowDialog<CodeEntity?>(this).ContinueWith(_ => result, TaskScheduler.FromCurrentSynchronizationContext());

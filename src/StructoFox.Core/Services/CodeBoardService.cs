@@ -28,6 +28,10 @@ public static class CodeEntityService
         var result = new List<CodeEntity>();
         foreach (var f in Directory.EnumerateFiles(dir, "*.json"))
         {
+            // Skip service files (_board_/_flow_/_struct_/_boards): on a case-insensitive filesystem the
+            // "Struct" entity folder and the "struct" structogram folder are the same directory, so the
+            // structogram files would otherwise be loaded as blank "Class Entity" phantoms.
+            if (Path.GetFileName(f).StartsWith('_')) continue;
             try
             {
                 var e = JsonSerializer.Deserialize<CodeEntity>(File.ReadAllText(f), ReadOpts);

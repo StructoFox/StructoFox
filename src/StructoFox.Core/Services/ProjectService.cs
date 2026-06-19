@@ -56,7 +56,7 @@ public static class ProjectService
         int Count(string sub, string pattern)
         {
             var d = Path.Combine(code, sub);
-            try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, pattern).Count() : 0; }
+            try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, pattern).Count(f => !Path.GetFileName(f).StartsWith('_')) : 0; }
             catch { return 0; }
         }
         int boards = 0;
@@ -73,7 +73,7 @@ public static class ProjectService
         int Count(string sub)
         {
             var d = Path.Combine(code, sub);
-            try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, "*.json").Count() : 0; }
+            try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, "*.json").Count(f => !Path.GetFileName(f).StartsWith('_')) : 0; }
             catch { return 0; }
         }
         var byType = CodeEntityService.EntityTypes.ToDictionary(t => t, Count);
