@@ -35,23 +35,47 @@ public static class ThemeManager
         if (_current is not null) app.Resources.MergedDictionaries.Remove(_current);
         app.Resources.MergedDictionaries.Add(dict);
         _current = dict;
-        FixComboGlyph(app);
+        FixFluentBrushes(app);
     }
 
-    // Fluent paints the ComboBox drop-down chevron from its own light brush (a direct template value
-    // that outside styles can't override), so it vanished on light themes. Point those resource keys
-    // at the active theme's sidebar text colour instead — re-applied on every theme swap.
-    static void FixComboGlyph(Application app)
+    // Fluent paints some control glyphs (the ComboBox chevron, the CheckBox box + label) from its own
+    // light brushes — direct template values that outside styles can't override — so they vanished on
+    // light themes. Point those resource keys at the active theme's brushes instead, on every swap.
+    static void FixFluentBrushes(Application app)
     {
-        if (!app.TryGetResource("SidebarTextBrush", null, out var fg) || fg is null) return;
-        foreach (var key in new[]
-                 {
-                     "ComboBoxDropDownGlyphForeground",
-                     "ComboBoxDropDownGlyphForegroundDisabled",
-                     "ComboBoxDropDownGlyphForegroundFocused",
-                     "ComboBoxDropDownGlyphForegroundFocusedPressed",
-                 })
-            app.Resources[key] = fg;
+        object? B(string key) => app.TryGetResource(key, null, out var v) ? v : null;
+        var text     = B("SidebarTextBrush");   // glyphs + label text
+        var accent   = B("AccentBgBrush");       // checked box fill
+        var onAccent = B("ContentBgBrush");      // the check mark sitting on the accent fill
+
+        void Set(object? val, params string[] keys)
+        {
+            if (val is null) return;
+            foreach (var k in keys) app.Resources[k] = val;
+        }
+
+        // ComboBox drop-down chevron
+        Set(text,
+            "ComboBoxDropDownGlyphForeground", "ComboBoxDropDownGlyphForegroundDisabled",
+            "ComboBoxDropDownGlyphForegroundFocused", "ComboBoxDropDownGlyphForegroundFocusedPressed");
+
+        // CheckBox label text (the "static" caption went white, also on hover)
+        Set(text,
+            "CheckBoxForegroundUnchecked", "CheckBoxForegroundUncheckedPointerOver", "CheckBoxForegroundUncheckedPressed",
+            "CheckBoxForegroundChecked", "CheckBoxForegroundCheckedPointerOver", "CheckBoxForegroundCheckedPressed");
+
+        // CheckBox box outline when unchecked (it was white-on-white)
+        Set(text,
+            "CheckBoxCheckBackgroundStrokeUnchecked", "CheckBoxCheckBackgroundStrokeUncheckedPointerOver",
+            "CheckBoxCheckBackgroundStrokeUncheckedPressed");
+
+        // Checked box: accent fill with a contrasting check mark
+        Set(accent,
+            "CheckBoxCheckBackgroundFillChecked", "CheckBoxCheckBackgroundFillCheckedPointerOver",
+            "CheckBoxCheckBackgroundFillCheckedPressed");
+        Set(onAccent,
+            "CheckBoxCheckGlyphForegroundChecked", "CheckBoxCheckGlyphForegroundCheckedPointerOver",
+            "CheckBoxCheckGlyphForegroundCheckedPressed");
     }
 
     // The theme worn out of the box: a clean light "drawing board" surface for diagrams & code.

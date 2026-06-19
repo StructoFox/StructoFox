@@ -198,10 +198,6 @@ public class CodeEntityEditorDialog : Window
                     _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, key, title, _themePath);
                 };
                 topRow.Children.Add(flowM);
-
-                var delM = Btn("✕");
-                delM.Click += (_, _) => { workMethods.RemoveAt(ci); RebuildMethodRows(); };
-                topRow.Children.Add(delM);
                 editor.Children.Add(topRow);
 
                 var paramStack = new StackPanel { Margin = new(16, 2, 0, 0) };
@@ -239,7 +235,7 @@ public class CodeEntityEditorDialog : Window
                     editor.Children.Add(paramStack);
                 }
 
-                methodStack.Children.Add(ItemRow(summary, editor));
+                methodStack.Children.Add(ItemRow(summary, editor, () => { workMethods.RemoveAt(ci); RebuildMethodRows(); }));
             }
         }
         RebuildMethodRows();
@@ -318,20 +314,13 @@ public class CodeEntityEditorDialog : Window
                 stat.IsCheckedChanged += (_, _) => { workFields[ci].IsStatic = stat.IsChecked == true; UpdateSummary(); };
                 row.Children.Add(stat);
 
-                var del = Btn("✕");
-                del.Click += (_, _) => { workFields.RemoveAt(ci); RebuildFieldRows(); };
-                row.Children.Add(del);
-
-                // Right-click on the summary → add Get / Set accessor method.
-                var cm = new ContextMenu();
+                // Right-click on the summary → add Get / Set accessor, or delete (confirmed).
                 var getMi = new MenuItem { Header = Loc.S("CodeEdit_AddGetter") };
                 getMi.Click += (_, _) => AddAccessor(workFields[ci], getter: true);
-                cm.Items.Add(getMi);
                 var setMi = new MenuItem { Header = Loc.S("CodeEdit_AddSetter") };
                 setMi.Click += (_, _) => AddAccessor(workFields[ci], getter: false);
-                cm.Items.Add(setMi);
 
-                fieldStack.Children.Add(ItemRow(summary, row, cm));
+                fieldStack.Children.Add(ItemRow(summary, row, () => { workFields.RemoveAt(ci); RebuildFieldRows(); }, getMi, setMi));
             }
         }
         RebuildFieldRows();
@@ -359,10 +348,7 @@ public class CodeEntityEditorDialog : Window
                 var nm  = SmallBox(160, workEnum[ci]);
                 nm.TextChanged += (_, _) => { workEnum[ci] = nm.Text ?? ""; summary.Text = "• " + nm.Text; };
                 row.Children.Add(nm);
-                var del = Btn("✕");
-                del.Click += (_, _) => { workEnum.RemoveAt(ci); RebuildEnumRows(); };
-                row.Children.Add(del);
-                enumStack.Children.Add(ItemRow(summary, row));
+                enumStack.Children.Add(ItemRow(summary, row, () => { workEnum.RemoveAt(ci); RebuildEnumRows(); }));
             }
         }
         RebuildEnumRows();
@@ -410,11 +396,7 @@ public class CodeEntityEditorDialog : Window
                 convCombo.SelectionChanged += (_, _) => { if (convCombo.SelectedItem is PassingConvention c) { workPorts[ci].Convention = c; UpdateSummary(); } };
                 row.Children.Add(convCombo);
 
-                var del = Btn("✕");
-                del.Click += (_, _) => { workPorts.RemoveAt(ci); RebuildPortRows(); };
-                row.Children.Add(del);
-
-                portStack.Children.Add(ItemRow(summary, row));
+                portStack.Children.Add(ItemRow(summary, row, () => { workPorts.RemoveAt(ci); RebuildPortRows(); }));
             }
         }
         RebuildPortRows();
@@ -573,9 +555,10 @@ public class CodeEntityEditorDialog : Window
         return tb;
     }
 
-    // Wraps an item as a collapsed one-line summary that expands to its editor on click;
-    // an optional context menu rides along (used for the field → Get/Set accessor menu).
-    Border ItemRow(TextBlock summary, Control editor, ContextMenu? menu = null)
+    // Wraps an item as a collapsed one-line summary that expands to its editor on click. A right-click
+    // menu carries any extra entries (e.g. the field → Get/Set accessors) plus a confirmed Delete —
+    // there is no inline ✕, so a member with a lot hanging off it can't be killed by a stray click.
+    Border ItemRow(TextBlock summary, Control editor, Action onDelete, params MenuItem[] extra)
     {
         editor.IsVisible = false;
 
@@ -585,12 +568,27 @@ public class CodeEntityEditorDialog : Window
             if (e.GetCurrentPoint(header).Properties.IsLeftButtonPressed)
                 editor.IsVisible = !editor.IsVisible;
         };
-        if (menu is not null) header.ContextMenu = menu;
+
+        var cm = new ContextMenu();
+        foreach (var mi in extra) cm.Items.Add(mi);
+        if (extra.Length > 0) cm.Items.Add(new Separator());
+        var del = new MenuItem { Header = Loc.S("CodeEdit_Delete") };
+        del.Click += async (_, _) => { if (await ConfirmDelete(summary.Text ?? "")) onDelete(); };
+        cm.Items.Add(del);
+        header.ContextMenu = cm;
 
         var stack = new StackPanel { Children = { header, editor } };
         var outer = new Border { Child = stack, BorderThickness = new(0, 0, 0, 1), Margin = new(0, 0, 0, 1) };
         Ui.Theme(outer, Border.BorderBrushProperty, "ControlBorderBrush");
         return outer;
+    }
+
+    // Asks before deleting a member; returns true only on an explicit Yes.
+    async Task<bool> ConfirmDelete(string what)
+    {
+        var res = await MessageDialog.Show(this,
+            string.Format(Loc.S("CodeEdit_DeleteConfirm"), what.Trim()), Loc.S("CodeEdit_DeleteTitle"), DialogButtons.YesNo);
+        return res == DialogResult.Yes;
     }
 
     TextBlock FieldLabel(string text)

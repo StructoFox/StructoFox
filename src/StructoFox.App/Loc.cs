@@ -230,6 +230,9 @@ public static class Loc
         ["CodeEdit_AddGetter"]     = "Add getter (Get…)",
         ["CodeEdit_AddSetter"]     = "Add setter (Set…)",
         ["CodeEdit_DefaultValue"]  = "Value",
+        ["CodeEdit_Delete"]        = "✕  Delete",
+        ["CodeEdit_DeleteConfirm"] = "Delete “{0}”? Anything attached to it (parameters, diagrams, …) goes with it.",
+        ["CodeEdit_DeleteTitle"]   = "Delete",
         ["Common_NameColon"]       = "Name:",
         ["Common_Add"]             = "Add",
 
@@ -447,6 +450,9 @@ public static class Loc
         ["CodeEdit_AddGetter"]     = "Getter hinzufügen (Get…)",
         ["CodeEdit_AddSetter"]     = "Setter hinzufügen (Set…)",
         ["CodeEdit_DefaultValue"]  = "Wert",
+        ["CodeEdit_Delete"]        = "✕  Löschen",
+        ["CodeEdit_DeleteConfirm"] = "„{0}“ löschen? Alles, was daran hängt (Parameter, Diagramme, …), geht mit.",
+        ["CodeEdit_DeleteTitle"]   = "Löschen",
         ["Common_NameColon"]       = "Name:",
         ["Common_Add"]             = "Hinzufügen",
 
