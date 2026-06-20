@@ -423,25 +423,30 @@ public partial class MainWindow : Window
     StackPanel BuildFilterBar()
     {
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-        var nameBox = new TextBox { PlaceholderText = "Filter by name…", Width = 200, Text = _homeFilter };
+        var nameBox = new TextBox { PlaceholderText = Loc.S("Sec_FilterName"), Width = 200, Text = _homeFilter };
         nameBox.TextChanged += (_, _) => { _homeFilter = nameBox.Text ?? ""; RefreshHomeList(); };
         bar.Children.Add(nameBox);
-        bar.Children.Add(SortBtn("Date ↓", HomeSort.DateDesc));
-        bar.Children.Add(SortBtn("Date ↑", HomeSort.DateAsc));
-        bar.Children.Add(SortBtn("A–Z", HomeSort.NameAsc));
-        bar.Children.Add(SortBtn("Z–A", HomeSort.NameDesc));
-        return bar;
-    }
 
-    // One sort button, accent-highlighted when active.
-    Button SortBtn(string label, HomeSort sort)
-    {
-        var b = Ui.Btn(label); b.Padding = new(8, 4);
-        var active = _homeSort == sort;
-        Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
-        Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
-        b.Click += (_, _) => { _homeSort = sort; _body.Content = BuildHome(); };
-        return b;
+        // Two sort toggles (consistent with the cockpit): Date ↓↑ and A–Z / Z–A, active one highlighted.
+        Button dateBtn = null!, azBtn = null!;
+        void Restyle()
+        {
+            bool dateActive = _homeSort is HomeSort.DateDesc or HomeSort.DateAsc;
+            dateBtn.Content = _homeSort == HomeSort.DateAsc ? "Date ↑" : "Date ↓";
+            azBtn.Content   = _homeSort == HomeSort.NameDesc ? "Z–A" : "A–Z";
+            Ui.Theme(dateBtn, TemplatedControl.BackgroundProperty, dateActive ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(dateBtn, TemplatedControl.ForegroundProperty, dateActive ? "AccentTextBrush" : "SidebarTextBrush");
+            Ui.Theme(azBtn,   TemplatedControl.BackgroundProperty, !dateActive ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(azBtn,   TemplatedControl.ForegroundProperty, !dateActive ? "AccentTextBrush" : "SidebarTextBrush");
+        }
+        dateBtn = Ui.Btn("Date ↓"); dateBtn.Padding = new(8, 4);
+        dateBtn.Click += (_, _) => { _homeSort = _homeSort == HomeSort.DateDesc ? HomeSort.DateAsc : HomeSort.DateDesc; Restyle(); RefreshHomeList(); };
+        azBtn = Ui.Btn("A–Z"); azBtn.Padding = new(8, 4);
+        azBtn.Click += (_, _) => { _homeSort = _homeSort == HomeSort.NameAsc ? HomeSort.NameDesc : HomeSort.NameAsc; Restyle(); RefreshHomeList(); };
+        Restyle();
+        bar.Children.Add(dateBtn);
+        bar.Children.Add(azBtn);
+        return bar;
     }
 
     // The project paths for the active source, each with a representative date (for sorting/display).
