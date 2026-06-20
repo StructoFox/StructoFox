@@ -198,6 +198,10 @@ public class CodeEntityEditorDialog : Window
                     _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, key, title, _themePath);
                 };
                 topRow.Children.Add(flowM);
+
+                var assignM = Btn("🗺", Loc.S("CodeEdit_AssignBoardTip"));
+                assignM.Click += async (_, _) => await AssignBoardToKey($"{entity.Id}#{m.Id}");
+                topRow.Children.Add(assignM);
                 editor.Children.Add(topRow);
 
                 var paramStack = new StackPanel { Margin = new(16, 2, 0, 0) };
@@ -235,7 +239,7 @@ public class CodeEntityEditorDialog : Window
                     editor.Children.Add(paramStack);
                 }
 
-                methodStack.Children.Add(ItemRow(summary, editor, () => { workMethods.RemoveAt(ci); RebuildMethodRows(); }));
+                methodStack.Children.Add(ItemRow(summary, editor, () => { workMethods.RemoveAt(ci); RebuildMethodRows(); }, null, () => BoardWarn($"{entity.Id}#{m.Id}")));
             }
         }
         RebuildMethodRows();
@@ -320,7 +324,7 @@ public class CodeEntityEditorDialog : Window
                 var setMi = new MenuItem { Header = Loc.S("CodeEdit_AddSetter") };
                 setMi.Click += (_, _) => AddAccessor(workFields[ci], getter: false);
 
-                fieldStack.Children.Add(ItemRow(summary, row, () => { workFields.RemoveAt(ci); RebuildFieldRows(); }, getMi, setMi));
+                fieldStack.Children.Add(ItemRow(summary, row, () => { workFields.RemoveAt(ci); RebuildFieldRows(); }, new[] { getMi, setMi }));
             }
         }
         RebuildFieldRows();
@@ -558,7 +562,7 @@ public class CodeEntityEditorDialog : Window
     // Wraps an item as a collapsed one-line summary that expands to its editor on click. A right-click
     // menu carries any extra entries (e.g. the field → Get/Set accessors) plus a confirmed Delete —
     // there is no inline ✕, so a member with a lot hanging off it can't be killed by a stray click.
-    Border ItemRow(TextBlock summary, Control editor, Action onDelete, params MenuItem[] extra)
+    Border ItemRow(TextBlock summary, Control editor, Action onDelete, IEnumerable<MenuItem>? extra = null, Func<string?>? extraWarn = null)
     {
         editor.IsVisible = false;
 
@@ -570,10 +574,11 @@ public class CodeEntityEditorDialog : Window
         };
 
         var cm = new ContextMenu();
-        foreach (var mi in extra) cm.Items.Add(mi);
-        if (extra.Length > 0) cm.Items.Add(new Separator());
+        var extras = extra?.ToList() ?? new();
+        foreach (var mi in extras) cm.Items.Add(mi);
+        if (extras.Count > 0) cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("CodeEdit_Delete") };
-        del.Click += async (_, _) => { if (await ConfirmDelete(summary.Text ?? "")) onDelete(); };
+        del.Click += async (_, _) => { if (await ConfirmDelete(summary.Text ?? "", extraWarn?.Invoke())) onDelete(); };
         cm.Items.Add(del);
         header.ContextMenu = cm;
 
@@ -583,12 +588,32 @@ public class CodeEntityEditorDialog : Window
         return outer;
     }
 
-    // Asks before deleting a member; returns true only on an explicit Yes.
-    async Task<bool> ConfirmDelete(string what)
+    // Asks before deleting a member; returns true only on an explicit Yes. An extra warning line
+    // (e.g. "a board is assigned") is appended when provided.
+    async Task<bool> ConfirmDelete(string what, string? extraWarn = null)
     {
-        var res = await MessageDialog.Show(this,
-            string.Format(Loc.S("CodeEdit_DeleteConfirm"), what.Trim()), Loc.S("CodeEdit_DeleteTitle"), DialogButtons.YesNo);
+        var msg = string.Format(Loc.S("CodeEdit_DeleteConfirm"), what.Trim());
+        if (!string.IsNullOrEmpty(extraWarn)) msg += "\n\n" + extraWarn;
+        var res = await MessageDialog.Show(this, msg, Loc.S("CodeEdit_DeleteTitle"), DialogButtons.YesNo);
         return res == DialogResult.Yes;
+    }
+
+    // Assigns an existing project board to author this method's body (sets the board's TargetKey).
+    async Task AssignBoardToKey(string key)
+    {
+        var boards = CodeBoardRegistryService.Load(_projFolder);
+        if (boards.Count == 0) { await MessageDialog.Show(this, Loc.S("Boards_NoBoards"), Loc.S("Boards_Assign")); return; }
+        var pick = await PickListDialog.Show(this, Loc.S("CodeEdit_AssignBoardTitle"), boards.Select(b => (b.Id, b.Name)).ToList());
+        if (pick is null) return;
+        boards.First(b => b.Id == pick).TargetKey = key;
+        CodeBoardRegistryService.Save(_projFolder, boards);
+    }
+
+    // A warning line if any board is assigned to the given diagram key, else null.
+    string? BoardWarn(string key)
+    {
+        var names = CodeBoardRegistryService.Load(_projFolder).Where(b => b.TargetKey == key).Select(b => b.Name).ToList();
+        return names.Count > 0 ? string.Format(Loc.S("CodeEdit_DeleteBoardWarn"), string.Join(", ", names)) : null;
     }
 
     TextBlock FieldLabel(string text)

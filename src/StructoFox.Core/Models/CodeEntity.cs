@@ -94,6 +94,10 @@ public class CodeBoard
     public string   Symbol    { get; set; } = "💻";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>If set, this board authors a function/method body: the diagram key it generates into
+    /// (entityId, or "entityId#methodId" for a method). Empty = a plain visualisation board.</summary>
+    public string   TargetKey { get; set; } = "";
 }
 
 /// <summary>Per-card-per-board position and orientation (orientation is board-local).</summary>

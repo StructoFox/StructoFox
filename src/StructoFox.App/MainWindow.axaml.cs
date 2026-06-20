@@ -1020,6 +1020,13 @@ public partial class MainWindow : Window
         var msg = ids.Count == 1
             ? string.Format(Loc.S("Sec_DeleteConfirm1"), _sectionRows.FirstOrDefault(t => t.e.Id == ids[0]).e?.Name ?? "")
             : string.Format(Loc.S("Sec_DeleteConfirmN"), ids.Count);
+
+        // Warn (but never auto-delete) when a board is assigned to one of these entities or its methods.
+        var assignedBoards = ids.SelectMany(id => CodeBoardRegistryService.BoardsAssignedTo(_project, id))
+            .GroupBy(b => b.Id).Select(g => g.First().Name).ToList();
+        if (assignedBoards.Count > 0)
+            msg += "\n\n" + string.Format(Loc.S("Sec_DeleteBoardWarn"), string.Join(", ", assignedBoards));
+
         if (await MessageDialog.Show(this, msg, Loc.S("Sec_DeleteTitle"), DialogButtons.YesNo) != DialogResult.Yes) return;
         foreach (var id in ids) CodeEntityService.Delete(_project, section.ToString(), id);
         ShowSection(section);
@@ -1184,7 +1191,7 @@ public partial class MainWindow : Window
         var tile = new Border { Width = 200, Padding = new(14), Margin = new(0, 0, 10, 10), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
         Ui.Theme(tile, Border.BackgroundProperty, "ControlBgBrush");
 
-        tile.Child = new StackPanel
+        var stack = new StackPanel
         {
             Spacing = 6,
             Children =
@@ -1193,19 +1200,56 @@ public partial class MainWindow : Window
                 new TextBlock { Text = board.Name, FontWeight = FontWeight.Bold, FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis },
             },
         };
+        // Show the assignment, if any ("→ Class.Method"), so a body-authoring board reads as such.
+        if (_project is not null && !string.IsNullOrEmpty(board.TargetKey))
+            stack.Children.Add(Dim("→ " + CodeBoardRegistryService.TargetLabel(_project, board.TargetKey), 11));
+        tile.Child = stack;
 
         tile.PointerPressed += (_, ev) => { if (ev.GetCurrentPoint(tile).Properties.IsLeftButtonPressed) OpenBoard(board); };
 
+        var assign = new MenuItem { Header = Loc.S("Boards_Assign") };
+        assign.Click += async (_, _) => await AssignBoard(board);
         var rename = new MenuItem { Header = Loc.S("Boards_Rename") };
         rename.Click += async (_, _) => await RenameBoard(board);
         var delete = new MenuItem { Header = Loc.S("Boards_Delete") };
         delete.Click += async (_, _) => await DeleteBoard(board);
         var cm = new ContextMenu();
+        cm.Items.Add(assign);
+        if (!string.IsNullOrEmpty(board.TargetKey))
+        {
+            var clear = new MenuItem { Header = Loc.S("Boards_ClearAssign") };
+            clear.Click += (_, _) => SetBoardTarget(board.Id, "");
+            cm.Items.Add(clear);
+        }
+        cm.Items.Add(new Separator());
         cm.Items.Add(rename); cm.Items.Add(delete);
         tile.ContextMenu = cm;
 
         return tile;
     }
+
+    // Picks a function/method for this board to author, then stores the assignment.
+    Task AssignBoard(CodeBoard board) => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null) return;
+        var targets = CodeBoardRegistryService.AssignableTargets(_project);
+        if (targets.Count == 0) { await MessageDialog.Show(this, Loc.S("Boards_NoTargets"), Loc.S("Boards_Assign")); return; }
+        var key = await PickListDialog.Show(this, Loc.S("Boards_AssignTitle"), targets.Select(t => (t.Key, t.Label)).ToList());
+        if (key is null) return;
+        SetBoardTarget(board.Id, key);
+    }, "AssignBoard");
+
+    // Writes a board's TargetKey and refreshes the gallery.
+    void SetBoardTarget(string boardId, string key) => CrashHandler.Safe(() =>
+    {
+        if (_project is null) return;
+        var boards = CodeBoardRegistryService.Load(_project);
+        var b = boards.FirstOrDefault(x => x.Id == boardId);
+        if (b is null) return;
+        b.TargetKey = key;
+        CodeBoardRegistryService.Save(_project, boards);
+        ShowSection(Section.Boards);
+    }, "SetBoardTarget");
 
     // Opens a board on its own canvas window; its export buttons open the exporter on the chosen entities.
     void OpenBoard(CodeBoard board) => CrashHandler.Safe(() =>

@@ -215,6 +215,28 @@ public static class CodeBoardRegistryService
         catch { }
     }
 
+    /// <summary>Every function/method a board can be assigned to author: standalone functions and the
+    /// methods of classes/structs/interfaces. Key is the diagram key, Label a readable name.</summary>
+    public static List<(string Key, string Label)> AssignableTargets(string projFolder)
+    {
+        var list = new List<(string, string)>();
+        foreach (var e in CodeEntityService.LoadAll(projFolder, "Function"))
+            list.Add((e.Id, e.Name));
+        foreach (var typeName in new[] { "Class", "Struct", "Interface" })
+            foreach (var e in CodeEntityService.LoadAll(projFolder, typeName))
+                foreach (var m in e.Methods)
+                    list.Add(($"{e.Id}#{m.Id}", $"{e.Name}.{(string.IsNullOrWhiteSpace(m.Name) ? "(method)" : m.Name)}"));
+        return list;
+    }
+
+    /// <summary>A readable label for a target key, or the raw key if it can't be resolved.</summary>
+    public static string TargetLabel(string projFolder, string key) =>
+        string.IsNullOrEmpty(key) ? "" : (AssignableTargets(projFolder).FirstOrDefault(t => t.Key == key).Label ?? key);
+
+    /// <summary>Boards assigned to an entity or any of its methods (TargetKey == id or "id#…").</summary>
+    public static List<CodeBoard> BoardsAssignedTo(string projFolder, string entityId) =>
+        Load(projFolder).Where(b => b.TargetKey == entityId || b.TargetKey.StartsWith(entityId + "#")).ToList();
+
     public static readonly string[] SymbolPalette =
     [
         // Programming / structure

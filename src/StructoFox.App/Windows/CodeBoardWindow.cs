@@ -72,7 +72,8 @@ public class CodeBoardWindow : Window
         _board      = board;
         _themePath  = themePath;
         _onExport   = onExport;
-        _bodyTargetKey = bodyTargetKey;
+        // The body target comes from the explicit param (per-key board) or the board's own assignment.
+        _bodyTargetKey = bodyTargetKey ?? (string.IsNullOrWhiteSpace(board.TargetKey) ? null : board.TargetKey);
         _boardData  = CodeBoardDataService.Load(projFolder, board.Id);
 
         Title                 = board.Symbol + "  " + board.Name;
