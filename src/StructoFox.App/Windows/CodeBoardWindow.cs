@@ -1091,7 +1091,7 @@ public class CodeBoardWindow : Window
         var proj = payload[..sep];
         if (!string.Equals(proj, _projFolder, StringComparison.OrdinalIgnoreCase)) return;   // different project
         var ids = payload[(sep + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries);
-        AddEntitiesById(ids, e.GetPosition(_canvas));
+        AddEntitiesById(ids, e.GetPosition(_canvas!));
         e.Handled = true;
     }
 

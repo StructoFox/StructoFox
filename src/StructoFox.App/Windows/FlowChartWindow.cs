@@ -800,7 +800,7 @@ public class FlowChartWindow : Window
         var ids = payload[(sep + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries);
 
         var funcs = CodeEntityService.LoadAll(_projFolder, "Function").ToDictionary(x => x.Id);
-        var at = e.GetPosition(_canvas);
+        var at = e.GetPosition(_canvas!);
         double off = 0;
         foreach (var id in ids)
         {
