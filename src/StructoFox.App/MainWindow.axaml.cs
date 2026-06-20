@@ -153,8 +153,17 @@ public partial class MainWindow : Window
         pal.Click += (_, _) => new PaletteEditorWindow().Show();
         cm.Items.Add(pal);
 
-        // Options: a checkbox per suppressible message (checked = shown; re-check to re-enable it).
+        // Options: norm-compliance toggles + a checkbox per suppressible message.
         var options = new MenuItem { Header = Loc.S("Menu_Options") };
+
+        var normWarn = new MenuItem { Header = Loc.S("Opt_NormWarn"), ToggleType = MenuItemToggleType.CheckBox, IsChecked = AppSettings.NormWarn };
+        normWarn.Click += (_, _) => AppSettings.Set(AppSettings.NormWarnKey, normWarn.IsChecked);
+        options.Items.Add(normWarn);
+        var normMark = new MenuItem { Header = Loc.S("Opt_NormMark"), ToggleType = MenuItemToggleType.CheckBox, IsChecked = AppSettings.NormMark };
+        normMark.Click += (_, _) => AppSettings.Set(AppSettings.NormMarkKey, normMark.IsChecked);
+        options.Items.Add(normMark);
+        options.Items.Add(new Separator());
+
         foreach (var (key, labelKey) in SuppressStore.Known)
         {
             var k = key;

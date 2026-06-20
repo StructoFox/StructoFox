@@ -227,12 +227,15 @@ public class FlowChartWindow : Window
         row.Children.Add(decorBtn);
 
         var lineBtn = TBtn(LineModeLabel(), Loc.S("Flow_LinesTip"));
-        lineBtn.Click += (_, _) =>
+        lineBtn.Click += async (_, _) =>
         {
             _data.DiagonalLines = !_data.DiagonalLines;
             lineBtn.Content = LineModeLabel();
             foreach (var c in _data.Connections) RenderConnection(c);
             Save();
+            // Diagonal centre-to-centre arrows are not DIN-compliant — warn unless turned off in Options.
+            if (_data.DiagonalLines && AppSettings.NormWarn)
+                await MessageDialog.Show(this, Loc.S("Norm_DiagonalWarn"), Loc.S("Norm_Title"));
         };
         row.Children.Add(lineBtn);
 
@@ -606,6 +609,21 @@ public class FlowChartWindow : Window
             else if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; }
         };
         _canvas.Children.Add(hit); visuals.Add(hit);
+
+        // Non-DIN marker: a small crossed-out N on a diagonal (non-norm) line, if marking is on.
+        if (_data.DiagonalLines && AppSettings.NormMark)
+        {
+            var m = pts[pts.Count / 2];
+            var n = new TextBlock
+            {
+                Text = "N", FontSize = 11, FontWeight = FontWeight.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xE5, 0x39, 0x35)), IsHitTestVisible = false,
+                TextDecorations = new TextDecorationCollection { new TextDecoration { Location = TextDecorationLocation.Strikethrough } },
+            };
+            Canvas.SetLeft(n, m.X + 4); Canvas.SetTop(n, m.Y + 4);
+            n.ZIndex = 5;
+            _canvas.Children.Add(n); visuals.Add(n);
+        }
 
         // Transmission path marker: a small zig-zag at the route's middle point.
         if (conn.Transmission)

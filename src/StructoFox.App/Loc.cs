@@ -374,9 +374,13 @@ public static class Loc
         // App menu
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "About StructoFox",
-        ["Menu_Options"]    = "⚙ Options (show messages)",
+        ["Menu_Options"]    = "⚙ Options",
+        ["Opt_NormWarn"]    = "Warn about non-DIN elements",
+        ["Opt_NormMark"]    = "Mark non-DIN elements (N̶)",
         ["Opt_SubRemove"]   = "Subroutine-removal note",
         ["Opt_BoardRemove"] = "Board-removal note",
+        ["Norm_Title"]      = "Not DIN-compliant",
+        ["Norm_DiagonalWarn"] = "Diagonal centre-to-centre arrows aren't DIN 66001-compliant. Use orthogonal flow lines for a norm-compliant chart. (You can turn this warning off in Options.)",
 
         // Project context menu (home)
         ["Proj_Rename"]       = "✎ Rename…",
@@ -666,9 +670,13 @@ public static class Loc
         // App-Menü
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "Über StructoFox",
-        ["Menu_Options"]    = "⚙ Optionen (Meldungen anzeigen)",
+        ["Menu_Options"]    = "⚙ Optionen",
+        ["Opt_NormWarn"]    = "Meldung wenn nicht normgerecht",
+        ["Opt_NormMark"]    = "Markierung wenn nicht normgerecht (N̶)",
         ["Opt_SubRemove"]   = "Hinweis: Unterprogramm entfernen",
         ["Opt_BoardRemove"] = "Hinweis: vom Board entfernen",
+        ["Norm_Title"]      = "Nicht normgerecht",
+        ["Norm_DiagonalWarn"] = "Diagonale Mitte-zu-Mitte-Pfeile sind nicht DIN-66001-konform. Für ein normgerechtes Diagramm orthogonale Flusslinien verwenden. (Diese Meldung lässt sich in den Optionen abschalten.)",
 
         // Projekt-Kontextmenü (Home)
         ["Proj_Rename"]       = "✎ Umbenennen…",
