@@ -25,10 +25,11 @@ public class HexColorPicker : StackPanel
     readonly Border _hueFill = new() { IsHitTestVisible = false };
     readonly Border _hueBar  = new() { Width = BoxW, Height = BarH, BorderBrush = Brushes.Gray, BorderThickness = new(1) };
 
-    // Per-channel numeric inputs: decimal (0–255) and hex (00–FF).
-    readonly TextBox _rDec = Dec(), _gDec = Dec(), _bDec = Dec();
-    readonly TextBox _rHex = Hex2(), _gHex = Hex2(), _bHex = Hex2();
+    // Per-channel numeric inputs: decimal (0–255) and hex (00–FF). Alpha (A) drives transparency.
+    readonly TextBox _rDec = Dec(), _gDec = Dec(), _bDec = Dec(), _aDec = Dec();
+    readonly TextBox _rHex = Hex2(), _gHex = Hex2(), _bHex = Hex2(), _aHex = Hex2();
     readonly TextBox _c = Pctf(), _m = Pctf(), _y = Pctf(), _k = Pctf();
+    byte _alpha = 255;
 
     readonly StackPanel _paletteArea = new() { Spacing = 4 };
     Color  _color = Colors.Black;
@@ -66,8 +67,8 @@ public class HexColorPicker : StackPanel
             Children.Add(NumericArea());
         }
 
-        WireText(_rDec, FromDec); WireText(_gDec, FromDec); WireText(_bDec, FromDec);
-        WireText(_rHex, FromHex); WireText(_gHex, FromHex); WireText(_bHex, FromHex);
+        WireText(_rDec, FromDec); WireText(_gDec, FromDec); WireText(_bDec, FromDec); WireText(_aDec, FromDec);
+        WireText(_rHex, FromHex); WireText(_gHex, FromHex); WireText(_bHex, FromHex); WireText(_aHex, FromHex);
         foreach (var f in new[] { _c, _m, _y, _k }) WireText(f, FromCmyk);
 
         Color = Colors.Black;
@@ -85,8 +86,9 @@ public class HexColorPicker : StackPanel
     {
         _updating = true;
         _color = col;
-        _rDec.Text = col.R.ToString(); _gDec.Text = col.G.ToString(); _bDec.Text = col.B.ToString();
-        _rHex.Text = col.R.ToString("X2"); _gHex.Text = col.G.ToString("X2"); _bHex.Text = col.B.ToString("X2");
+        _alpha = col.A;
+        _rDec.Text = col.R.ToString(); _gDec.Text = col.G.ToString(); _bDec.Text = col.B.ToString(); _aDec.Text = col.A.ToString();
+        _rHex.Text = col.R.ToString("X2"); _gHex.Text = col.G.ToString("X2"); _bHex.Text = col.B.ToString("X2"); _aHex.Text = col.A.ToString("X2");
         var (cc, mm, yy, kk) = RgbToCmyk(col);
         _c.Text = Pct(cc); _m.Text = Pct(mm); _y.Text = Pct(yy); _k.Text = Pct(kk);
         (_h, _s, _v) = RgbToHsv(col);
@@ -99,7 +101,7 @@ public class HexColorPicker : StackPanel
     void Commit(Color col)
     {
         if (_updating) return;
-        ShowColor(col);
+        ShowColor(Color.FromArgb(_alpha, col.R, col.G, col.B));   // keep the chosen alpha through hue/SV/palette picks
         ColorChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -220,19 +222,19 @@ public class HexColorPicker : StackPanel
         box.KeyDown   += (_, e) => { if (e.Key == Key.Enter) Try(); };
     }
 
-    // The colour described by the three decimal (0–255) channel fields, or null if any don't parse.
+    // The colour described by the decimal (0–255) channel fields incl. alpha, or null if any don't parse.
     Color? FromDec()
     {
-        if (TryByteDec(_rDec, out var r) && TryByteDec(_gDec, out var g) && TryByteDec(_bDec, out var b))
-            return Color.FromRgb(r, g, b);
+        if (TryByteDec(_rDec, out var r) && TryByteDec(_gDec, out var g) && TryByteDec(_bDec, out var b) && TryByteDec(_aDec, out var a))
+        { _alpha = a; return Color.FromArgb(a, r, g, b); }
         return null;
     }
 
-    // The colour described by the three hex (00–FF) channel fields, or null if any don't parse.
+    // The colour described by the hex (00–FF) channel fields incl. alpha, or null if any don't parse.
     Color? FromHex()
     {
-        if (TryByteHex(_rHex, out var r) && TryByteHex(_gHex, out var g) && TryByteHex(_bHex, out var b))
-            return Color.FromRgb(r, g, b);
+        if (TryByteHex(_rHex, out var r) && TryByteHex(_gHex, out var g) && TryByteHex(_bHex, out var b) && TryByteHex(_aHex, out var a))
+        { _alpha = a; return Color.FromArgb(a, r, g, b); }
         return null;
     }
 
@@ -305,7 +307,7 @@ public class HexColorPicker : StackPanel
         var rgb = new StackPanel
         {
             Spacing = 4, VerticalAlignment = VerticalAlignment.Center,
-            Children = { ChannelGroup("R", _rDec, _rHex), ChannelGroup("G", _gDec, _gHex), ChannelGroup("B", _bDec, _bHex) },
+            Children = { ChannelGroup("R", _rDec, _rHex), ChannelGroup("G", _gDec, _gHex), ChannelGroup("B", _bDec, _bHex), ChannelGroup("A", _aDec, _aHex) },
         };
 
         var cmyk = new Grid { ColumnSpacing = 10, RowSpacing = 4, VerticalAlignment = VerticalAlignment.Center };
@@ -375,4 +377,8 @@ public class HexColorPicker : StackPanel
 
     /// <summary>Formats a colour as opaque web hex (#RRGGBB).</summary>
     public static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+
+    /// <summary>Formats a colour as web hex, including the alpha channel (#AARRGGBB) when not fully
+    /// opaque — so transparency survives a round-trip through Color.Parse.</summary>
+    public static string HexOfRgba(Color c) => c.A == 255 ? HexOf(c) : $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
 }

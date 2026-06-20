@@ -111,9 +111,10 @@ public class StyleEditorWindow : Window
     // Reads the controls back into a fresh ElementStyle (inherit → null fields).
     ElementStyle BuildStyle() => new()
     {
-        LineColor     = _lineField.Inherit ? null : HexColorPicker.HexOf(_lineField.Color),
-        FillColor     = _fillField.Inherit ? null : HexColorPicker.HexOf(_fillField.Color),
-        TextColor     = _textField.Inherit ? null : HexColorPicker.HexOf(_textField.Color),
+        // RGBA so transparency (e.g. a see-through note's fill/frame/text) is preserved.
+        LineColor     = _lineField.Inherit ? null : HexColorPicker.HexOfRgba(_lineField.Color),
+        FillColor     = _fillField.Inherit ? null : HexColorPicker.HexOfRgba(_fillField.Color),
+        TextColor     = _textField.Inherit ? null : HexColorPicker.HexOfRgba(_textField.Color),
         LineThickness = _thickCombo.SelectedIndex >= 1 ? _thickCombo.SelectedIndex : null,
     };
 
