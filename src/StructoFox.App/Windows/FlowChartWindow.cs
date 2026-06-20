@@ -44,6 +44,8 @@ public class FlowChartWindow : Window
     bool   _selecting;  Point _selStart;             // left-drag selection on empty canvas
     bool   _panning;    Point _panStart;  Vector _panOrigin;   // right-drag canvas pan
 
+    FlowConnection? _segConn;  int _segIdx;  List<BoardWaypoint>? _segBase;  Point _segStart;  // segment drag
+
     Button? _selectBtn, _removeBtn;
     MenuItem? _connMenu;   // the merged "Connect" menu; its header reflects the active line style + mode
     ContextMenu? _menu;       // the one open context menu, so a new one closes the old (no stacking)
@@ -148,6 +150,7 @@ public class FlowChartWindow : Window
                 _rubberBand.EndPoint = e.GetPosition(_canvas);
                 return;
             }
+            if (_segConn is not null && _segBase is not null) { DragSegment(e.GetPosition(_canvas)); return; }
             if (_panning)
             {
                 var d = e.GetPosition(_scroll) - _panStart;
@@ -158,6 +161,7 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
+            if (_segConn is not null) { Save(); _segConn = null; _segBase = null; e.Pointer.Capture(null); return; }
             if (_panning) { _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null); return; }
             if (_selecting) { _selecting = false; CommitSelectRect(); e.Pointer.Capture(null); }
         };
@@ -858,6 +862,69 @@ public class FlowChartWindow : Window
         foreach (var c in _data.Connections) RenderConnection(c);
     }
 
+    // The route for a connection that has manual waypoints: node-edge exit/entry (chosen toward the first
+    // and last waypoint) with the user's bends in between.
+    static List<Point> ManualRoute(Rect a, Rect b, FlowConnection conn)
+    {
+        var wps = conn.Waypoints.Select(w => new Point(w.X, w.Y)).ToList();
+        var pts = new List<Point> { EdgeMid(a, wps[0]) };
+        pts.AddRange(wps);
+        pts.Add(EdgeMid(b, wps[^1]));
+        return pts;
+    }
+
+    // The midpoint of the rectangle edge facing a target point (keeps exits/entries orthogonal).
+    static Point EdgeMid(Rect r, Point toward)
+    {
+        var c = r.Center;
+        double dx = toward.X - c.X, dy = toward.Y - c.Y;
+        return Math.Abs(dy) >= Math.Abs(dx)
+            ? new Point(c.X, dy >= 0 ? r.Bottom : r.Top)
+            : new Point(dx >= 0 ? r.Right : r.Left, c.Y);
+    }
+
+    // Starts dragging an interior segment of a connection. If the connection is still auto-routed, its
+    // current bends are frozen into waypoints first so they become editable.
+    void BeginSegmentDrag(FlowConnection conn, int segIdx, PointerPressedEventArgs e)
+    {
+        if (conn.Waypoints.Count == 0)
+        {
+            var a = NodeRect(conn.FromId); var b = NodeRect(conn.ToId);
+            if (a is null || b is null) return;
+            var pts = OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId);
+            conn.Waypoints = pts.Skip(1).Take(pts.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
+        }
+        _segConn = conn;
+        _segIdx  = segIdx;
+        _segBase = conn.Waypoints.Select(w => new BoardWaypoint { X = w.X, Y = w.Y }).ToList();
+        _segStart = e.GetPosition(_canvas);
+        e.Pointer.Capture(_canvas);
+    }
+
+    // Moves the dragged segment perpendicular to its orientation, shifting its two bend points (and so
+    // the whole segment) while the neighbouring segments stay attached.
+    void DragSegment(Point cur)
+    {
+        if (_segConn is null || _segBase is null) return;
+        int ai = _segIdx - 1, bi = _segIdx;   // waypoint indices of the segment's two ends (both interior)
+        if (ai < 0 || bi >= _segBase.Count) return;
+
+        var wps = _segBase.Select(w => new BoardWaypoint { X = w.X, Y = w.Y }).ToList();
+        bool horiz = Math.Abs(_segBase[bi].Y - _segBase[ai].Y) < Math.Abs(_segBase[bi].X - _segBase[ai].X);
+        if (horiz)
+        {
+            double ny = Snap(_segBase[ai].Y + (cur.Y - _segStart.Y));
+            wps[ai].Y = ny; wps[bi].Y = ny;
+        }
+        else
+        {
+            double nx = Snap(_segBase[ai].X + (cur.X - _segStart.X));
+            wps[ai].X = nx; wps[bi].X = nx;
+        }
+        _segConn.Waypoints = wps;
+        RenderConnection(_segConn);
+    }
+
     // Draws one connection: line, arrowhead, a transparent hit-zone for editing, and an optional label.
     void RenderConnection(FlowConnection conn)
     {
@@ -869,11 +936,13 @@ public class FlowChartWindow : Window
         var b = NodeRect(conn.ToId);
         if (a is null || b is null) return;
 
-        // DIN flow lines route orthogonally from edge-midpoints, steering ≥1 grid clear of other nodes;
-        // the diagonal style is opt-in.
+        // Routing: diagonal (opt-in) · manual (user-dragged waypoints) · else auto orthogonal that steers
+        // ≥1 grid clear of other nodes.
         var pts = _data.DiagonalLines
             ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
-            : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId);
+            : conn.Waypoints.Count > 0
+                ? ManualRoute(a.Value, b.Value, conn)
+                : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId);
 
         var brush   = new SolidColorBrush(ParseColor(conn.LineColor));
         var visuals = new List<Control>();
@@ -897,17 +966,29 @@ public class FlowChartWindow : Window
             _canvas.Children.Add(dot); visuals.Add(dot);
         }
 
-        // Fat transparent overlay so the thin line is easy to right-click / remove.
-        var hit = new Polyline { Stroke = Brushes.Transparent, StrokeThickness = 12, Cursor = new Cursor(StandardCursorType.Hand) };
-        foreach (var p in pts) hit.Points.Add(p);
-        hit.ZIndex = 3;
+        // Fat transparent per-segment hit zones: right-click menu / remove on any; in Select mode an
+        // interior segment (both ends are bends) can be dragged to reposition it for tidy layouts.
         var capConn = conn;
-        hit.PointerPressed += (_, e) =>
+        for (int i = 0; i < pts.Count - 1; i++)
         {
-            if (e.GetCurrentPoint(hit).Properties.IsRightButtonPressed) { ShowConnMenu(capConn, hit); e.Handled = true; }
-            else if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; }
-        };
-        _canvas.Children.Add(hit); visuals.Add(hit);
+            var p0 = pts[i]; var p1 = pts[i + 1];
+            bool interior = !_data.DiagonalLines && i >= 1 && i <= pts.Count - 3;
+            bool horiz = Math.Abs(p1.Y - p0.Y) < Math.Abs(p1.X - p0.X);
+            var seg = new Line
+            {
+                StartPoint = p0, EndPoint = p1, Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 3,
+                Cursor = new Cursor(interior ? (horiz ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast)
+                                             : StandardCursorType.Hand),
+            };
+            int segIdx = i;
+            seg.PointerPressed += (_, e) =>
+            {
+                if (e.GetCurrentPoint(seg).Properties.IsRightButtonPressed) { ShowConnMenu(capConn, seg); e.Handled = true; return; }
+                if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
+                if (_mode == EditMode.Select && interior) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }
+            };
+            _canvas.Children.Add(seg); visuals.Add(seg);
+        }
 
         // Non-DIN marker: a small crossed-out N on a diagonal (non-norm) line, if marking is on.
         if (_data.DiagonalLines && AppSettings.NormMark)
@@ -976,6 +1057,12 @@ public class FlowChartWindow : Window
         var trans = new MenuItem { Header = conn.Transmission ? Loc.S("Flow_TransmissionOff") : Loc.S("Flow_Transmission") };
         trans.Click += (_, _) => { conn.Transmission = !conn.Transmission; Save(); RenderConnection(conn); };
         cm.Items.Add(trans);
+        if (conn.Waypoints.Count > 0)
+        {
+            var reset = new MenuItem { Header = Loc.S("Flow_ResetRoute") };
+            reset.Click += (_, _) => { conn.Waypoints.Clear(); Save(); RenderConnection(conn); };
+            cm.Items.Add(reset);
+        }
         var del = new MenuItem { Header = Loc.S("Flow_DeleteArrow") };
         del.Click += (_, _) => DeleteConnection(conn);
         cm.Items.Add(del);
