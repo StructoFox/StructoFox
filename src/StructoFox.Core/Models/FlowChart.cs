@@ -37,6 +37,10 @@ public class FlowNode
 
     /// <summary>Optional DIN symbol variant (cosmetic; default = the kind's standard shape).</summary>
     public FlowSymbol   Symbol { get; set; } = FlowSymbol.Auto;
+
+    /// <summary>For a Subroutine node: the id of the Function entity it calls (in the Functions library;
+    /// its diagram is keyed by this id). Empty until linked/created via "show chart".</summary>
+    public string       RefId  { get; set; } = "";
     public string       Text   { get; set; } = "";
     public double       X      { get; set; } = 60;
     public double       Y      { get; set; } = 60;

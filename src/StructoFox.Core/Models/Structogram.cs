@@ -39,8 +39,11 @@ public class NsBlock
     public List<NsBlock> Else  { get; set; } = [];
     public List<NsArm>   Arms  { get; set; } = [];
 
-    /// <summary>For a Subroutine block: the diagram key of the sub-program it links to (its own
-    /// flowchart/structogram/board). Empty until first opened via "show chart".</summary>
+    /// <summary>For a Subroutine block: the id of the Function entity it calls (lives in the Functions
+    /// library; its diagram is keyed by this id). Empty until linked/created via "show chart".</summary>
+    public string        RefId { get; set; } = "";
+
+    /// <summary>Legacy ad-hoc sub-diagram key (pre-RefId). Kept for older files; no longer written.</summary>
     public string        LinkKey { get; set; } = "";
 
     /// <summary>Optional cosmetic appearance overrides for this block (null = inherit the diagram style).

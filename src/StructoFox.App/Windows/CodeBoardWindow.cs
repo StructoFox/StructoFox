@@ -1188,8 +1188,10 @@ public class CodeBoardWindow : Window
 
     void RemoveFromBoard(IEnumerable<string> ids)
     {
+        var any = false;
         foreach (var id in ids)
         {
+            any = true;
             _boardData.Positions.Remove(id);
 
             if (_cards.TryGetValue(id, out var card)) { _canvas!.Children.Remove(card); _cards.Remove(id); }
@@ -1210,6 +1212,7 @@ public class CodeBoardWindow : Window
         _selectedIds.Clear();
         Save();
         RefreshSelectionVisuals();
+        if (any) _ = InfoDialog.Show(this, "board_remove", Loc.S("Board_RemoveInfo"), Loc.S("Code_RemoveFromBoard"));
     }
 
     void RefreshSelectionVisuals()

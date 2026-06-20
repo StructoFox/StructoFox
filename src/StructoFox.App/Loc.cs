@@ -99,6 +99,7 @@ public static class Loc
         ["NewProj_FreeFmt"]   = "{0} MB free on {1}",
         ["Common_OK"]         = "OK",
         ["Common_Cancel"]     = "Cancel",
+        ["Common_DontShowAgain"] = "Don't show this again",
 
         // Diagram chooser (DiagramLauncher)
         ["Diag_Title"]     = "Diagram",
@@ -148,6 +149,8 @@ public static class Loc
         ["Struct_DefSubroutine"]  = "subprogram",
         ["Struct_ShowChart"]      = "🗺 Show chart…",
         ["Struct_ShowChartTip"]   = "Double-click to open this subprogram's diagram",
+        ["Sub_NamePrompt"]        = "Subprogram (function) name:",
+        ["Sub_RemoveInfo"]        = "The subprogram stays in the Functions library — only this block/node was removed. To delete it for good, remove it in the Functions tab.",
         ["Struct_AddBlockTip"]    = "Add a block",
         ["Struct_AddInline"]      = "＋ add",
         ["Struct_PromptStatement"] = "Statement",
@@ -345,6 +348,7 @@ public static class Loc
         ["Code_SwitchVertical"]   = "Ports: switch to vertical",
         ["Code_SwitchHorizontal"] = "Ports: switch to horizontal",
         ["Code_RemoveFromBoard"]  = "Remove from board",
+        ["Board_RemoveInfo"]      = "These entities stay in the project libraries — only removed from this board. To delete one for good, use its right-click → Delete in the library.",
         ["Code_DeletePerm"]       = "✕ Delete entity (permanent)",
         ["Code_DeletePermConfirm"]= "Permanently delete \"{0}\" from the project? This cannot be undone.",
         ["Code_DeleteEntityTitle"]= "Delete entity",
@@ -433,6 +437,8 @@ public static class Loc
         ["Struct_DefSubroutine"]  = "Unterprogramm",
         ["Struct_ShowChart"]      = "🗺 Diagramm zeigen…",
         ["Struct_ShowChartTip"]   = "Doppelklick öffnet das Diagramm dieses Unterprogramms",
+        ["Sub_NamePrompt"]        = "Unterprogramm-(Funktions-)Name:",
+        ["Sub_RemoveInfo"]        = "Das Unterprogramm bleibt in der Functions-Bibliothek — entfernt wurde nur dieser Block/Knoten. Zum endgültigen Löschen im Functions-Reiter entfernen.",
         ["Struct_AddBlockTip"]    = "Einen Block hinzufügen",
         ["Struct_AddInline"]      = "＋ hinzufügen",
         ["Struct_PromptStatement"] = "Anweisung",
@@ -550,6 +556,7 @@ public static class Loc
         ["StyleEd_SlotName"]  = "Slot-Name:",
         ["Common_OK"]         = "OK",
         ["Common_Cancel"]     = "Abbrechen",
+        ["Common_DontShowAgain"] = "Nicht wieder anzeigen",
 
         // Entity editor dialog
         ["Common_Name"]            = "Name",
@@ -630,6 +637,7 @@ public static class Loc
         ["Code_SwitchVertical"]   = "Ports: auf vertikal umstellen",
         ["Code_SwitchHorizontal"] = "Ports: auf horizontal umstellen",
         ["Code_RemoveFromBoard"]  = "Vom Board entfernen",
+        ["Board_RemoveInfo"]      = "Diese Entities bleiben in den Projekt-Bibliotheken — nur vom Board entfernt. Zum endgültigen Löschen in der Bibliothek per Rechtsklick → Löschen.",
         ["Code_DeletePerm"]       = "✕ Entity löschen (dauerhaft)",
         ["Code_DeletePermConfirm"]= "„{0}“ dauerhaft aus dem Projekt löschen? Das kann nicht rückgängig gemacht werden.",
         ["Code_DeleteEntityTitle"]= "Entity löschen",

@@ -123,6 +123,11 @@ public class FlowChartWindow : Window
 
         KeyDown += (_, e) => { if (e.Key == Key.Delete) RemoveSelected(); };
 
+        // Accept functions dragged in from the cockpit → they land as subroutine nodes.
+        DragDrop.SetAllowDrop(_canvas, true);
+        _canvas.AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        _canvas.AddHandler(DragDrop.DropEvent, OnDrop);
+
         // Ctrl + wheel zooms the canvas (otherwise the scroll viewer scrolls normally).
         _scroll.PointerWheelChanged += (_, e) =>
         {
@@ -403,9 +408,10 @@ public class FlowChartWindow : Window
         {
             var props = e.GetCurrentPoint(container).Properties;
             if (props.IsRightButtonPressed) { ShowNodeMenu(node, label, container); e.Handled = true; return; }
-            if (_mode == EditMode.Remove)   { DeleteNode(node.Id); e.Handled = true; return; }
+            if (_mode == EditMode.Remove)   { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); e.Handled = true; return; }
             if (ConnectMode)                { HandleConnectClick(node.Id); e.Handled = true; return; }
-            if (e.ClickCount >= 2)          { _ = EditNodeText(node, label); e.Handled = true; return; }
+            // A subroutine opens its function's diagram; other nodes edit their text.
+            if (e.ClickCount >= 2)          { if (node.Kind == FlowNodeKind.Subroutine) ShowChartFlow(node); else _ = EditNodeText(node, label); e.Handled = true; return; }
 
             _selected.Clear(); _selected.Add(node.Id); RefreshSelection();
             dragging = true; offset = e.GetPosition(container);
@@ -439,6 +445,13 @@ public class FlowChartWindow : Window
         var edit = new MenuItem { Header = Loc.S("Flow_EditText") };
         edit.Click += (_, _) => _ = EditNodeText(node, label);
         cm.Items.Add(edit);
+        if (node.Kind == FlowNodeKind.Subroutine)
+        {
+            var chart = new MenuItem { Header = Loc.S("Struct_ShowChart") };
+            chart.Click += (_, _) => ShowChartFlow(node);
+            cm.Items.Add(chart);
+        }
+
         var style = new MenuItem { Header = Loc.S("Style_Open") };
         style.Click += (_, _) => _ = EditNodeStyle(node);
         cm.Items.Add(style);
@@ -673,9 +686,62 @@ public class FlowChartWindow : Window
     // Deletes every selected node (and its arrows), then persists once.
     void RemoveSelected()
     {
+        bool anySub = _selected.Any(id => _data.Nodes.FirstOrDefault(n => n.Id == id) is { Kind: FlowNodeKind.Subroutine } s && !string.IsNullOrEmpty(s.RefId));
         foreach (var id in _selected.ToList()) DeleteNode(id, persist: false);
         _selected.Clear();
         Save();
+        if (anySub) _ = InfoDialog.Show(this, "sub_remove", Loc.S("Sub_RemoveInfo"), Loc.S("Flow_Subroutine"));
+    }
+
+    // Opens (or creates, in the Functions library) the function a subroutine node calls, then its diagram.
+    async void ShowChartFlow(FlowNode node)
+    {
+        if (string.IsNullOrEmpty(node.RefId))
+        {
+            var name = await PromptDialog.Show(this, Loc.S("Sub_NamePrompt"), node.Text, Loc.S("Flow_Subroutine"));
+            if (string.IsNullOrWhiteSpace(name)) return;
+            var fn = new CodeEntity { Name = name.Trim(), EntityType = CodeEntityType.Function };
+            CodeEntityService.Save(_projFolder, "Function", fn);
+            node.RefId = fn.Id; node.Text = fn.Name; Save();
+            if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
+            RenderNode(node); UpdateConnectionsFor(node.Id);
+        }
+        var f = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == node.RefId);
+        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, node.RefId, f?.Name ?? node.Text, _themePath);
+    }
+
+    // ── Drag functions in from the cockpit (→ subroutine nodes) ──────────────
+
+    void OnDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(CodeBoardWindow.EntityDragFormat) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    void OnDrop(object? sender, DragEventArgs e)
+    {
+        if (e.DataTransfer.TryGetValue(CodeBoardWindow.EntityDragFormat) is not string payload) return;
+        var sep = payload.IndexOf(CodeBoardWindow.DragSep);
+        if (sep < 0 || !string.Equals(payload[..sep], _projFolder, StringComparison.OrdinalIgnoreCase)) return;
+        var ids = payload[(sep + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+        var funcs = CodeEntityService.LoadAll(_projFolder, "Function").ToDictionary(x => x.Id);
+        var at = e.GetPosition(_canvas);
+        double off = 0;
+        foreach (var id in ids)
+        {
+            if (!funcs.TryGetValue(id, out var fn)) continue;   // only functions become subroutine nodes
+            var node = new FlowNode
+            {
+                Kind = FlowNodeKind.Subroutine, RefId = fn.Id, Text = fn.Name,
+                X = Math.Max(0, at.X + off), Y = Math.Max(0, at.Y + off), Width = 150, Height = 56,
+            };
+            _data.Nodes.Add(node);
+            RenderNode(node);
+            off += 26;
+        }
+        Save();
+        e.Handled = true;
     }
 
     // Removes a node and any connections attached to it, optionally saving.

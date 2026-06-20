@@ -288,12 +288,21 @@ public class StructogramWindow : Window
         return g;
     }
 
-    // Opens the sub-program's diagram (chooser), creating a stable link key on first use.
-    void ShowChart(NsBlock b)
+    // Opens the sub-program's diagram. A subroutine references a real Function in the library: on first
+    // use it creates one (named after the block), so it can be reused across plans/boards.
+    async void ShowChart(NsBlock b)
     {
-        if (string.IsNullOrEmpty(b.LinkKey)) { b.LinkKey = $"{_key}#sub_{b.Id}"; Save(); }
-        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, b.LinkKey,
-            string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSubroutine") : b.Text, _themePath);
+        if (string.IsNullOrEmpty(b.RefId))
+        {
+            var name = await PromptDialog.Show(this, Loc.S("Sub_NamePrompt"),
+                string.IsNullOrWhiteSpace(b.Text) ? "" : b.Text, Loc.S("Struct_KSubroutine"));
+            if (string.IsNullOrWhiteSpace(name)) return;
+            var fn = new CodeEntity { Name = name.Trim(), EntityType = CodeEntityType.Function };
+            CodeEntityService.Save(_projFolder, "Function", fn);
+            b.RefId = fn.Id; b.Text = fn.Name; Save(); Rebuild();
+        }
+        var f = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == b.RefId);
+        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, b.RefId, f?.Name ?? b.Text, _themePath);
     }
 
     // The classic if/else box: centered condition, T/F labels, then two side-by-side branches.
@@ -446,7 +455,12 @@ public class StructogramWindow : Window
 
         cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Struct_DeleteBlock") };
-        del.Click += (_, _) => { parent.Remove(b); Save(); Rebuild(); };
+        del.Click += async (_, _) =>
+        {
+            var wasSub = b.Kind == NsBlockKind.Subroutine && !string.IsNullOrEmpty(b.RefId);
+            parent.Remove(b); Save(); Rebuild();
+            if (wasSub) await InfoDialog.Show(this, "sub_remove", Loc.S("Sub_RemoveInfo"), Loc.S("Struct_KSubroutine"));
+        };
         cm.Items.Add(del);
 
         OpenMenu(cm, anchor);
