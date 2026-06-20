@@ -53,6 +53,10 @@ public class CodeBoardWindow : Window
 
     double _zoom = 1.0;
 
+    Rectangle? _gridRect;                              // tiled alignment grid behind the cards
+    bool   _panning;  Point _panStart;  Vector _panOrigin;   // right-drag canvas pan
+    bool   _rightMaybeMenu;                            // a right press that opens the add-menu if it wasn't a drag
+
     const double PortRadius  = 6;
     const double DefaultCardW = 180;
 
@@ -122,7 +126,8 @@ public class CodeBoardWindow : Window
         Ui.Theme(_canvas, Canvas.BackgroundProperty, "ContentBgBrush");
         _scroll.Content = _canvas;
 
-        KeyDown += (_, e) => { if (e.Key == Key.Delete && _selectedIds.Count > 0) RemoveSelectedFromBoard(); };
+        KeyDown += (_, e) => HandleKey(e);
+        Focusable = true;
 
         _canvas.PointerPressed  += Canvas_PointerPressed;
         _canvas.PointerMoved    += Canvas_PointerMoved;
@@ -137,10 +142,11 @@ public class CodeBoardWindow : Window
         _scroll.PointerWheelChanged += (_, e) =>
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
-            _zoom = Math.Clamp(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), 0.25, 3.0);
-            _canvas!.RenderTransform = new ScaleTransform(_zoom, _zoom);
+            SetZoom(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1));
             e.Handled = true;
         };
+
+        RenderGrid();
 
         // Render saved cards (dropping any whose entity vanished from disk).
         foreach (var kv in _boardData.Positions.ToList())
@@ -200,12 +206,123 @@ public class CodeBoardWindow : Window
         }
 
         row.Children.Add(new Border { Width = 8 });
-        var zoomBtn = Btn("1:1", Loc.S("Common_ResetZoomTip"));
-        zoomBtn.Click += (_, _) => { _zoom = 1.0; if (_canvas is not null) _canvas.RenderTransform = null; };
-        row.Children.Add(zoomBtn);
+        var viewBtn = Btn(Loc.S("Flow_View"), Loc.S("Flow_ViewTip"));
+        viewBtn.Flyout = BuildViewFlyout();
+        row.Children.Add(viewBtn);
 
         return bar;
     }
+
+    // The "View" flyout: zoom reset + grid controls (show / snap / style / colour / opacity).
+    Flyout BuildViewFlyout()
+    {
+        var panel = new StackPanel { Spacing = 10, MinWidth = 230, Margin = new(4) };
+
+        var zoom = Btn(Loc.S("Common_ResetZoomTip"));
+        zoom.Click += (_, _) => SetZoom(1.0);
+        panel.Children.Add(zoom);
+
+        panel.Children.Add(new Separator());
+        panel.Children.Add(new TextBlock { Text = Loc.S("Grid_Header"), FontWeight = FontWeight.Bold });
+
+        var show = new CheckBox { Content = Loc.S("Grid_Show"), IsChecked = _boardData.GridVisible };
+        show.IsCheckedChanged += (_, _) => { _boardData.GridVisible = show.IsChecked == true; RenderGrid(); Save(); };
+        panel.Children.Add(show);
+
+        var snap = new CheckBox { Content = Loc.S("Grid_Snap"), IsChecked = _boardData.SnapToGrid };
+        snap.IsCheckedChanged += (_, _) => { _boardData.SnapToGrid = snap.IsChecked == true; Save(); };
+        panel.Children.Add(snap);
+
+        var styleCombo = Ui.Combo();
+        styleCombo.Items.Add(new ComboItem(Loc.S("Grid_Lines"),  nameof(GridLineStyle.Lines)));
+        styleCombo.Items.Add(new ComboItem(Loc.S("Grid_Dashed"), nameof(GridLineStyle.Dashed)));
+        styleCombo.Items.Add(new ComboItem(Loc.S("Grid_Dots"),   nameof(GridLineStyle.Dots)));
+        styleCombo.SelectedItem = styleCombo.Items.OfType<ComboItem>().FirstOrDefault(c => c.Id == _boardData.GridStyle.ToString()) ?? styleCombo.Items[0];
+        styleCombo.SelectionChanged += (_, _) =>
+        {
+            if ((styleCombo.SelectedItem as ComboItem)?.Id is { } id && Enum.TryParse<GridLineStyle>(id, out var gs))
+            { _boardData.GridStyle = gs; RenderGrid(); Save(); }
+        };
+        panel.Children.Add(styleCombo);
+
+        var color = Btn(Loc.S("Grid_Color"));
+        color.Click += async (_, _) =>
+        {
+            var hex = await ColorPickDialog.Pick(this, Loc.S("Grid_Color"), _boardData.GridColor);
+            if (hex is null) return;
+            _boardData.GridColor = hex; RenderGrid(); Save();
+        };
+        panel.Children.Add(color);
+
+        panel.Children.Add(new TextBlock { Text = Loc.S("Grid_Opacity"), FontSize = 11, Opacity = 0.8 });
+        var op = new Slider { Minimum = 0, Maximum = 1, Value = _boardData.GridOpacity, SmallChange = 0.05, LargeChange = 0.1 };
+        op.PropertyChanged += (_, ev) => { if (ev.Property == Slider.ValueProperty) { _boardData.GridOpacity = op.Value; RenderGrid(); } };
+        op.PointerCaptureLost += (_, _) => Save();
+        panel.Children.Add(op);
+
+        return new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+    }
+
+    static string Inv(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    // Keyboard: Delete removes the selection; Ctrl+0 resets zoom, Ctrl +/- and Ctrl+Up/Down zoom.
+    void HandleKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Delete && _selectedIds.Count > 0) { RemoveSelectedFromBoard(); return; }
+        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        switch (e.Key)
+        {
+            case Key.D0 or Key.NumPad0:                    SetZoom(1.0); e.Handled = true; break;
+            case Key.OemPlus or Key.Add or Key.Up:         SetZoom(_zoom + 0.1); e.Handled = true; break;
+            case Key.OemMinus or Key.Subtract or Key.Down: SetZoom(_zoom - 0.1); e.Handled = true; break;
+        }
+    }
+
+    // Applies a clamped zoom level to the canvas.
+    void SetZoom(double z)
+    {
+        _zoom = Math.Clamp(z, 0.25, 3.0);
+        if (_canvas is not null)
+            _canvas.RenderTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+    }
+
+    // (Re)draws the alignment grid behind the cards as a single tiled brush.
+    void RenderGrid()
+    {
+        if (_canvas is null) return;
+        if (_gridRect is not null) { _canvas.Children.Remove(_gridRect); _gridRect = null; }
+        if (!_boardData.GridVisible) return;
+
+        double g = Math.Max(4, _boardData.GridSize);
+        Color c; try { c = Color.Parse(_boardData.GridColor); } catch { c = Colors.Gray; }
+        var brush = new SolidColorBrush(c, Math.Clamp(_boardData.GridOpacity, 0, 1));
+
+        Drawing drawing;
+        if (_boardData.GridStyle == GridLineStyle.Dots)
+            drawing = new GeometryDrawing { Brush = brush, Geometry = new EllipseGeometry(new Rect(0, 0, 1.6, 1.6)) };
+        else
+        {
+            var pen = new Pen(brush, 1);
+            if (_boardData.GridStyle == GridLineStyle.Dashed) pen.DashStyle = new DashStyle(new double[] { 2, 2 }, 0);
+            drawing = new GeometryDrawing { Pen = pen, Geometry = Geometry.Parse($"M0,0 L{Inv(g)},0 M0,0 L0,{Inv(g)}") };
+        }
+
+        _gridRect = new Rectangle
+        {
+            Width = _canvas.Width, Height = _canvas.Height, IsHitTestVisible = false, ZIndex = -1,
+            Fill = new DrawingBrush(drawing)
+            {
+                TileMode = TileMode.Tile, Stretch = Stretch.None,
+                DestinationRect = new RelativeRect(0, 0, g, g, RelativeUnit.Absolute),
+            },
+        };
+        Canvas.SetLeft(_gridRect, 0); Canvas.SetTop(_gridRect, 0);
+        _canvas.Children.Add(_gridRect);
+    }
+
+    // Snaps a card's top-left so its CENTRE lands on a grid line (centre-aligned → straight links).
+    double SnapCentered(double topLeft, double size) =>
+        !_boardData.SnapToGrid || _boardData.GridSize < 1 ? topLeft : Snap(topLeft + size / 2) - size / 2;
 
     void ToggleConnectMode()
     {
@@ -285,8 +402,9 @@ public class CodeBoardWindow : Window
         {
             if (!dragging) return;
             var pt = e.GetPosition(_canvas);
-            var nx = Snap(Math.Max(0, pt.X - offset.X));
-            var ny = Snap(Math.Max(0, pt.Y - offset.Y));
+            // Snap the card's CENTRE to the grid so centre-aligned cards give straight links.
+            var nx = SnapCentered(Math.Max(0, pt.X - offset.X), card.Bounds.Width);
+            var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), card.Bounds.Height);
             Canvas.SetLeft(card, nx);
             Canvas.SetTop(card,  ny);
             GrowCanvasFor(nx, ny, card.Bounds.Width, card.Bounds.Height);
@@ -481,8 +599,10 @@ public class CodeBoardWindow : Window
     {
         if (_canvas is null) return;
         const double margin = 400;
-        if (x + w + margin > _canvas.Width)  _canvas.Width  = x + w + margin;
-        if (y + h + margin > _canvas.Height) _canvas.Height = y + h + margin;
+        bool grew = false;
+        if (x + w + margin > _canvas.Width)  { _canvas.Width  = x + w + margin; grew = true; }
+        if (y + h + margin > _canvas.Height) { _canvas.Height = y + h + margin; grew = true; }
+        if (grew && _gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
     }
 
     void UpdatePortPositions(string entityId)
@@ -790,7 +910,10 @@ public class CodeBoardWindow : Window
         if (props.IsRightButtonPressed)
         {
             if (_connectMode) { CancelConnect(); return; }
-            ShowCanvasAddMenu(e.GetPosition(_canvas));
+            // Right press may start a pan (on drag) or open the add-menu (on a plain click).
+            _panning = true; _rightMaybeMenu = true;
+            _panStart = e.GetPosition(_scroll); _panOrigin = _scroll!.Offset;
+            e.Pointer.Capture(_canvas);
             e.Handled = true;
             return;
         }
@@ -812,6 +935,14 @@ public class CodeBoardWindow : Window
         {
             if (GetPortCenter(_connectFromEntityId, _connectFromPortId!) is { } c) _rubberBand.StartPoint = c;
             _rubberBand.EndPoint = e.GetPosition(_canvas);
+            return;
+        }
+
+        if (_panning)
+        {
+            var d = e.GetPosition(_scroll) - _panStart;
+            if (_rightMaybeMenu && (Math.Abs(d.X) > 4 || Math.Abs(d.Y) > 4)) { _rightMaybeMenu = false; if (_canvas is not null) _canvas.Cursor = new Cursor(StandardCursorType.SizeAll); }
+            _scroll!.Offset = new Vector(_panOrigin.X - d.X, _panOrigin.Y - d.Y);
             return;
         }
 
@@ -837,6 +968,14 @@ public class CodeBoardWindow : Window
 
     void Canvas_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_panning)
+        {
+            _panning = false;
+            e.Pointer.Capture(null);
+            if (_canvas is not null) _canvas.Cursor = new Cursor(StandardCursorType.Arrow);
+            if (_rightMaybeMenu) { _rightMaybeMenu = false; ShowCanvasAddMenu(e.GetPosition(_canvas)); }   // plain right-click → add menu
+            return;
+        }
         if (!_rubberSelecting) return;
         _rubberSelecting = false;
         e.Pointer.Capture(null);

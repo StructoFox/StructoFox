@@ -136,4 +136,7 @@ public class CodeBoardData
     public double                               GridSize   { get; set; } = 10;
     public bool                                 SnapToGrid { get; set; } = false;
     public bool                                 GridVisible { get; set; } = false;
+    public string                               GridColor   { get; set; } = "#B0BEC5";
+    public double                               GridOpacity { get; set; } = 0.35;
+    public GridLineStyle                        GridStyle   { get; set; } = GridLineStyle.Lines;
 }
