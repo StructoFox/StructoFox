@@ -53,6 +53,11 @@ public partial class MainWindow : Window
     string? _selAnchor;
     readonly List<(CodeEntity e, Border row)> _sectionRows = new();
 
+    // Cockpit entity-section filter state.
+    string  _secFilter = "";
+    string? _secNamespace = null;          // null = all namespaces, "" = no namespace, else the name
+    ContentControl _secList = new();       // the filtered list region (re-rendered without rebuilding the bar)
+
     // Builds the shell window and shows the project browser.
     public MainWindow()
     {
@@ -865,34 +870,94 @@ public partial class MainWindow : Window
         if (section == Section.Main)   { BuildMainView(root); return root; }
         if (section == Section.Export) { BuildExportView(root); return root; }
 
-        // Entity section: heading, a "New …" action, then the list of entities of this type.
+        // Entity section: heading, a "New …" action, a filter bar, then the filtered list.
         root.Children.Add(Heading(PluralLabel(section)));
         var add = Ui.Btn(string.Format(Loc.S("Sec_New"), SingularLabel(section)));
         add.HorizontalAlignment = HorizontalAlignment.Left;
         add.Click += async (_, _) => await NewEntity(section);
         root.Children.Add(add);
 
-        var entities = _project is null ? new() : CodeEntityService.LoadAll(_project, section.ToString());
-        // The entry-point function lives in its own "Main" tab, so it doesn't appear in the Functions list.
-        if (section == Section.Function) entities = entities.Where(e => !e.IsEntryPoint).ToList();
-        if (entities.Count == 0)
-            root.Children.Add(Note(string.Format(Loc.S("Sec_Empty"), PluralLabel(section))));
-        else
-        {
-            var list = new StackPanel { Spacing = 4 };
-            foreach (var e in entities.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
-                list.Children.Add(EntityRow(e, section));
+        root.Children.Add(BuildSectionFilterBar(section));
 
-            // A transparent holder + overlay canvas gives the list a rubber-band selection like the board.
-            var overlay = new Canvas { IsHitTestVisible = false };
-            var holder  = new Grid { Background = Brushes.Transparent };
-            holder.Children.Add(list);
-            holder.Children.Add(overlay);
-            WireListRubberBand(holder, overlay);
-            root.Children.Add(holder);
-        }
+        _secList = new ContentControl();
+        root.Children.Add(_secList);
+        RefreshSecList(section);
         return root;
     }
+
+    // Filter bar for an entity section: a name filter + an always-visible Namespace dropdown.
+    Control BuildSectionFilterBar(Section section)
+    {
+        var nameBox = new TextBox { Width = 200, Text = _secFilter, PlaceholderText = Loc.S("Sec_FilterName") };
+        Ui.Theme(nameBox, TextBox.BackgroundProperty,  "InputBgBrush");
+        Ui.Theme(nameBox, TextBox.ForegroundProperty,  "SidebarTextBrush");
+        Ui.Theme(nameBox, TextBox.BorderBrushProperty, "ControlBorderBrush");
+        nameBox.TextChanged += (_, _) => { _secFilter = nameBox.Text ?? ""; RefreshSecList(section); };
+
+        var nsCombo = Ui.Combo(190);
+        nsCombo.Items.Add(Loc.S("Sec_NsAll"));
+        nsCombo.Items.Add(Loc.S("Sec_NsNone"));
+        var spaces = _project is null ? new List<string>()
+            : LoadAllEntities(_project).Values.Select(e => e.Namespace).Where(n => !string.IsNullOrWhiteSpace(n))
+              .Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var ns in spaces) nsCombo.Items.Add(ns);
+        nsCombo.SelectedItem = _secNamespace is null ? Loc.S("Sec_NsAll") : _secNamespace == "" ? Loc.S("Sec_NsNone") : (spaces.Contains(_secNamespace) ? _secNamespace : Loc.S("Sec_NsAll"));
+        nsCombo.SelectionChanged += (_, _) =>
+        {
+            var sel = nsCombo.SelectedItem as string;
+            _secNamespace = sel == Loc.S("Sec_NsAll") ? null : sel == Loc.S("Sec_NsNone") ? "" : sel;
+            RefreshSecList(section);
+        };
+
+        return new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
+            Children = { nameBox, new TextBlock { Text = Loc.S("CodeEdit_Namespace"), VerticalAlignment = VerticalAlignment.Center }, nsCombo },
+        };
+    }
+
+    // Re-renders just the list region for the current filter (so the filter bar keeps focus).
+    void RefreshSecList(Section section) => CrashHandler.Safe(() =>
+    {
+        var entities = _project is null ? new() : CodeEntityService.LoadAll(_project, section.ToString());
+        if (section == Section.Function) entities = entities.Where(e => !e.IsEntryPoint).ToList();
+        entities = entities.Where(e =>
+            (string.IsNullOrEmpty(_secFilter) || e.Name.Contains(_secFilter, StringComparison.OrdinalIgnoreCase)) &&
+            (_secNamespace is null || (_secNamespace == "" ? string.IsNullOrEmpty(e.Namespace) : e.Namespace == _secNamespace)))
+            .ToList();
+        _secList.Content = BuildEntityList(section, entities);
+    }, "RefreshSecList");
+
+    // Builds the (filtered) entity list with rubber-band selection, or an "empty" note.
+    Control BuildEntityList(Section section, List<CodeEntity> entities)
+    {
+        _sectionRows.Clear(); _selEntities.Clear(); _selAnchor = null;
+        if (entities.Count == 0)
+            return Note(string.Format(Loc.S("Sec_Empty"), PluralLabel(section)));
+
+        var list = new StackPanel { Spacing = 4 };
+        foreach (var e in entities.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+            list.Children.Add(EntityRow(e, section));
+
+        var overlay = new Canvas { IsHitTestVisible = false };
+        var holder  = new Grid { Background = Brushes.Transparent };
+        holder.Children.Add(list);
+        holder.Children.Add(overlay);
+        WireListRubberBand(holder, overlay);
+        return holder;
+    }
+
+    // Assigns a namespace (prompted) to the selection (or the right-clicked entity), then refreshes.
+    Task AssignNamespace(CodeEntity e, Section section) => CrashHandler.SafeAsync(async () =>
+    {
+        if (_project is null) return;
+        var ids = _selEntities.Contains(e.Id) && _selEntities.Count > 0 ? _selEntities.ToList() : new() { e.Id };
+        var ns = await PromptDialog.Show(this, Loc.S("Sec_NsPrompt"), e.Namespace, Loc.S("Sec_SetNs"));
+        if (ns is null) return;
+        foreach (var ent in CodeEntityService.LoadAll(_project, section.ToString()))
+            if (ids.Contains(ent.Id)) { ent.Namespace = ns.Trim(); CodeEntityService.Save(_project, section.ToString(), ent); }
+        ShowSection(section);   // rebuild so the namespace dropdown picks up any new value
+    }, "AssignNamespace");
 
     // One entity row: name + summary. Left-click selects (Ctrl toggles, Shift ranges), double-click or
     // right-click → Edit opens it; delete sits below a separator in the menu to dodge mis-clicks.
@@ -979,6 +1044,10 @@ public partial class MainWindow : Window
             setMain.Click += (_, _) => SetAsMain(e);
             cm.Items.Add(setMain);
         }
+
+        var setNs = new MenuItem { Header = Loc.S("Sec_SetNs") };
+        setNs.Click += async (_, _) => await AssignNamespace(e, section);
+        cm.Items.Add(setNs);
 
         cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Sec_Delete") };
