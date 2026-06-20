@@ -91,6 +91,12 @@ public static class ThemeManager
             "ExpanderChevronForeground", "ExpanderChevronForegroundPointerOver", "ExpanderChevronForegroundPressed");
         Set(border, "ExpanderHeaderBorderBrush", "ExpanderContentBorderBrush", "ExpanderChevronBorderBrush");
 
+        // Menu / context-menu items: Fluent flips the label to white on hover/press, unreadable on the
+        // light hover highlight. Pin every state to the theme text colour and theme the popup chrome.
+        Set(text, "MenuFlyoutItemForeground", "MenuFlyoutItemForegroundPointerOver", "MenuFlyoutItemForegroundPressed");
+        Set(surface, "MenuFlyoutPresenterBackground");
+        Set(border,  "MenuFlyoutPresenterBorderBrush");
+
         // CheckBox label text (the "static" caption went white, also on hover)
         Set(text,
             "CheckBoxForegroundUnchecked", "CheckBoxForegroundUncheckedPointerOver", "CheckBoxForegroundUncheckedPressed",

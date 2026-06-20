@@ -105,10 +105,15 @@ public class FlowChartWindow : Window
         _scroll.Content = _canvas;
 
         // Click on empty canvas clears selection (node clicks are handled and don't bubble here).
-        _canvas.PointerPressed += (_, _) =>
+        _canvas.PointerPressed += (_, e) =>
         {
             _menu?.Close();
-            if (ConnectMode) return;
+            if (ConnectMode)
+            {
+                // Right-click anywhere cancels an in-progress connection.
+                if (e.GetCurrentPoint(_canvas).Properties.IsRightButtonPressed) CancelConnect();
+                return;
+            }
             _selected.Clear(); RefreshSelection();
         };
         // While connecting, the rubber-band follows the pointer.
@@ -466,7 +471,8 @@ public class FlowChartWindow : Window
         container.PointerPressed += (_, e) =>
         {
             var props = e.GetCurrentPoint(container).Properties;
-            if (props.IsRightButtonPressed) { ShowNodeMenu(node, label, container); e.Handled = true; return; }
+            // While connecting, a right-click cancels rather than opening the node menu.
+            if (props.IsRightButtonPressed) { if (ConnectMode) CancelConnect(); else ShowNodeMenu(node, label, container); e.Handled = true; return; }
             if (_mode == EditMode.Remove)   { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); e.Handled = true; return; }
             if (ConnectMode)                { HandleConnectClick(node.Id); e.Handled = true; return; }
             // A subroutine opens its function's diagram; other nodes edit their text.
@@ -1074,6 +1080,13 @@ public class FlowChartWindow : Window
         if (_rubberBand is null) return;
         _canvas?.Children.Remove(_rubberBand);
         _rubberBand = null;
+    }
+
+    // Aborts an in-progress connection (right-click during connect mode).
+    void CancelConnect()
+    {
+        _connectFromId = null;
+        RemoveRubberBand();
     }
 
     // ── Small UI helpers ───────────────────────────────────────────────────
