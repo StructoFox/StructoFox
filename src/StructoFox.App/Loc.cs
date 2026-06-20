@@ -290,6 +290,7 @@ public static class Loc
         ["Boards_ClearAssign"] = "Clear assignment",
         ["Boards_NoTargets"]  = "No functions or methods to assign to yet.",
         ["Boards_NoBoards"]   = "No boards yet — create one in the Boards tab first.",
+        ["Boards_HasNonFunc"] = "This board contains classes/objects, so it can't author a function body (only function-wiring boards can). Use a board with functions only.",
         ["Boards_Rename"]     = "✎ Rename…",
         ["Boards_Delete"]     = "✕  Delete board",
         ["Boards_DeleteConfirm"] = "Delete the board \"{0}\"? (Entities stay; only this board's layout is removed.)",
@@ -330,6 +331,7 @@ public static class Loc
         ["Code_AllOnBoard"]       = "Every entity is already on this board.",
         ["Code_AddEntityTitle"]   = "Add entity",
         ["Code_NewTypeTitle"]     = "New {0}",
+        ["Code_BodyFuncOnly"]     = "This board authors a function body, so it takes function cards only (no classes/objects).",
 
         // Code exporter
         ["Export_Title"]    = "Export — {0}",
@@ -551,6 +553,7 @@ public static class Loc
         ["Boards_ClearAssign"] = "Zuweisung entfernen",
         ["Boards_NoTargets"]  = "Noch keine Funktionen/Methoden zum Zuweisen.",
         ["Boards_NoBoards"]   = "Noch keine Boards — lege zuerst eines im Boards-Reiter an.",
+        ["Boards_HasNonFunc"] = "Dieses Board enthält Klassen/Objekte und kann daher keinen Funktionsrumpf erzeugen (nur Funktions-Verdrahtungs-Boards). Nimm ein Board nur mit Funktionen.",
         ["Boards_Rename"]     = "✎ Umbenennen…",
         ["Boards_Delete"]     = "✕  Board löschen",
         ["Boards_DeleteConfirm"] = "Board „{0}“ löschen? (Entities bleiben; nur das Layout dieses Boards wird entfernt.)",
@@ -591,6 +594,7 @@ public static class Loc
         ["Code_AllOnBoard"]       = "Alle Entities sind bereits auf diesem Board.",
         ["Code_AddEntityTitle"]   = "Entity hinzufügen",
         ["Code_NewTypeTitle"]     = "Neue(s) {0}",
+        ["Code_BodyFuncOnly"]     = "Dieses Board erzeugt einen Funktionsrumpf und nimmt daher nur Funktions-Karten auf (keine Klassen/Objekte).",
 
         // Code-Export
         ["Export_Title"]    = "Export — {0}",

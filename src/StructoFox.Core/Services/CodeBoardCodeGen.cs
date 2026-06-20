@@ -73,4 +73,17 @@ public static class CodeBoardCodeGen
     }
 
     static string Camel(string s) => string.IsNullOrEmpty(s) ? "result" : char.ToLowerInvariant(s[0]) + s[1..];
+
+    /// <summary>True if the board holds any non-Function entity (class/struct/interface/enum/object/
+    /// namespace). Such boards are composition/architecture views and must NOT author a function body —
+    /// that would invite nasty nesting loops — so assignment is refused for them.</summary>
+    public static bool ContainsNonFunction(string projFolder, string boardId)
+    {
+        var data = CodeBoardDataService.Load(projFolder, boardId);
+        var ents = new Dictionary<string, CodeEntity>();
+        foreach (var t in CodeEntityService.EntityTypes)
+            foreach (var e in CodeEntityService.LoadAll(projFolder, t))
+                ents[e.Id] = e;
+        return data.Positions.Keys.Any(id => ents.TryGetValue(id, out var e) && e.EntityType != CodeEntityType.Function);
+    }
 }

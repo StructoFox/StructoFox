@@ -605,6 +605,9 @@ public class CodeEntityEditorDialog : Window
         if (boards.Count == 0) { await MessageDialog.Show(this, Loc.S("Boards_NoBoards"), Loc.S("Boards_Assign")); return; }
         var pick = await PickListDialog.Show(this, Loc.S("CodeEdit_AssignBoardTitle"), boards.Select(b => (b.Id, b.Name)).ToList());
         if (pick is null) return;
+        // Refuse boards that carry classes/objects — they're architecture views, not function bodies.
+        if (CodeBoardCodeGen.ContainsNonFunction(_projFolder, pick))
+        { await MessageDialog.Show(this, Loc.S("Boards_HasNonFunc"), Loc.S("Boards_Assign")); return; }
         boards.First(b => b.Id == pick).TargetKey = key;
         CodeBoardRegistryService.Save(_projFolder, boards);
     }

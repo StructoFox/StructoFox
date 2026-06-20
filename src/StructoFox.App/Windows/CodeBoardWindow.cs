@@ -966,6 +966,9 @@ public class CodeBoardWindow : Window
     async Task AddEntityOfType(string entityTypeName, Point dropPoint)
     {
         if (!Enum.TryParse<CodeEntityType>(entityTypeName, out var et)) return;
+        // A body-authoring board only wires functions — keep classes/objects off it (avoids loops).
+        if (_bodyTargetKey is not null && et != CodeEntityType.Function)
+        { await MessageDialog.Show(this, Loc.S("Code_BodyFuncOnly"), Loc.S("Code_AddEntityTitle")); return; }
         var name = await PromptDialog.Show(this, Loc.S("Common_NameColon"), "", string.Format(Loc.S("Code_NewTypeTitle"), entityTypeName));
         if (string.IsNullOrWhiteSpace(name)) return;
 
@@ -990,7 +993,9 @@ public class CodeBoardWindow : Window
             foreach (var e in CodeEntityService.LoadAll(_projFolder, t))
             {
                 _entities[e.Id] = e;
-                if (!onBoard.Contains(e.Id)) available.Add(e);
+                if (onBoard.Contains(e.Id)) continue;
+                if (_bodyTargetKey is not null && e.EntityType != CodeEntityType.Function) continue;   // body board = functions only
+                available.Add(e);
             }
         available = available.OrderBy(e => e.EntityType.ToString()).ThenBy(e => e.Name).ToList();
 
@@ -1102,6 +1107,7 @@ public class CodeBoardWindow : Window
         {
             if (_boardData.Positions.ContainsKey(id)) continue;       // already on the board
             if (!_entities.TryGetValue(id, out var ent)) continue;
+            if (_bodyTargetKey is not null && ent.EntityType != CodeEntityType.Function) continue;   // body board = functions only
             var pos = new CodeCardPosition { X = Math.Max(0, at.X + off), Y = Math.Max(0, at.Y + off) };
             _boardData.Positions[id] = pos;
             RenderCard(ent, pos);

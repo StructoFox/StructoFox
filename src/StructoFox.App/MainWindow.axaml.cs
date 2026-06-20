@@ -1163,8 +1163,12 @@ public partial class MainWindow : Window
     // ── Boards gallery ───────────────────────────────────────────────────────
 
     // Lists the project's code boards as cards with a "New board" action; clicking a card opens it.
+    string? _selBoard;
+    readonly List<(string id, Border tile)> _boardTiles = new();
+
     void BuildBoardsView(StackPanel root)
     {
+        _boardTiles.Clear(); _selBoard = null;
         root.Children.Add(Heading("Boards"));
 
         var add = Ui.Btn(Loc.S("Boards_New"));
@@ -1188,8 +1192,9 @@ public partial class MainWindow : Window
     // One board tile: symbol + name; left-click opens it, right-click renames/deletes.
     Control BoardCard(CodeBoard board)
     {
-        var tile = new Border { Width = 200, Padding = new(14), Margin = new(0, 0, 10, 10), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
+        var tile = new Border { Width = 200, Padding = new(14), Margin = new(0, 0, 10, 10), CornerRadius = new(8), BorderThickness = new(2), BorderBrush = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
         Ui.Theme(tile, Border.BackgroundProperty, "ControlBgBrush");
+        _boardTiles.Add((board.Id, tile));
 
         var stack = new StackPanel
         {
@@ -1205,8 +1210,18 @@ public partial class MainWindow : Window
             stack.Children.Add(Dim("→ " + CodeBoardRegistryService.TargetLabel(_project, board.TargetKey), 11));
         tile.Child = stack;
 
-        tile.PointerPressed += (_, ev) => { if (ev.GetCurrentPoint(tile).Properties.IsLeftButtonPressed) OpenBoard(board); };
+        // Handled like entity rows: left-click selects, double-click opens, right-click → menu (Open…).
+        tile.PointerPressed += (_, ev) =>
+        {
+            var pt = ev.GetCurrentPoint(tile);
+            if (pt.Properties.IsRightButtonPressed) { _selBoard = board.Id; RefreshBoardSelection(); return; }
+            if (!pt.Properties.IsLeftButtonPressed) return;
+            if (ev.ClickCount >= 2) { OpenBoard(board); return; }
+            _selBoard = board.Id; RefreshBoardSelection();
+        };
 
+        var open = new MenuItem { Header = Loc.S("Boards_Open") };
+        open.Click += (_, _) => OpenBoard(board);
         var assign = new MenuItem { Header = Loc.S("Boards_Assign") };
         assign.Click += async (_, _) => await AssignBoard(board);
         var rename = new MenuItem { Header = Loc.S("Boards_Rename") };
@@ -1214,6 +1229,7 @@ public partial class MainWindow : Window
         var delete = new MenuItem { Header = Loc.S("Boards_Delete") };
         delete.Click += async (_, _) => await DeleteBoard(board);
         var cm = new ContextMenu();
+        cm.Items.Add(open);
         cm.Items.Add(assign);
         if (!string.IsNullOrEmpty(board.TargetKey))
         {
@@ -1228,10 +1244,23 @@ public partial class MainWindow : Window
         return tile;
     }
 
+    // Highlights the selected board tile (single selection, mirrors the entity rows).
+    void RefreshBoardSelection()
+    {
+        foreach (var (id, tile) in _boardTiles)
+        {
+            if (id == _selBoard) Ui.Theme(tile, Border.BorderBrushProperty, "AccentBgBrush");
+            else tile.BorderBrush = Brushes.Transparent;
+        }
+    }
+
     // Picks a function/method for this board to author, then stores the assignment.
     Task AssignBoard(CodeBoard board) => CrashHandler.SafeAsync(async () =>
     {
         if (_project is null) return;
+        // A board with classes/objects on it is an architecture view, not a function body.
+        if (CodeBoardCodeGen.ContainsNonFunction(_project, board.Id))
+        { await MessageDialog.Show(this, Loc.S("Boards_HasNonFunc"), Loc.S("Boards_Assign")); return; }
         var targets = CodeBoardRegistryService.AssignableTargets(_project);
         if (targets.Count == 0) { await MessageDialog.Show(this, Loc.S("Boards_NoTargets"), Loc.S("Boards_Assign")); return; }
         var key = await PickListDialog.Show(this, Loc.S("Boards_AssignTitle"), targets.Select(t => (t.Key, t.Label)).ToList());
