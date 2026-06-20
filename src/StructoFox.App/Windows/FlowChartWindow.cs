@@ -610,6 +610,7 @@ public class FlowChartWindow : Window
         _data.Nodes.Add(node);
         Save();
         RenderNode(node);
+        if (_mode != EditMode.Select) SetMode(EditMode.Select);   // a fresh node is ready to place, not delete
     }
 
     // A spawn position inside the currently visible viewport (accounts for scroll + zoom), with a small

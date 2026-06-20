@@ -7,7 +7,10 @@ namespace StructoFox.App;
 /// <summary>
 /// A faint honeycomb (flat-top hexagon) texture behind content — a futuristic, "techy" backdrop.
 /// Its line colour follows the theme (bind <see cref="LineBrush"/> to an OXSUIT accent), but is forced
-/// to a low alpha so it's present without being prominent. Re-renders on resize and on theme swaps.
+/// to a low alpha so it's present without being prominent.
+/// <para>The pattern is baked once into a tiled <see cref="DrawingBrush"/> (one repeating cell) and
+/// painted with a single fill, so cost is independent of the area — a full-screen window no longer
+/// redraws tens of thousands of hexagons on every layout pass.</para>
 /// </summary>
 public class HoneycombBackdrop : Control
 {
@@ -26,38 +29,56 @@ public class HoneycombBackdrop : Control
         set => SetValue(LineBrushProperty, value);
     }
 
+    DrawingBrush? _brush;   // cached tile, rebuilt only when the line colour changes
+    Color _brushColor;
+
     static HoneycombBackdrop() => AffectsRender<HoneycombBackdrop>(LineBrushProperty);
 
     public HoneycombBackdrop() => ClipToBounds = true;
 
-    // Re-draw on resize so the comb always fills the area.
-    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs e)
-    {
-        base.OnPropertyChanged(e);
-        if (e.Property == BoundsProperty) InvalidateVisual();
-    }
-
-    // Tiles small flat-top hexagons: a 1px dark shadow line, then the theme-accent line on top —
-    // the slight offset reads as a subtle 3D emboss. Both kept very transparent.
+    // Fill the whole area with the tiled comb — one cheap draw regardless of size.
     public override void Render(DrawingContext ctx)
     {
-        var src       = (LineBrush as ISolidColorBrush)?.Color ?? Color.FromRgb(128, 128, 128);
+        var src = (LineBrush as ISolidColorBrush)?.Color ?? Color.FromRgb(128, 128, 128);
+        if (_brush is null || _brushColor != src) { _brush = BuildBrush(src); _brushColor = src; }
+        ctx.FillRectangle(_brush, new Rect(Bounds.Size));
+    }
+
+    // Builds a seamless one-cell tile of the honeycomb (a 1px dark shadow + a light highlight, slightly
+    // offset for a subtle emboss, then the accent line on top), as a tiling DrawingBrush.
+    static DrawingBrush BuildBrush(Color src)
+    {
         var main      = new Pen(new SolidColorBrush(Color.FromArgb(LineAlpha, src.R, src.G, src.B)), 1);
         var shadow    = new Pen(new SolidColorBrush(Color.FromArgb(ShadowAlpha, 0, 0, 0)), 1);
         var highlight = new Pen(new SolidColorBrush(Color.FromArgb(HighlightAlpha, 255, 255, 255)), 1);
 
-        double stepX = 1.5 * R, stepY = Math.Sqrt(3) * R;
-        int col = 0;
-        for (double cx = 0; cx <= Bounds.Width + R; cx += stepX, col++)
+        double tileW = 3 * R, tileH = Math.Sqrt(3) * R;
+        // Hex centres covering one period (plus neighbours so the outlines meet seamlessly at the seams).
+        var centres = new (double cx, double cy)[]
         {
-            double offsetY = (col % 2 == 0) ? 0 : stepY / 2;
-            for (double cy = offsetY; cy <= Bounds.Height + R; cy += stepY)
-            {
-                ctx.DrawGeometry(null, shadow,    Hexagon(cx + 1, cy + 1));  // dark side (light themes)
-                ctx.DrawGeometry(null, highlight, Hexagon(cx - 1, cy - 1));  // light side (dark themes)
-                ctx.DrawGeometry(null, main,      Hexagon(cx, cy));          // accent on top
-            }
+            (0, 0), (0, tileH), (tileW, 0), (tileW, tileH),
+            (1.5 * R, tileH / 2), (1.5 * R, -tileH / 2), (1.5 * R, 3 * tileH / 2),
+        };
+
+        GeometryGroup Group(double ox, double oy)
+        {
+            var g = new GeometryGroup();
+            foreach (var (cx, cy) in centres) g.Children.Add(Hexagon(cx + ox, cy + oy));
+            return g;
         }
+
+        var dg = new DrawingGroup();
+        dg.Children.Add(new GeometryDrawing { Pen = shadow,    Geometry = Group(1, 1) });
+        dg.Children.Add(new GeometryDrawing { Pen = highlight, Geometry = Group(-1, -1) });
+        dg.Children.Add(new GeometryDrawing { Pen = main,      Geometry = Group(0, 0) });
+
+        return new DrawingBrush(dg)
+        {
+            TileMode        = TileMode.Tile,
+            Stretch         = Stretch.None,
+            SourceRect      = new RelativeRect(0, 0, tileW, tileH, RelativeUnit.Absolute),
+            DestinationRect = new RelativeRect(0, 0, tileW, tileH, RelativeUnit.Absolute),
+        };
     }
 
     // Builds one flat-top hexagon outline centred at (cx, cy).
