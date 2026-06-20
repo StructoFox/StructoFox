@@ -37,7 +37,8 @@ public class FlowChartWindow : Window
     readonly HashSet<string> _selected = new();
     double   _zoom = 1.0;
 
-    Button? _selectBtn, _connectBtn, _removeBtn;
+    Button? _selectBtn, _removeBtn;
+    MenuItem? _connMenu;   // the merged "Connect" menu; its header reflects the active line style + mode
     ContextMenu? _menu;       // the one open context menu, so a new one closes the old (no stacking)
 
     // Opens a context menu over an anchor, first closing any menu still showing.
@@ -226,22 +227,29 @@ public class FlowChartWindow : Window
         io.Items.Add(MI(Loc.S("Flow_SymStoredData"),   () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.StoredData)));
         shapeMenu.Items.Add(io);
 
-        // The connect menu is rebuilt each open so the active line style's ✓ stays current.
-        var conn = Cat(Loc.S("Flow_CatConnect"));
+        // The merged Connect menu: drawing mode + connector/junction/off-page + the line style. Its header
+        // shows the active arrow style (and a ● when drawing), so "Verbinder"/"Verbinden" are one button.
+        // Rebuilt on open so the line style's ✓ stays current.
+        _connMenu = new MenuItem();
+        Ui.Theme(_connMenu, MenuItem.ForegroundProperty, "SidebarTextBrush");
+        _connMenu.PointerEntered += (_, _) => _connMenu!.IsSubMenuOpen = true;
         void FillConn()
         {
-            conn.Items.Clear();
-            conn.Items.Add(MI(Loc.S("Flow_Connector"),  () => AddNode(FlowNodeKind.Connector)));
-            conn.Items.Add(MI(Loc.S("Flow_SymOffPage"), () => AddNode(FlowNodeKind.Connector, FlowSymbol.OffPageConnector)));
-            conn.Items.Add(MI(Loc.S("Flow_Junction"),   () => AddNode(FlowNodeKind.Junction)));
-            conn.Items.Add(new Separator());
+            _connMenu!.Items.Clear();
+            _connMenu.Items.Add(MI(Loc.S("Flow_Connect"), () => SetMode(EditMode.Connect)));   // start drawing arrows
+            _connMenu.Items.Add(new Separator());
+            _connMenu.Items.Add(MI(Loc.S("Flow_Connector"),  () => AddNode(FlowNodeKind.Connector)));
+            _connMenu.Items.Add(MI(Loc.S("Flow_SymOffPage"), () => AddNode(FlowNodeKind.Connector, FlowSymbol.OffPageConnector)));
+            _connMenu.Items.Add(MI(Loc.S("Flow_Junction"),   () => AddNode(FlowNodeKind.Junction)));
+            _connMenu.Items.Add(new Separator());
             // Flow-line routing style (global): DIN orthogonal vs. free diagonal arrows.
-            conn.Items.Add(MI((_data.DiagonalLines ? "" : "✓ ") + Loc.S("Flow_ArrowDin"),  () => SetDiagonal(false)));
-            conn.Items.Add(MI((_data.DiagonalLines ? "✓ " : "") + Loc.S("Flow_ArrowFree"), () => SetDiagonal(true)));
+            _connMenu.Items.Add(MI((_data.DiagonalLines ? "" : "✓ ") + Loc.S("Flow_ArrowDin"),  () => SetDiagonal(false)));
+            _connMenu.Items.Add(MI((_data.DiagonalLines ? "✓ " : "") + Loc.S("Flow_ArrowFree"), () => SetDiagonal(true)));
         }
         FillConn();
-        conn.SubmenuOpened += (_, _) => FillConn();
-        shapeMenu.Items.Add(conn);
+        _connMenu.SubmenuOpened += (_, _) => FillConn();
+        shapeMenu.Items.Add(_connMenu);
+        RefreshConnHeader();
 
         shapeMenu.Items.Add(Act(Loc.S("Flow_Note"), FlowNodeKind.Comment));
 
@@ -250,13 +258,10 @@ public class FlowChartWindow : Window
         row.Children.Add(new Border { Width = 12 });
 
         _selectBtn  = TBtn(Loc.S("Flow_Select"), Loc.S("Flow_SelectTip"));
-        _connectBtn = TBtn(Loc.S("Flow_Connect"), Loc.S("Flow_ConnectTip"));
         _removeBtn  = TBtn(Loc.S("Flow_Remove"), Loc.S("Flow_RemoveTip"));
         _selectBtn.Click  += (_, _) => SetMode(EditMode.Select);
-        _connectBtn.Click += (_, _) => SetMode(EditMode.Connect);
         _removeBtn.Click  += (_, _) => SetMode(EditMode.Remove);
         row.Children.Add(_selectBtn);
-        row.Children.Add(_connectBtn);
         row.Children.Add(_removeBtn);
         UpdateModeButtons();
 
@@ -295,6 +300,7 @@ public class FlowChartWindow : Window
         if (_data.DiagonalLines == diagonal) return;
         _data.DiagonalLines = diagonal;
         foreach (var c in _data.Connections) RenderConnection(c);
+        RefreshConnHeader();
         Save();
         if (diagonal && AppSettings.NormWarn)
             await MessageDialog.Show(this, Loc.S("Norm_DiagonalWarn"), Loc.S("Norm_Title"));
@@ -363,10 +369,18 @@ public class FlowChartWindow : Window
             Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
         }
         Style(_selectBtn,  _mode == EditMode.Select);
-        Style(_connectBtn, _mode == EditMode.Connect);
         Style(_removeBtn,  _mode == EditMode.Remove);
+        RefreshConnHeader();   // connect mode is shown in the merged menu's header, not a button
         if (_canvas is not null)
             _canvas.Cursor = new Cursor(_mode == EditMode.Remove ? StandardCursorType.No : StandardCursorType.Arrow);
+    }
+
+    // Updates the merged Connect menu header: 🔗 + the active arrow style icon, with a ● when drawing.
+    void RefreshConnHeader()
+    {
+        if (_connMenu is null) return;
+        var arrow = _data.DiagonalLines ? "⟍" : "➜";
+        _connMenu.Header = (ConnectMode ? "● " : "") + "🔗 " + arrow + "  ▾";
     }
 
     // ── Node creation / rendering ──────────────────────────────────────────
