@@ -85,6 +85,9 @@ public partial class MainWindow : Window
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(GridLength.Star));
         var top = BuildTopBar(); Grid.SetRow(top, 0); root.Children.Add(top);
+        // _body is a reused field; on a rebuild (e.g. language switch) it still hangs in the old shell,
+        // and Avalonia forbids a second visual parent — so detach it first.
+        (_body.Parent as Panel)?.Children.Remove(_body);
         Grid.SetRow(_body, 1); root.Children.Add(_body);
         return root;
     }
