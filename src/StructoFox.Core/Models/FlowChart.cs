@@ -59,6 +59,10 @@ public class FlowChartData
     public double               GridSize    { get; set; } = 10;
     public bool                 SnapToGrid  { get; set; } = false;
 
+    /// <summary>Connector style: false = DIN-style orthogonal flow lines (default), true = direct
+    /// diagonal centre-to-centre arrows (the non-normative convenience option).</summary>
+    public bool                 DiagonalLines { get; set; } = false;
+
     /// <summary>The diagram's surface appearance, persisted with it (user-controlled, theme-independent).</summary>
     public DiagramStyle         Style       { get; set; } = new();
 }

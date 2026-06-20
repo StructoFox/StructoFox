@@ -219,12 +219,25 @@ public class FlowChartWindow : Window
         decorBtn.Click += (_, _) => _ = OpenDecor();
         row.Children.Add(decorBtn);
 
+        var lineBtn = TBtn(LineModeLabel(), Loc.S("Flow_LinesTip"));
+        lineBtn.Click += (_, _) =>
+        {
+            _data.DiagonalLines = !_data.DiagonalLines;
+            lineBtn.Content = LineModeLabel();
+            foreach (var c in _data.Connections) RenderConnection(c);
+            Save();
+        };
+        row.Children.Add(lineBtn);
+
         var zoomBtn = TBtn("1:1", Loc.S("Common_ResetZoomTip"));
         zoomBtn.Click += (_, _) => { _zoom = 1.0; if (_canvas is not null) _canvas.RenderTransform = null; };
         row.Children.Add(zoomBtn);
 
         return bar;
     }
+
+    // Toolbar label reflecting the current connector style.
+    string LineModeLabel() => _data.DiagonalLines ? Loc.S("Flow_LinesDiagonal") : Loc.S("Flow_LinesOrtho");
 
     // Converts the flowchart to a structogram (deterministically) and opens it, warning if partial.
     async void ConvertToStructogram()
@@ -507,32 +520,26 @@ public class FlowChartWindow : Window
         var b = NodeRect(conn.ToId);
         if (a is null || b is null) return;
 
-        var ca = new Point(a.Value.X + a.Value.Width / 2, a.Value.Y + a.Value.Height / 2);
-        var cb = new Point(b.Value.X + b.Value.Width / 2, b.Value.Y + b.Value.Height / 2);
-        var p1 = RectBorderPoint(a.Value, cb);
-        var p2 = RectBorderPoint(b.Value, ca);
+        // DIN flow lines route orthogonally from edge-midpoints; the diagonal style is opt-in.
+        var pts = _data.DiagonalLines
+            ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
+            : OrthoRoute(a.Value, b.Value);
 
         var brush   = new SolidColorBrush(ParseColor(conn.LineColor));
         var visuals = new List<Control>();
 
-        var line = new Line
-        {
-            StartPoint = p1, EndPoint = p2,
-            Stroke = brush, StrokeThickness = conn.Thickness, IsHitTestVisible = false,
-        };
+        var line = new Polyline { Stroke = brush, StrokeThickness = conn.Thickness, IsHitTestVisible = false };
+        foreach (var p in pts) line.Points.Add(p);
         line.ZIndex = 1;
         _canvas!.Children.Add(line); visuals.Add(line);
 
-        var arrow = BuildArrow(p1, p2, brush);
+        var arrow = BuildArrow(pts[^2], pts[^1], brush);
         arrow.ZIndex = 1;
         _canvas.Children.Add(arrow); visuals.Add(arrow);
 
-        // Fat transparent overlay so the thin arrow is easy to right-click / remove.
-        var hit = new Line
-        {
-            StartPoint = p1, EndPoint = p2,
-            Stroke = Brushes.Transparent, StrokeThickness = 12, Cursor = new Cursor(StandardCursorType.Hand),
-        };
+        // Fat transparent overlay so the thin line is easy to right-click / remove.
+        var hit = new Polyline { Stroke = Brushes.Transparent, StrokeThickness = 12, Cursor = new Cursor(StandardCursorType.Hand) };
+        foreach (var p in pts) hit.Points.Add(p);
         hit.ZIndex = 3;
         var capConn = conn;
         hit.PointerPressed += (_, e) =>
@@ -544,7 +551,7 @@ public class FlowChartWindow : Window
 
         if (!string.IsNullOrWhiteSpace(conn.Label))
         {
-            var mid = new Point((p1.X + p2.X) / 2, (p1.Y + p2.Y) / 2);
+            var mid = pts[pts.Count / 2];
             var badge = new Border { CornerRadius = new(3), Padding = new(4, 1, 4, 1) };
             Ui.Theme(badge, Border.BackgroundProperty, "SidebarBgBrush");
             var t = new TextBlock { Text = conn.Label, FontSize = 10 };
@@ -728,6 +735,29 @@ public class FlowChartWindow : Window
         double hw = rect.Width / 2, hh = rect.Height / 2;
         double scale = 1.0 / Math.Max(Math.Abs(dx) / hw, Math.Abs(dy) / hh);
         return new Point(c.X + dx * scale, c.Y + dy * scale);
+    }
+
+    // A DIN-style orthogonal route between two node rects: exit at an edge midpoint (bottom/top for a
+    // mostly-vertical link, right/left for a horizontal one), straight H/V segments, enter the target's
+    // opposite edge midpoint. Collinear points collapse to a straight line.
+    static List<Point> OrthoRoute(Rect s, Rect t)
+    {
+        var sc = s.Center; var tc = t.Center;
+        double dx = tc.X - sc.X, dy = tc.Y - sc.Y;
+        if (Math.Abs(dy) >= Math.Abs(dx))
+        {
+            var exit  = new Point(sc.X, dy >= 0 ? s.Bottom : s.Top);
+            var entry = new Point(tc.X, dy >= 0 ? t.Top    : t.Bottom);
+            double midY = (exit.Y + entry.Y) / 2;
+            return new() { exit, new(exit.X, midY), new(entry.X, midY), entry };
+        }
+        else
+        {
+            var exit  = new Point(dx >= 0 ? s.Right : s.Left, sc.Y);
+            var entry = new Point(dx >= 0 ? t.Left  : t.Right, tc.Y);
+            double midX = (exit.X + entry.X) / 2;
+            return new() { exit, new(midX, exit.Y), new(midX, entry.Y), entry };
+        }
     }
 
     // Builds a small triangular arrowhead pointing from one point to another.
