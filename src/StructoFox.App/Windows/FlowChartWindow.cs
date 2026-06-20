@@ -444,6 +444,9 @@ public class FlowChartWindow : Window
     {
         var panel = new StackPanel { Spacing = 10, MinWidth = 230, Margin = new(4) };
 
+        // Colours — grouped: canvas background + arrow colour.
+        panel.Children.Add(new TextBlock { Text = Loc.S("Flow_Colors"), FontWeight = FontWeight.Bold });
+
         var bg = Ui.Btn(Loc.S("Flow_Background"));
         bg.Click += async (_, _) =>
         {
@@ -454,6 +457,19 @@ public class FlowChartWindow : Window
             Save();
         };
         panel.Children.Add(bg);
+
+        var arrow = Ui.Btn(Loc.S("Flow_ArrowColor"));
+        arrow.Click += async (_, _) =>
+        {
+            var hex = await ColorPickDialog.Pick(this, Loc.S("Flow_ArrowColor"), _style.LineColor);
+            if (hex is null) return;
+            _style.LineColor = hex;
+            foreach (var c in _data.Connections) { c.LineColor = hex; RenderConnection(c); }   // recolour all arrows
+            Save();
+        };
+        panel.Children.Add(arrow);
+
+        panel.Children.Add(new Separator());
 
         var decor = Ui.Btn(Loc.S("Decor_Open"));
         decor.Click += (_, _) => _ = OpenDecor();
@@ -843,7 +859,7 @@ public class FlowChartWindow : Window
         }
         if (nodeId == _connectFromId) { _connectFromId = null; RemoveRubberBand(); return; }
 
-        var conn = new FlowConnection { FromId = _connectFromId, ToId = nodeId };
+        var conn = new FlowConnection { FromId = _connectFromId, ToId = nodeId, LineColor = _style.LineColor };
         _connectFromId = null;
         RemoveRubberBand();
 
@@ -952,12 +968,20 @@ public class FlowChartWindow : Window
         line.ZIndex = 1;
         _canvas!.Children.Add(line); visuals.Add(line);
 
-        var arrow = BuildArrow(pts[^2], pts[^1], brush);
-        arrow.ZIndex = 1;
-        _canvas.Children.Add(arrow); visuals.Add(arrow);
+        // DIN: lines meeting a collector point (Sammelpunkt) carry no arrowhead, and lines leaving one
+        // carry no departure dot — the junction itself is the marker.
+        bool toJunction   = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId)?.Kind   == FlowNodeKind.Junction;
+        bool fromJunction = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Junction;
+
+        if (!toJunction)
+        {
+            var arrow = BuildArrow(pts[^2], pts[^1], brush);
+            arrow.ZIndex = 1;
+            _canvas.Children.Add(arrow); visuals.Add(arrow);
+        }
 
         // DIN departure marker: a small filled dot where the flow line leaves the source edge.
-        if (!_data.DiagonalLines)
+        if (!_data.DiagonalLines && !fromJunction)
         {
             const double r = 3.5;
             var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, IsHitTestVisible = false };

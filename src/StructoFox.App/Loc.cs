@@ -33,10 +33,14 @@ public static class Loc
             Directory.CreateDirectory(LangDir);
             ExportIfMissing("en", En);
             ExportIfMissing("de", De);
-            _overlay = LoadOverlay(Lang);
+            // Built-in languages always use the in-code table (the exported json is only a translator
+            // starter); loading it back as an overlay would let a stale file shadow newer strings.
+            _overlay = IsBuiltin(Lang) ? new() : LoadOverlay(Lang);
         }
         catch { /* localization is best-effort; built-ins remain the fallback */ }
     }
+
+    static bool IsBuiltin(string code) => Builtins.Any(b => b.Code == code);
 
     /// <summary>Switches the active UI language, persists the choice and reloads its overlay. Callers
     /// rebuild their UI afterwards to re-resolve every string.</summary>
@@ -44,7 +48,7 @@ public static class Loc
     {
         Lang = code;
         AppSettings.Lang = code;
-        _overlay = LoadOverlay(code);
+        _overlay = IsBuiltin(code) ? new() : LoadOverlay(code);
     }
 
     // Maps the OS UI culture to one of our supported language codes (German → "de", else "en").
@@ -223,8 +227,8 @@ public static class Loc
         ["Flow_SelectTip"]             = "Normal mode: select and drag nodes (drag empty canvas = rubber-band select; right-drag = pan)",
         ["Flow_Connect"]               = "→ Connect",
         ["Flow_ConnectTip"]            = "Click a node, then another, to draw an arrow",
-        ["Flow_View"]                  = "🎛 View ▾",
-        ["Flow_ViewTip"]               = "Surface settings: background, decoration, zoom, grid",
+        ["Flow_View"]                  = "⚙ Options ▾",
+        ["Flow_ViewTip"]               = "Options: colours, decoration, zoom, grid",
         ["Grid_Header"]                = "Grid",
         ["Grid_Show"]                  = "Show grid",
         ["Grid_Snap"]                  = "Snap to grid",
@@ -257,6 +261,8 @@ public static class Loc
         ["Flow_ToStructogramOverwrite"] = "A structogram already exists for this function. Overwrite it with the converted flowchart?",
         ["Flow_ToStructogramPartial"]  = "Converted — but some parts of the flowchart could not be structured. They are flagged in amber in the structogram.",
         ["Flow_Background"]            = "Canvas background colour",
+        ["Flow_ArrowColor"]            = "🎨 Arrow colour…",
+        ["Flow_Colors"]                = "Colours",
         ["Flow_LinesOrtho"]           = "⌐ Lines: orthogonal",
         ["Flow_LinesDiagonal"]        = "⟍ Lines: diagonal",
         ["Flow_LinesTip"]             = "Switch between DIN orthogonal flow lines and direct diagonal arrows",
@@ -558,8 +564,8 @@ public static class Loc
         ["Flow_SelectTip"]             = "Normalmodus: Knoten auswählen und ziehen (leeren Canvas ziehen = Rechteck-Auswahl; rechte Maustaste ziehen = verschieben)",
         ["Flow_Connect"]               = "→ Verbinden",
         ["Flow_ConnectTip"]            = "Klicke einen Knoten, dann einen anderen, um einen Pfeil zu ziehen",
-        ["Flow_View"]                  = "🎛 Ansicht ▾",
-        ["Flow_ViewTip"]               = "Flächen-Einstellungen: Hintergrund, Dekoration, Zoom, Raster",
+        ["Flow_View"]                  = "⚙ Optionen ▾",
+        ["Flow_ViewTip"]               = "Optionen: Farben, Dekoration, Zoom, Raster",
         ["Grid_Header"]                = "Raster",
         ["Grid_Show"]                  = "Raster anzeigen",
         ["Grid_Snap"]                  = "Am Raster einrasten",
@@ -592,6 +598,8 @@ public static class Loc
         ["Flow_ToStructogramOverwrite"] = "Für diese Funktion existiert bereits ein Struktogramm. Mit dem umgewandelten Ablaufplan überschreiben?",
         ["Flow_ToStructogramPartial"]  = "Umgewandelt — aber einige Teile des Ablaufplans ließen sich nicht strukturieren. Sie sind im Struktogramm bernsteinfarben markiert.",
         ["Flow_Background"]            = "Hintergrundfarbe der Zeichenfläche",
+        ["Flow_ArrowColor"]            = "🎨 Pfeilfarbe…",
+        ["Flow_Colors"]                = "Farben",
         ["Flow_LinesOrtho"]           = "⌐ Linien: orthogonal",
         ["Flow_LinesDiagonal"]        = "⟍ Linien: diagonal",
         ["Flow_LinesTip"]             = "Zwischen DIN-orthogonalen Flusslinien und direkten Diagonalpfeilen wechseln",
