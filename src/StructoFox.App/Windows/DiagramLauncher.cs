@@ -67,22 +67,28 @@ public static class DiagramLauncher
         };
         stack.Children.Add(nsBtn);
 
-        // Board option — a dataflow surface that generates this function/method's body from its wiring.
-        var boardId = SafeKey(key);
-        var boardBtn = ChoiceBtn(CodeBoardDataService.Exists(projFolder, boardId) ? Loc.S("Diag_BoardExists") : Loc.S("Diag_Board"));
+        // Board option — opens THE board assigned to this function/method (one board kind, in the
+        // registry/gallery), creating it on first use. No separate ad-hoc per-key board.
+        var hasBoard = CodeBoardRegistryService.Load(projFolder).Any(b => b.TargetKey == key);
+        var boardBtn = ChoiceBtn(hasBoard ? Loc.S("Diag_BoardExists") : Loc.S("Diag_Board"));
         ToolTip.SetTip(boardBtn, Loc.S("Diag_BoardTip"));
         boardBtn.Click += (_, _) =>
         {
             dlg.Close();
-            new CodeBoardWindow(projFolder, new CodeBoard { Id = boardId, Name = title }, themePath, null, key).Show();
+            var boards = CodeBoardRegistryService.Load(projFolder);
+            var board  = boards.FirstOrDefault(b => b.TargetKey == key);
+            if (board is null)
+            {
+                board = new CodeBoard { Name = title, TargetKey = key };
+                boards.Add(board);
+                CodeBoardRegistryService.Save(projFolder, boards);
+            }
+            new CodeBoardWindow(projFolder, board, themePath).Show();
         };
         stack.Children.Add(boardBtn);
 
         return dlg.ShowDialog(owner);
     }
-
-    // A filesystem-safe id for a per-function/method board (the diagram key holds '#'/':').
-    static string SafeKey(string key) => key.Replace('#', '_').Replace(':', '_');
 
     // Builds one left-aligned, full-width choice button tinted from the active OXSUIT theme.
     static Button ChoiceBtn(string label)

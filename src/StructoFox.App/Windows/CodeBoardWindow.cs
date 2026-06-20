@@ -66,14 +66,14 @@ public class CodeBoardWindow : Window
     void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
 
     public CodeBoardWindow(string projFolder, CodeBoard board, string? themePath,
-        Action<IEnumerable<CodeEntity>>? onExport = null, string? bodyTargetKey = null)
+        Action<IEnumerable<CodeEntity>>? onExport = null)
     {
         _projFolder = projFolder;
         _board      = board;
         _themePath  = themePath;
         _onExport   = onExport;
-        // The body target comes from the explicit param (per-key board) or the board's own assignment.
-        _bodyTargetKey = bodyTargetKey ?? (string.IsNullOrWhiteSpace(board.TargetKey) ? null : board.TargetKey);
+        // A board authors a body when it carries an assignment — the single source of truth.
+        _bodyTargetKey = string.IsNullOrWhiteSpace(board.TargetKey) ? null : board.TargetKey;
         _boardData  = CodeBoardDataService.Load(projFolder, board.Id);
 
         Title                 = board.Symbol + "  " + board.Name;

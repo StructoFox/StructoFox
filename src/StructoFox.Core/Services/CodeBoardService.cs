@@ -84,9 +84,6 @@ public static class CodeBoardDataService
     private static string BoardFilePath(string projFolder, string boardId) =>
         Path.Combine(projFolder, "PROJECTPLAN", "code", $"_board_{boardId}.json");
 
-    public static bool Exists(string projFolder, string boardId) =>
-        File.Exists(BoardFilePath(projFolder, boardId));
-
     public static CodeBoardData Load(string projFolder, string boardId)
     {
         var path = BoardFilePath(projFolder, boardId);
