@@ -11,7 +11,8 @@ public enum FlowNodeKind
     InputOutput,  // parallelogram — read/print/IO
     Subroutine,   // double-bordered rectangle — calls another function
     Comment,      // free note
-    Connector     // on-page connector — a small labelled circle that continues the flow elsewhere
+    Connector,    // on-page connector — a small labelled circle that continues the flow elsewhere
+    Junction      // merge/collector point (Sammelpunkt) — a small filled dot several lines join at
 }
 
 /// <summary>Cosmetic DIN 66001 symbol variants for an I/O node. Purely a drawing choice — the node's

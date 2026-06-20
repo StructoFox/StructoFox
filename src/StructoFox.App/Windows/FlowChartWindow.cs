@@ -185,6 +185,7 @@ public class FlowChartWindow : Window
         AddShapeBtn(Loc.S("Flow_End"), FlowNodeKind.End);
         AddShapeBtn(Loc.S("Flow_Note"), FlowNodeKind.Comment);
         AddShapeBtn(Loc.S("Flow_Connector"), FlowNodeKind.Connector);
+        AddShapeBtn(Loc.S("Flow_Junction"), FlowNodeKind.Junction);
 
         row.Children.Add(new Border { Width = 12 });
 
@@ -312,8 +313,8 @@ public class FlowChartWindow : Window
             Text   = DefaultText(kind),
             X      = 80 + _data.Nodes.Count % 6 * 30,
             Y      = 80 + _data.Nodes.Count % 6 * 30,
-            Width  = kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
-            Height = kind is FlowNodeKind.Start or FlowNodeKind.End or FlowNodeKind.Connector ? 46 : 56,
+            Width  = kind == FlowNodeKind.Junction ? 16 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
+            Height = kind == FlowNodeKind.Junction ? 16 : kind is FlowNodeKind.Start or FlowNodeKind.End or FlowNodeKind.Connector ? 46 : 56,
         };
         _data.Nodes.Add(node);
         Save();
@@ -330,6 +331,7 @@ public class FlowChartWindow : Window
         FlowNodeKind.Subroutine  => Loc.S("Flow_DefCall"),
         FlowNodeKind.Comment     => Loc.S("Flow_DefNote"),
         FlowNodeKind.Connector   => Loc.S("Flow_DefConnector"),
+        FlowNodeKind.Junction    => "",
         _                        => Loc.S("Flow_DefStep"),
     };
 
@@ -355,6 +357,7 @@ public class FlowChartWindow : Window
                 FlowNodeKind.Subroutine  => SubroutineShape(fill, stroke),
                 FlowNodeKind.Comment     => CommentShape(fill, stroke),
                 FlowNodeKind.Connector   => new Ellipse { Fill = new SolidColorBrush(fill), Stroke = new SolidColorBrush(stroke), StrokeThickness = 1.5 },
+                FlowNodeKind.Junction    => new Ellipse { Fill = new SolidColorBrush(stroke) },
                 _                        => RoundedBox(4, fill, stroke),
             };
         inner.Children.Add(shape);
@@ -802,6 +805,7 @@ public class FlowChartWindow : Window
         FlowNodeKind.Subroutine  => (Color.FromRgb(0xD1, 0xC4, 0xE9), Color.FromRgb(0x51, 0x2D, 0xA8)),
         FlowNodeKind.Comment     => (Color.FromRgb(0xEC, 0xEF, 0xF1), Color.FromRgb(0x45, 0x5A, 0x64)),
         FlowNodeKind.Connector   => (Color.FromRgb(0xFF, 0xFF, 0xFF), Color.FromRgb(0x42, 0x42, 0x42)),
+        FlowNodeKind.Junction    => (Color.FromRgb(0x37, 0x47, 0x4F), Color.FromRgb(0x37, 0x47, 0x4F)),
         _                        => (Color.FromRgb(0xE3, 0xF2, 0xFD), Color.FromRgb(0x15, 0x65, 0xC0)),
     };
 
