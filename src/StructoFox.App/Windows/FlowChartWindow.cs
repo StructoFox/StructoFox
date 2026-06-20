@@ -37,6 +37,11 @@ public class FlowChartWindow : Window
     readonly HashSet<string> _selected = new();
     double   _zoom = 1.0;
 
+    Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
+    Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
+    bool   _selecting;  Point _selStart;             // left-drag selection on empty canvas
+    bool   _panning;    Point _panStart;  Vector _panOrigin;   // right-drag canvas pan
+
     Button? _selectBtn, _removeBtn;
     MenuItem? _connMenu;   // the merged "Connect" menu; its header reflects the active line style + mode
     ContextMenu? _menu;       // the one open context menu, so a new one closes the old (no stacking)
@@ -105,29 +110,55 @@ public class FlowChartWindow : Window
         };
         _scroll.Content = _canvas;
 
-        // Click on empty canvas clears selection (node clicks are handled and don't bubble here).
+        // Empty-canvas interactions (node clicks are handled and don't bubble here):
+        //  • right-drag      → pan the canvas (also cancels an in-progress connection on right-click)
+        //  • left-drag       → rubber-band multi-select
+        //  • plain left-click → clear selection
         _canvas.PointerPressed += (_, e) =>
         {
             _menu?.Close();
-            if (ConnectMode)
+            var p = e.GetCurrentPoint(_canvas);
+            if (p.Properties.IsRightButtonPressed)
             {
-                // Right-click anywhere cancels an in-progress connection.
-                if (e.GetCurrentPoint(_canvas).Properties.IsRightButtonPressed) CancelConnect();
+                if (ConnectMode) { CancelConnect(); return; }
+                _panning = true; _panStart = e.GetPosition(_scroll); _panOrigin = _scroll!.Offset;
+                _canvas!.Cursor = new Cursor(StandardCursorType.SizeAll);
+                e.Pointer.Capture(_canvas); e.Handled = true;
                 return;
             }
+            if (ConnectMode) return;
             _selected.Clear(); RefreshSelection();
+            if (_mode == EditMode.Select)   // begin a rubber-band selection
+            {
+                _selecting = true; _selStart = e.GetPosition(_canvas);
+                e.Pointer.Capture(_canvas); e.Handled = true;
+            }
         };
-        // While connecting, the rubber-band follows the pointer.
         _canvas.PointerMoved += (_, e) =>
         {
+            // While connecting, the rubber-band follows the pointer.
             if (ConnectMode && _connectFromId is not null && _rubberBand is not null)
             {
                 if (NodeCenter(_connectFromId) is { } c) _rubberBand.StartPoint = c;
                 _rubberBand.EndPoint = e.GetPosition(_canvas);
+                return;
             }
+            if (_panning)
+            {
+                var d = e.GetPosition(_scroll) - _panStart;
+                _scroll!.Offset = new Vector(_panOrigin.X - d.X, _panOrigin.Y - d.Y);
+                return;
+            }
+            if (_selecting) UpdateSelectRect(e.GetPosition(_canvas));
+        };
+        _canvas.PointerReleased += (_, e) =>
+        {
+            if (_panning) { _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null); return; }
+            if (_selecting) { _selecting = false; CommitSelectRect(); e.Pointer.Capture(null); }
         };
 
-        KeyDown += (_, e) => { if (e.Key == Key.Delete) RemoveSelected(); };
+        KeyDown += (_, e) => HandleKey(e);
+        Focusable = true;
 
         // Accept functions dragged in from the cockpit → they land as subroutine nodes.
         DragDrop.SetAllowDrop(_canvas, true);
@@ -138,14 +169,102 @@ public class FlowChartWindow : Window
         _scroll.PointerWheelChanged += (_, e) =>
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
-            _zoom = Math.Clamp(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), 0.3, 2.5);
-            _canvas!.RenderTransform = new ScaleTransform(_zoom, _zoom);
+            SetZoom(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1));
             e.Handled = true;
         };
 
+        RenderGrid();
         foreach (var n in _data.Nodes) RenderNode(n);
         RenderAllConnections();
         RefreshDecor();
+    }
+
+    // Keyboard: Delete removes the selection; Ctrl+0 resets zoom, Ctrl +/- and Ctrl+Up/Down zoom.
+    void HandleKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Delete) { RemoveSelected(); return; }
+        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        switch (e.Key)
+        {
+            case Key.D0 or Key.NumPad0:                 SetZoom(1.0); e.Handled = true; break;
+            case Key.OemPlus or Key.Add or Key.Up:      SetZoom(_zoom + 0.1); e.Handled = true; break;
+            case Key.OemMinus or Key.Subtract or Key.Down: SetZoom(_zoom - 0.1); e.Handled = true; break;
+        }
+    }
+
+    // Applies a clamped zoom level to the canvas.
+    void SetZoom(double z)
+    {
+        _zoom = Math.Clamp(z, 0.3, 2.5);
+        if (_canvas is not null)
+            _canvas.RenderTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+    }
+
+    static string Inv(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    // (Re)draws the alignment grid behind the diagram as a single tiled brush — cheap regardless of size.
+    void RenderGrid()
+    {
+        if (_canvas is null) return;
+        if (_gridRect is not null) { _canvas.Children.Remove(_gridRect); _gridRect = null; }
+        if (!_style.GridVisible) return;
+
+        double g = Math.Max(4, _data.GridSize);
+        var brush = new SolidColorBrush(ParseColor(_style.GridColor), Math.Clamp(_style.GridOpacity, 0, 1));
+
+        Drawing drawing;
+        if (_style.GridStyle == GridLineStyle.Dots)
+            drawing = new GeometryDrawing { Brush = brush, Geometry = new EllipseGeometry(new Rect(0, 0, 1.6, 1.6)) };
+        else
+        {
+            var pen = new Pen(brush, 1);
+            if (_style.GridStyle == GridLineStyle.Dashed) pen.DashStyle = new DashStyle(new double[] { 2, 2 }, 0);
+            drawing = new GeometryDrawing { Pen = pen, Geometry = Geometry.Parse($"M0,0 L{Inv(g)},0 M0,0 L0,{Inv(g)}") };
+        }
+
+        _gridRect = new Avalonia.Controls.Shapes.Rectangle
+        {
+            Width = _canvas.Width, Height = _canvas.Height, IsHitTestVisible = false, ZIndex = 0,
+            Fill = new DrawingBrush(drawing)
+            {
+                TileMode = TileMode.Tile, Stretch = Stretch.None,
+                DestinationRect = new RelativeRect(0, 0, g, g, RelativeUnit.Absolute),
+            },
+        };
+        Canvas.SetLeft(_gridRect, 0); Canvas.SetTop(_gridRect, 0);
+        _canvas.Children.Add(_gridRect);
+    }
+
+    // Grows/redraws the rubber-band selection rectangle to the current pointer.
+    void UpdateSelectRect(Point cur)
+    {
+        if (_selRect is null)
+        {
+            _selRect = new Avalonia.Controls.Shapes.Rectangle
+            {
+                Fill = new SolidColorBrush(Color.FromArgb(40, 33, 150, 243)),
+                Stroke = new SolidColorBrush(Color.FromArgb(160, 33, 150, 243)), StrokeThickness = 1,
+                IsHitTestVisible = false, ZIndex = 30,
+            };
+            _canvas!.Children.Add(_selRect);
+        }
+        Canvas.SetLeft(_selRect, Math.Min(_selStart.X, cur.X));
+        Canvas.SetTop(_selRect,  Math.Min(_selStart.Y, cur.Y));
+        _selRect.Width  = Math.Abs(cur.X - _selStart.X);
+        _selRect.Height = Math.Abs(cur.Y - _selStart.Y);
+    }
+
+    // Selects every node intersecting the rubber-band rectangle, then removes it.
+    void CommitSelectRect()
+    {
+        if (_selRect is null) return;
+        var r = new Rect(Canvas.GetLeft(_selRect), Canvas.GetTop(_selRect), _selRect.Width, _selRect.Height);
+        _canvas!.Children.Remove(_selRect); _selRect = null;
+        if (r.Width < 3 && r.Height < 3) return;   // a click, not a drag
+        _selected.Clear();
+        foreach (var n in _data.Nodes)
+            if (r.Intersects(new Rect(n.X, n.Y, n.Width, n.Height))) _selected.Add(n.Id);
+        RefreshSelection();
     }
 
     Grid? _root;
@@ -271,8 +390,22 @@ public class FlowChartWindow : Window
         row.Children.Add(toNsBtn);
 
         row.Children.Add(new Border { Width = 12 });
-        var bgBtn = TBtn("🎨", Loc.S("Flow_Background"));
-        bgBtn.Click += async (_, _) =>
+        // "View" gathers the set-once-and-forget surface settings: background, decoration, zoom reset and
+        // the grid (visibility / colour / style / opacity / snap) — rarely touched while actually drawing.
+        var viewBtn = TBtn(Loc.S("Flow_View"), Loc.S("Flow_ViewTip"));
+        viewBtn.Flyout = BuildViewFlyout();
+        row.Children.Add(viewBtn);
+
+        return bar;
+    }
+
+    // The "View" flyout panel: background colour, decoration, zoom reset and grid controls.
+    Flyout BuildViewFlyout()
+    {
+        var panel = new StackPanel { Spacing = 10, MinWidth = 230, Margin = new(4) };
+
+        var bg = Ui.Btn(Loc.S("Flow_Background"));
+        bg.Click += async (_, _) =>
         {
             var hex = await ColorPickDialog.Pick(this, Loc.S("Flow_Background"), _style.BackgroundColor);
             if (hex is null) return;
@@ -280,17 +413,55 @@ public class FlowChartWindow : Window
             if (_canvas is not null) _canvas.Background = new SolidColorBrush(Color.Parse(hex));
             Save();
         };
-        row.Children.Add(bgBtn);
+        panel.Children.Add(bg);
 
-        var decorBtn = TBtn(Loc.S("Decor_Open"), Loc.S("Decor_OpenTip"));
-        decorBtn.Click += (_, _) => _ = OpenDecor();
-        row.Children.Add(decorBtn);
+        var decor = Ui.Btn(Loc.S("Decor_Open"));
+        decor.Click += (_, _) => _ = OpenDecor();
+        panel.Children.Add(decor);
 
-        var zoomBtn = TBtn("1:1", Loc.S("Common_ResetZoomTip"));
-        zoomBtn.Click += (_, _) => { _zoom = 1.0; if (_canvas is not null) _canvas.RenderTransform = null; };
-        row.Children.Add(zoomBtn);
+        var zoom = Ui.Btn(Loc.S("Common_ResetZoomTip"));
+        zoom.Click += (_, _) => SetZoom(1.0);
+        panel.Children.Add(zoom);
 
-        return bar;
+        panel.Children.Add(new Separator());
+        panel.Children.Add(new TextBlock { Text = Loc.S("Grid_Header"), FontWeight = FontWeight.Bold });
+
+        var show = new CheckBox { Content = Loc.S("Grid_Show"), IsChecked = _style.GridVisible };
+        show.IsCheckedChanged += (_, _) => { _style.GridVisible = show.IsChecked == true; RenderGrid(); Save(); };
+        panel.Children.Add(show);
+
+        var snap = new CheckBox { Content = Loc.S("Grid_Snap"), IsChecked = _data.SnapToGrid };
+        snap.IsCheckedChanged += (_, _) => { _data.SnapToGrid = snap.IsChecked == true; Save(); };
+        panel.Children.Add(snap);
+
+        var styleCombo = Ui.Combo();
+        styleCombo.Items.Add(new ComboItem(Loc.S("Grid_Lines"),  nameof(GridLineStyle.Lines)));
+        styleCombo.Items.Add(new ComboItem(Loc.S("Grid_Dashed"), nameof(GridLineStyle.Dashed)));
+        styleCombo.Items.Add(new ComboItem(Loc.S("Grid_Dots"),   nameof(GridLineStyle.Dots)));
+        styleCombo.SelectedItem = styleCombo.Items.OfType<ComboItem>().FirstOrDefault(c => c.Id == _style.GridStyle.ToString()) ?? styleCombo.Items[0];
+        styleCombo.SelectionChanged += (_, _) =>
+        {
+            if ((styleCombo.SelectedItem as ComboItem)?.Id is { } id && Enum.TryParse<GridLineStyle>(id, out var gs))
+            { _style.GridStyle = gs; RenderGrid(); Save(); }
+        };
+        panel.Children.Add(styleCombo);
+
+        var color = Ui.Btn(Loc.S("Grid_Color"));
+        color.Click += async (_, _) =>
+        {
+            var hex = await ColorPickDialog.Pick(this, Loc.S("Grid_Color"), _style.GridColor);
+            if (hex is null) return;
+            _style.GridColor = hex; RenderGrid(); Save();
+        };
+        panel.Children.Add(color);
+
+        panel.Children.Add(new TextBlock { Text = Loc.S("Grid_Opacity"), FontSize = 11, Opacity = 0.8 });
+        var op = new Slider { Minimum = 0, Maximum = 1, Value = _style.GridOpacity, SmallChange = 0.05, LargeChange = 0.1 };
+        op.PropertyChanged += (_, ev) => { if (ev.Property == Slider.ValueProperty) { _style.GridOpacity = op.Value; RenderGrid(); } };
+        op.PointerCaptureLost += (_, _) => Save();
+        panel.Children.Add(op);
+
+        return new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
     }
 
     // Switches the global flow-line routing style and re-draws every arrow. Diagonal centre-to-centre
@@ -501,8 +672,9 @@ public class FlowChartWindow : Window
         {
             if (!dragging) return;
             var pt = e.GetPosition(_canvas);
-            var nx = Snap(Math.Max(0, pt.X - offset.X));
-            var ny = Snap(Math.Max(0, pt.Y - offset.Y));
+            // Snap the node's CENTRE to the grid: centre-aligned nodes give straight orthogonal arrows.
+            var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
+            var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), node.Height);
             Canvas.SetLeft(container, nx); Canvas.SetTop(container, ny);
             node.X = nx; node.Y = ny;
             GrowCanvasFor(nx, ny, node.Width, node.Height);
@@ -771,8 +943,10 @@ public class FlowChartWindow : Window
     {
         if (_canvas is null) return;
         const double margin = 400;
-        if (x + w + margin > _canvas.Width)  _canvas.Width  = x + w + margin;
-        if (y + h + margin > _canvas.Height) _canvas.Height = y + h + margin;
+        bool grew = false;
+        if (x + w + margin > _canvas.Width)  { _canvas.Width  = x + w + margin; grew = true; }
+        if (y + h + margin > _canvas.Height) { _canvas.Height = y + h + margin; grew = true; }
+        if (grew && _gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
     }
 
     // ── Remove ─────────────────────────────────────────────────────────────
@@ -1072,6 +1246,10 @@ public class FlowChartWindow : Window
     // Snaps a coordinate to the grid when snapping is enabled, else returns it unchanged.
     double Snap(double v) =>
         !_data.SnapToGrid || _data.GridSize < 1 ? v : Math.Round(v / _data.GridSize) * _data.GridSize;
+
+    // Snaps a node's top-left so that its CENTRE lands on a grid line (centre-aligned → straight arrows).
+    double SnapCentered(double topLeft, double size) =>
+        !_data.SnapToGrid || _data.GridSize < 1 ? topLeft : Snap(topLeft + size / 2) - size / 2;
 
     // ── Rubber band ────────────────────────────────────────────────────────
 

@@ -60,9 +60,26 @@ public class DiagramStyle
     /// <summary>Which corner the logo sits in.</summary>
     public DecorCorner LogoCorner { get; set; } = DecorCorner.TopRight;
 
+    // ── Grid (snapping aid) ──────────────────────────────────────────────────
+
+    /// <summary>Show the alignment grid behind the diagram.</summary>
+    public bool GridVisible { get; set; } = true;
+
+    /// <summary>Grid line colour (web hex).</summary>
+    public string GridColor { get; set; } = "#B0BEC5";
+
+    /// <summary>Grid line opacity, 0..1 (a faint grid is least distracting).</summary>
+    public double GridOpacity { get; set; } = 0.35;
+
+    /// <summary>How grid lines are drawn.</summary>
+    public GridLineStyle GridStyle { get; set; } = GridLineStyle.Lines;
+
     // Hands back a fresh copy of the default "drawing-board" look: white paper, dark thin lines.
     public static DiagramStyle Default() => new();
 }
+
+/// <summary>How the alignment grid is rendered.</summary>
+public enum GridLineStyle { Lines, Dashed, Dots }
 
 /// <summary>The corner a diagram logo is anchored to.</summary>
 public enum DecorCorner { TopLeft, TopRight, BottomLeft, BottomRight }
