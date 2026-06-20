@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.Styling;
 using OXSUIT.Loaders.Avalonia;
 
@@ -71,6 +72,14 @@ public static class ThemeManager
         Set(onAccent,
             "ComboBoxItemForegroundPointerOver", "ComboBoxItemForegroundPressed",
             "ComboBoxItemForegroundSelected", "ComboBoxItemForegroundSelectedPointerOver", "ComboBoxItemForegroundSelectedPressed");
+
+        // TextBox watermark/placeholder — a faint version of the theme text colour (was white).
+        if (text is ISolidColorBrush scb)
+        {
+            var faint = new SolidColorBrush(scb.Color, 0.55);
+            Set(faint, "TextControlPlaceholderForeground", "TextControlPlaceholderForegroundPointerOver",
+                       "TextControlPlaceholderForegroundFocused", "TextControlPlaceholderForegroundDisabled");
+        }
 
         // Expander (the colour-field "cards" in the style editor were Fluent's dark default chrome)
         var border = B("ControlBorderBrush");

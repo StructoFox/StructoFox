@@ -77,6 +77,7 @@ public static class Loc
         ["Sec_New"]         = "＋ New {0}",
         ["Sec_NewPrompt"]   = "{0} name:",
         ["Sec_FilterName"]  = "Filter by name…",
+        ["Sec_FilterSortTip"] = "Filter by name & sort",
         ["Sec_NsAll"]       = "(all namespaces)",
         ["Sec_NsNone"]      = "(no namespace)",
         ["Sec_SetNs"]       = "🏷 Set namespace…",

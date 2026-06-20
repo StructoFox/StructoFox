@@ -57,6 +57,9 @@ public partial class MainWindow : Window
     string  _secFilter = "";
     string? _secNamespace = null;          // null = all namespaces, "" = no namespace, else the name
     HomeView _secView = HomeView.DetailList;
+    HomeSort _secSort = HomeSort.NameAsc;
+    bool     _secFilterOpen;
+    StackPanel? _secFilterArea;
     ContentControl _secList = new();       // the filtered list region (re-rendered without rebuilding the bar)
 
     // Builds the shell window and shows the project browser.
@@ -853,7 +856,7 @@ public partial class MainWindow : Window
     // The content area: a faint themed honeycomb backdrop with the scrollable section view on top.
     Control BuildContentHost()
     {
-        _content = new ContentControl();   // fresh instance each build (a control has one parent)
+        _content = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };   // fill so a section can pin its footer
         var host = new Border();
         Ui.Theme(host, Border.BackgroundProperty, "ContentBgBrush");
 
@@ -861,7 +864,7 @@ public partial class MainWindow : Window
         var comb = new HoneycombBackdrop();
         Ui.Theme(comb, HoneycombBackdrop.LineBrushProperty, "AccentBgBrush");
         layered.Children.Add(comb);
-        layered.Children.Add(new ScrollViewer { Padding = new(24), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _content });
+        layered.Children.Add(_content);   // the section view fills the area and manages its own scroll + footer
         host.Child = layered;
         return host;
     }
@@ -884,38 +887,66 @@ public partial class MainWindow : Window
     Control BuildSectionView(Section section)
     {
         _sectionRows.Clear(); _selEntities.Clear(); _selAnchor = null;   // selection is per shown section
-        var root = new StackPanel { Spacing = 12, MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Left };
-        root.Children.Add(new TextBlock { Text = ProjectName(_project ?? ""), FontFamily = Mono, FontSize = 11, Opacity = 0.6 });
+        var content = new StackPanel { Spacing = 12, MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Left };
+        content.Children.Add(new TextBlock { Text = ProjectName(_project ?? ""), FontFamily = Mono, FontSize = 11, Opacity = 0.6 });
 
-        if (section == Section.Boards) { BuildBoardsView(root); return root; }
-        if (section == Section.Main)   { BuildMainView(root); return root; }
-        if (section == Section.Export) { BuildExportView(root); return root; }
+        Control? bottomBar = null;
+        if (section == Section.Boards) { BuildBoardsView(content); bottomBar = BuildBoardsBottomBar(); }
+        else if (section == Section.Main) { BuildMainView(content); }
+        else if (section == Section.Export) { BuildExportView(content); }
+        else
+        {
+            content.Children.Add(Heading(PluralLabel(section)));
+            var add = Ui.Btn(string.Format(Loc.S("Sec_New"), SingularLabel(section)));
+            add.HorizontalAlignment = HorizontalAlignment.Left;
+            add.Click += async (_, _) => await NewEntity(section);
+            content.Children.Add(add);
+            _secList = new ContentControl();
+            content.Children.Add(_secList);
+            RefreshSecList(section);
+            bottomBar = BuildSectionBottomBar(section);
+        }
 
-        // Entity section: heading, a "New …" action, a filter bar, then the filtered list.
-        root.Children.Add(Heading(PluralLabel(section)));
-        var add = Ui.Btn(string.Format(Loc.S("Sec_New"), SingularLabel(section)));
-        add.HorizontalAlignment = HorizontalAlignment.Left;
-        add.Click += async (_, _) => await NewEntity(section);
-        root.Children.Add(add);
-
-        root.Children.Add(BuildSectionFilterBar(section));
-
-        _secList = new ContentControl();
-        root.Children.Add(_secList);
-        RefreshSecList(section);
-        return root;
+        // Scroll the content; pin the filter/view bar at the bottom for a continuous menu (like home).
+        var scroll = new ScrollViewer { Content = content, Padding = new(24, 24, 24, 8), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        if (bottomBar is null) return scroll;
+        var grid = new Grid();
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        Grid.SetRow(scroll, 0); grid.Children.Add(scroll);
+        Grid.SetRow(bottomBar, 1); grid.Children.Add(bottomBar);
+        return grid;
     }
 
-    // Filter bar for an entity section: a name filter + an always-visible Namespace dropdown.
-    Control BuildSectionFilterBar(Section section)
+    // The pinned bottom bar of an entity section: [view ▾] [🔎 name+sort] [Namespace ▾ — always shown].
+    Control BuildSectionBottomBar(Section section)
     {
-        var nameBox = new TextBox { Width = 200, Text = _secFilter, PlaceholderText = Loc.S("Sec_FilterName") };
-        Ui.Theme(nameBox, TextBox.BackgroundProperty,  "InputBgBrush");
-        Ui.Theme(nameBox, TextBox.ForegroundProperty,  "SidebarTextBrush");
-        Ui.Theme(nameBox, TextBox.BorderBrushProperty, "ControlBorderBrush");
-        nameBox.TextChanged += (_, _) => { _secFilter = nameBox.Text ?? ""; RefreshSecList(section); };
+        var bar = new Border { Padding = new(24, 8) };
+        Ui.Theme(bar, Border.BackgroundProperty, "SidebarBgBrush");
 
-        var nsCombo = Ui.Combo(190);
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+
+        var viewBtn = Ui.Btn(ViewIcon(_secView) + "  ▾", "View"); viewBtn.Padding = new(10, 4);
+        viewBtn.Click += (_, _) =>
+        {
+            var cm = new ContextMenu();
+            void Item(string label, HomeView v) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => { _secView = v; viewBtn.Content = ViewIcon(_secView) + "  ▾"; RefreshSecList(section); }; cm.Items.Add(mi); }
+            Item("▦  Kacheln", HomeView.Cards);
+            Item("▣  Große Kacheln", HomeView.BigCards);
+            Item("≣  Einspaltige Liste (Details)", HomeView.DetailList);
+            Item("☷  Mehrspaltige Liste", HomeView.MultiList);
+            cm.Open(viewBtn);
+        };
+        row.Children.Add(viewBtn);
+
+        var find = Ui.Btn("🔎", Loc.S("Sec_FilterSortTip")); find.Padding = new(10, 4);
+        _secFilterArea = BuildSecFilterArea(section);
+        _secFilterArea.IsVisible = _secFilterOpen;
+        find.Click += (_, _) => { _secFilterOpen = !_secFilterOpen; _secFilterArea.IsVisible = _secFilterOpen; };
+        row.Children.Add(find);
+
+        // Namespace dropdown — always visible.
+        var nsCombo = Ui.Combo(180);
         nsCombo.Items.Add(Loc.S("Sec_NsAll"));
         nsCombo.Items.Add(Loc.S("Sec_NsNone"));
         var spaces = _project is null ? new List<string>()
@@ -929,28 +960,49 @@ public partial class MainWindow : Window
             _secNamespace = sel == Loc.S("Sec_NsAll") ? null : sel == Loc.S("Sec_NsNone") ? "" : sel;
             RefreshSecList(section);
         };
+        row.Children.Add(new TextBlock { Text = Loc.S("CodeEdit_Namespace"), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(nsCombo);
 
-        // View selector (same four modes as the home page).
-        var viewBtn = Ui.Btn(ViewIcon(_secView) + "  ▾", "View"); viewBtn.Padding = new(10, 4);
-        viewBtn.Click += (_, _) =>
+        row.Children.Add(_secFilterArea);
+
+        bar.Child = new ScrollViewer { Content = row, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        return bar;
+    }
+
+    // The collapsible part behind 🔎: a name filter + two sort toggles (Date ↓↑, A–Z / Z–A).
+    StackPanel BuildSecFilterArea(Section section)
+    {
+        var nameBox = new TextBox { Width = 180, Text = _secFilter, PlaceholderText = Loc.S("Sec_FilterName") };
+        Ui.Theme(nameBox, TextBox.BackgroundProperty,  "InputBgBrush");
+        Ui.Theme(nameBox, TextBox.ForegroundProperty,  "SidebarTextBrush");
+        Ui.Theme(nameBox, TextBox.BorderBrushProperty, "ControlBorderBrush");
+        nameBox.TextChanged += (_, _) => { _secFilter = nameBox.Text ?? ""; RefreshSecList(section); };
+
+        Button dateBtn = null!, azBtn = null!;
+        void Restyle()
         {
-            var cm = new ContextMenu();
-            void Item(string label, HomeView v) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => { _secView = v; RefreshSecList(section); }; cm.Items.Add(mi); }
-            Item("▦  Kacheln", HomeView.Cards);
-            Item("▣  Große Kacheln", HomeView.BigCards);
-            Item("≣  Einspaltige Liste (Details)", HomeView.DetailList);
-            Item("☷  Mehrspaltige Liste", HomeView.MultiList);
-            cm.Open(viewBtn);
-        };
+            bool dateActive = _secSort is HomeSort.DateDesc or HomeSort.DateAsc;
+            dateBtn.Content = _secSort == HomeSort.DateAsc ? "Date ↑" : "Date ↓";
+            azBtn.Content   = _secSort == HomeSort.NameDesc ? "Z–A" : "A–Z";
+            Ui.Theme(dateBtn, TemplatedControl.BackgroundProperty, dateActive ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(dateBtn, TemplatedControl.ForegroundProperty, dateActive ? "AccentTextBrush" : "SidebarTextBrush");
+            Ui.Theme(azBtn,   TemplatedControl.BackgroundProperty, !dateActive ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(azBtn,   TemplatedControl.ForegroundProperty, !dateActive ? "AccentTextBrush" : "SidebarTextBrush");
+        }
+        dateBtn = Ui.Btn("Date ↓"); dateBtn.Padding = new(8, 4);
+        dateBtn.Click += (_, _) => { _secSort = _secSort == HomeSort.DateDesc ? HomeSort.DateAsc : HomeSort.DateDesc; Restyle(); RefreshSecList(section); };
+        azBtn = Ui.Btn("A–Z"); azBtn.Padding = new(8, 4);
+        azBtn.Click += (_, _) => { _secSort = _secSort == HomeSort.NameAsc ? HomeSort.NameDesc : HomeSort.NameAsc; Restyle(); RefreshSecList(section); };
+        Restyle();
 
         return new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
-            Children = { nameBox, new TextBlock { Text = Loc.S("CodeEdit_Namespace"), VerticalAlignment = VerticalAlignment.Center }, nsCombo, viewBtn },
+            Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, Margin = new(8, 0, 0, 0),
+            Children = { nameBox, dateBtn, azBtn },
         };
     }
 
-    // Re-renders just the list region for the current filter (so the filter bar keeps focus).
+    // Re-renders just the list region for the current filter + sort (so the bar keeps focus).
     void RefreshSecList(Section section) => CrashHandler.Safe(() =>
     {
         var entities = _project is null ? new() : CodeEntityService.LoadAll(_project, section.ToString());
@@ -959,6 +1011,14 @@ public partial class MainWindow : Window
             (string.IsNullOrEmpty(_secFilter) || e.Name.Contains(_secFilter, StringComparison.OrdinalIgnoreCase)) &&
             (_secNamespace is null || (_secNamespace == "" ? string.IsNullOrEmpty(e.Namespace) : e.Namespace == _secNamespace)))
             .ToList();
+        DateTime FT(CodeEntity e) => CodeEntityService.FileTime(_project!, section.ToString(), e.Id);
+        entities = _secSort switch
+        {
+            HomeSort.DateDesc => entities.OrderByDescending(FT).ToList(),
+            HomeSort.DateAsc  => entities.OrderBy(FT).ToList(),
+            HomeSort.NameDesc => entities.OrderByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            _                 => entities.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+        };
         _secList.Content = BuildEntityList(section, entities);
     }, "RefreshSecList");
 
@@ -971,7 +1031,7 @@ public partial class MainWindow : Window
 
         // Single-column for the detail list; a wrap grid for the (big) card and multi-column views.
         Panel list = _secView == HomeView.DetailList ? new StackPanel { Spacing = 4 } : new WrapPanel();
-        foreach (var e in entities.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var e in entities)   // already filtered + sorted by RefreshSecList
             list.Children.Add(EntityRow(e, section, _secView));
 
         var overlay = new Canvas { IsHitTestVisible = false };
@@ -1303,10 +1363,14 @@ public partial class MainWindow : Window
     // Lists the project's code boards as cards with a "New board" action; clicking a card opens it.
     string? _selBoard;
     readonly List<(string id, Border tile)> _boardTiles = new();
+    string  _boardFilter = "";
+    HomeSort _boardSort = HomeSort.NameAsc;
+    bool     _boardFilterOpen;
+    StackPanel? _boardFilterArea;
+    ContentControl _boardList = new();
 
     void BuildBoardsView(StackPanel root)
     {
-        _boardTiles.Clear(); _selBoard = null;
         root.Children.Add(Heading("Boards"));
 
         var add = Ui.Btn(Loc.S("Boards_New"));
@@ -1314,17 +1378,74 @@ public partial class MainWindow : Window
         add.Click += async (_, _) => await NewBoard();
         root.Children.Add(add);
 
-        var boards = _project is null ? new() : CodeBoardRegistryService.Load(_project);
-        if (boards.Count == 0)
-        {
-            root.Children.Add(Note(Loc.S("Boards_Empty")));
-            return;
-        }
+        _boardList = new ContentControl();
+        root.Children.Add(_boardList);
+        RefreshBoardList();
+    }
 
+    // Re-renders the boards gallery for the current name filter + sort.
+    void RefreshBoardList() => CrashHandler.Safe(() =>
+    {
+        _boardTiles.Clear(); _selBoard = null;
+        var boards = _project is null ? new() : CodeBoardRegistryService.Load(_project);
+        boards = boards.Where(b => string.IsNullOrEmpty(_boardFilter) || b.Name.Contains(_boardFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+        boards = _boardSort switch
+        {
+            HomeSort.DateDesc => boards.OrderByDescending(b => b.UpdatedAt).ToList(),
+            HomeSort.DateAsc  => boards.OrderBy(b => b.UpdatedAt).ToList(),
+            HomeSort.NameDesc => boards.OrderByDescending(b => b.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            _                 => boards.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+        };
+        if (boards.Count == 0) { _boardList.Content = Note(Loc.S("Boards_Empty")); return; }
         var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var b in boards.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
-            wrap.Children.Add(BoardCard(b));
-        root.Children.Add(wrap);
+        foreach (var b in boards) wrap.Children.Add(BoardCard(b));
+        _boardList.Content = wrap;
+    }, "RefreshBoardList");
+
+    // The boards gallery's pinned bottom bar: just 🔎 (name filter + sort toggles) — no namespace/views.
+    Control BuildBoardsBottomBar()
+    {
+        var bar = new Border { Padding = new(24, 8) };
+        Ui.Theme(bar, Border.BackgroundProperty, "SidebarBgBrush");
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+
+        var find = Ui.Btn("🔎", Loc.S("Sec_FilterSortTip")); find.Padding = new(10, 4);
+        _boardFilterArea = BuildBoardFilterArea();
+        _boardFilterArea.IsVisible = _boardFilterOpen;
+        find.Click += (_, _) => { _boardFilterOpen = !_boardFilterOpen; _boardFilterArea.IsVisible = _boardFilterOpen; };
+        row.Children.Add(find);
+        row.Children.Add(_boardFilterArea);
+
+        bar.Child = new ScrollViewer { Content = row, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        return bar;
+    }
+
+    StackPanel BuildBoardFilterArea()
+    {
+        var nameBox = new TextBox { Width = 180, Text = _boardFilter, PlaceholderText = Loc.S("Sec_FilterName") };
+        Ui.Theme(nameBox, TextBox.BackgroundProperty,  "InputBgBrush");
+        Ui.Theme(nameBox, TextBox.ForegroundProperty,  "SidebarTextBrush");
+        Ui.Theme(nameBox, TextBox.BorderBrushProperty, "ControlBorderBrush");
+        nameBox.TextChanged += (_, _) => { _boardFilter = nameBox.Text ?? ""; RefreshBoardList(); };
+
+        Button dateBtn = null!, azBtn = null!;
+        void Restyle()
+        {
+            bool dateActive = _boardSort is HomeSort.DateDesc or HomeSort.DateAsc;
+            dateBtn.Content = _boardSort == HomeSort.DateAsc ? "Date ↑" : "Date ↓";
+            azBtn.Content   = _boardSort == HomeSort.NameDesc ? "Z–A" : "A–Z";
+            Ui.Theme(dateBtn, TemplatedControl.BackgroundProperty, dateActive ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(dateBtn, TemplatedControl.ForegroundProperty, dateActive ? "AccentTextBrush" : "SidebarTextBrush");
+            Ui.Theme(azBtn,   TemplatedControl.BackgroundProperty, !dateActive ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(azBtn,   TemplatedControl.ForegroundProperty, !dateActive ? "AccentTextBrush" : "SidebarTextBrush");
+        }
+        dateBtn = Ui.Btn("Date ↓"); dateBtn.Padding = new(8, 4);
+        dateBtn.Click += (_, _) => { _boardSort = _boardSort == HomeSort.DateDesc ? HomeSort.DateAsc : HomeSort.DateDesc; Restyle(); RefreshBoardList(); };
+        azBtn = Ui.Btn("A–Z"); azBtn.Padding = new(8, 4);
+        azBtn.Click += (_, _) => { _boardSort = _boardSort == HomeSort.NameAsc ? HomeSort.NameDesc : HomeSort.NameAsc; Restyle(); RefreshBoardList(); };
+        Restyle();
+
+        return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, Margin = new(8, 0, 0, 0), Children = { nameBox, dateBtn, azBtn } };
     }
 
     // One board tile: symbol + name; left-click opens it, right-click renames/deletes.
