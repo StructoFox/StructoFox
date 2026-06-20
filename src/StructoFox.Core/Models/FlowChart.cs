@@ -13,10 +13,28 @@ public enum FlowNodeKind
     Comment       // free note
 }
 
+/// <summary>Cosmetic DIN 66001 symbol variants for an I/O node. Purely a drawing choice — the node's
+/// semantic <see cref="FlowNodeKind"/> stays InputOutput, so code generation is unaffected (a punched
+/// card is still just "input/output" to the generated code).</summary>
+public enum FlowSymbol
+{
+    Auto,          // use the node kind's default shape
+    Document,      // printout / report (wavy bottom)
+    Display,       // screen output
+    ManualInput,   // keyboard / manual entry (slanted top)
+    PunchedCard,   // punched card (clipped corner)
+    MagneticTape,  // tape reel (circle + foot)
+    MagneticDisk,  // disk / database (cylinder)
+    StoredData     // stored data (curved sides)
+}
+
 public class FlowNode
 {
     public string       Id     { get; set; } = Guid.NewGuid().ToString("N")[..8];
     public FlowNodeKind Kind   { get; set; } = FlowNodeKind.Process;
+
+    /// <summary>Optional DIN symbol variant (cosmetic; default = the kind's standard shape).</summary>
+    public FlowSymbol   Symbol { get; set; } = FlowSymbol.Auto;
     public string       Text   { get; set; } = "";
     public double       X      { get; set; } = 60;
     public double       Y      { get; set; } = 60;

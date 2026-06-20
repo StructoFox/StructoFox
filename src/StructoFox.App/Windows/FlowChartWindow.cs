@@ -343,15 +343,17 @@ public class FlowChartWindow : Window
         var textColor = ParseOpt(node.Style?.TextColor) ?? stroke;
         var inner = new Grid();
 
-        Control shape = node.Kind switch
-        {
-            FlowNodeKind.Start or FlowNodeKind.End => RoundedBox(node.Height / 2, fill, stroke),
-            FlowNodeKind.Decision    => DiamondShape(node.Width, node.Height, fill, stroke),
-            FlowNodeKind.InputOutput => ParallelogramShape(node.Width, node.Height, fill, stroke),
-            FlowNodeKind.Subroutine  => SubroutineShape(fill, stroke),
-            FlowNodeKind.Comment     => CommentShape(fill, stroke),
-            _                        => RoundedBox(4, fill, stroke),
-        };
+        Control shape = node.Symbol != FlowSymbol.Auto
+            ? SymbolShape(node.Symbol, node.Width, node.Height, fill, stroke)
+            : node.Kind switch
+            {
+                FlowNodeKind.Start or FlowNodeKind.End => RoundedBox(node.Height / 2, fill, stroke),
+                FlowNodeKind.Decision    => DiamondShape(node.Width, node.Height, fill, stroke),
+                FlowNodeKind.InputOutput => ParallelogramShape(node.Width, node.Height, fill, stroke),
+                FlowNodeKind.Subroutine  => SubroutineShape(fill, stroke),
+                FlowNodeKind.Comment     => CommentShape(fill, stroke),
+                _                        => RoundedBox(4, fill, stroke),
+            };
         inner.Children.Add(shape);
 
         var label = new TextBlock
@@ -434,11 +436,38 @@ public class FlowChartWindow : Window
         var style = new MenuItem { Header = Loc.S("Style_Open") };
         style.Click += (_, _) => _ = EditNodeStyle(node);
         cm.Items.Add(style);
+
+        // I/O nodes can take a DIN symbol variant (document, display, punched card, storage media…).
+        if (node.Kind == FlowNodeKind.InputOutput)
+        {
+            var symMenu = new MenuItem { Header = Loc.S("Flow_Symbol") };
+            void Sym(string label, FlowSymbol s) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => SetNodeSymbol(node, s); symMenu.Items.Add(mi); }
+            Sym(Loc.S("Flow_SymAuto"),         FlowSymbol.Auto);
+            Sym(Loc.S("Flow_SymDocument"),     FlowSymbol.Document);
+            Sym(Loc.S("Flow_SymDisplay"),      FlowSymbol.Display);
+            Sym(Loc.S("Flow_SymManualInput"),  FlowSymbol.ManualInput);
+            Sym(Loc.S("Flow_SymPunchedCard"),  FlowSymbol.PunchedCard);
+            Sym(Loc.S("Flow_SymMagneticTape"), FlowSymbol.MagneticTape);
+            Sym(Loc.S("Flow_SymMagneticDisk"), FlowSymbol.MagneticDisk);
+            Sym(Loc.S("Flow_SymStoredData"),   FlowSymbol.StoredData);
+            cm.Items.Add(symMenu);
+        }
+
         cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Flow_DeleteNode") };
         del.Click += (_, _) => { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); };
         cm.Items.Add(del);
         OpenMenu(cm, anchor);
+    }
+
+    // Applies a DIN symbol variant to an I/O node and redraws it (and its connectors).
+    void SetNodeSymbol(FlowNode node, FlowSymbol s)
+    {
+        node.Symbol = s;
+        if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
+        RenderNode(node);
+        UpdateConnectionsFor(node.Id);
+        Save();
     }
 
     // Opens the element-style editor for a node's colour overrides; an all-inherit result clears them
@@ -696,6 +725,44 @@ public class FlowChartWindow : Window
         g.Children.Add(new Border { BorderBrush = new SolidColorBrush(stroke), BorderThickness = new(1, 0, 0, 0), Margin = new(7, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left });
         g.Children.Add(new Border { BorderBrush = new SolidColorBrush(stroke), BorderThickness = new(1, 0, 0, 0), Margin = new(0, 0, 7, 0), HorizontalAlignment = HorizontalAlignment.Right });
         return g;
+    }
+
+    // DIN 66001 I/O symbol variants — cosmetic shapes drawn at the node's size (semantics stay I/O).
+    static Control SymbolShape(FlowSymbol sym, double w, double h, Color fill, Color stroke)
+    {
+        var fb = new SolidColorBrush(fill);
+        var sb = new SolidColorBrush(stroke);
+        static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        Avalonia.Controls.Shapes.Path P(string d, bool filled = true) => new() { Data = Geometry.Parse(d), Fill = filled ? fb : null, Stroke = sb, StrokeThickness = 1.5 };
+
+        switch (sym)
+        {
+            case FlowSymbol.Document:    // rectangle with a wavy bottom edge
+                return P($"M0,0 L{F(w)},0 L{F(w)},{F(h * 0.82)} C{F(w * 0.66)},{F(h * 1.04)} {F(w * 0.33)},{F(h * 0.6)} 0,{F(h * 0.82)} Z");
+            case FlowSymbol.Display:     // screen — curved-in left, rounded right
+                return P($"M{F(w * 0.18)},0 L{F(w * 0.85)},0 C{F(w)},0 {F(w)},{F(h)} {F(w * 0.85)},{F(h)} L{F(w * 0.18)},{F(h)} C0,{F(h * 0.7)} 0,{F(h * 0.3)} {F(w * 0.18)},0 Z");
+            case FlowSymbol.ManualInput: // slanted top edge (keyboard)
+                return P($"M0,{F(h * 0.28)} L{F(w)},0 L{F(w)},{F(h)} L0,{F(h)} Z");
+            case FlowSymbol.PunchedCard: // clipped top-left corner
+                return P($"M{F(w * 0.2)},0 L{F(w)},0 L{F(w)},{F(h)} L0,{F(h)} L0,{F(h * 0.28)} Z");
+            case FlowSymbol.StoredData:  // curved left + right edges
+                return P($"M{F(w * 0.12)},0 L{F(w)},0 C{F(w * 0.86)},{F(h * 0.5)} {F(w * 0.86)},{F(h * 0.5)} {F(w)},{F(h)} L{F(w * 0.12)},{F(h)} C0,{F(h * 0.5)} 0,{F(h * 0.5)} {F(w * 0.12)},0 Z");
+            case FlowSymbol.MagneticTape: // reel: circle + tangent foot
+            {
+                var g = new Grid();
+                g.Children.Add(new Ellipse { Fill = fb, Stroke = sb, StrokeThickness = 1.5, Margin = new(w * 0.06, 0, w * 0.06, h * 0.12) });
+                g.Children.Add(new Line { StartPoint = new(w * 0.52, h * 0.95), EndPoint = new(w * 0.98, h * 0.95), Stroke = sb, StrokeThickness = 1.5 });
+                return g;
+            }
+            case FlowSymbol.MagneticDisk: // database cylinder
+            {
+                var g = new Grid();
+                g.Children.Add(P($"M0,{F(h * 0.16)} C0,{F(-h * 0.02)} {F(w)},{F(-h * 0.02)} {F(w)},{F(h * 0.16)} L{F(w)},{F(h * 0.84)} C{F(w)},{F(h * 1.02)} 0,{F(h * 1.02)} 0,{F(h * 0.84)} Z"));
+                g.Children.Add(P($"M0,{F(h * 0.16)} C0,{F(h * 0.34)} {F(w)},{F(h * 0.34)} {F(w)},{F(h * 0.16)}", filled: false));
+                return g;
+            }
+            default: return RoundedBox(4, fill, stroke);
+        }
     }
 
     // The intrinsic fill/stroke colours per node kind (semantic defaults, independent of the app theme).
