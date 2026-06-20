@@ -294,11 +294,10 @@ public class StructogramWindow : Window
     {
         if (string.IsNullOrEmpty(b.RefId))
         {
-            var name = await PromptDialog.Show(this, Loc.S("Sub_NamePrompt"),
-                string.IsNullOrWhiteSpace(b.Text) ? "" : b.Text, Loc.S("Struct_KSubroutine"));
-            if (string.IsNullOrWhiteSpace(name)) return;
-            var fn = new CodeEntity { Name = name.Trim(), EntityType = CodeEntityType.Function };
-            CodeEntityService.Save(_projFolder, "Function", fn);
+            var id = await SubroutineLinkDialog.Show(this, _projFolder, "");
+            if (string.IsNullOrEmpty(id)) return;
+            var fn = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == id);
+            if (fn is null) return;
             b.RefId = fn.Id; b.Text = fn.Name; Save(); Rebuild();
         }
         var f = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == b.RefId);

@@ -1051,23 +1051,6 @@ public partial class MainWindow : Window
         return holder;
     }
 
-    // Assigns a namespace (prompted) to the selection (or the right-clicked entity), then refreshes.
-    Task AssignNamespace(CodeEntity e, Section section) => CrashHandler.SafeAsync(async () =>
-    {
-        if (_project is null) return;
-        var ids = _selEntities.Contains(e.Id) && _selEntities.Count > 0 ? _selEntities.ToList() : new() { e.Id };
-
-        // Pick from the namespaces managed in the Namespaces tab (+ "(none)"). Value = namespace id.
-        var items = new List<(string, string)> { ("", Loc.S("Sec_NsNone")) };
-        items.AddRange(CodeEntityService.LoadAll(_project, "Namespace")
-            .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase).Select(n => (n.Id, n.Name)));
-        var ns = await PickListDialog.Show(this, Loc.S("Sec_SetNs"), items);
-        if (ns is null) return;
-        foreach (var ent in CodeEntityService.LoadAll(_project, section.ToString()))
-            if (ids.Contains(ent.Id)) { ent.Namespace = ns; CodeEntityService.Save(_project, section.ToString(), ent); }
-        ShowSection(section);
-    }, "AssignNamespace");
-
     // The inner content of an entity tile/row, laid out for the chosen view.
     Control EntityRowContent(CodeEntity e, HomeView view)
     {
@@ -1188,10 +1171,6 @@ public partial class MainWindow : Window
             setMain.Click += (_, _) => SetAsMain(e);
             cm.Items.Add(setMain);
         }
-
-        var setNs = new MenuItem { Header = Loc.S("Sec_SetNs") };
-        setNs.Click += async (_, _) => await AssignNamespace(e, section);
-        cm.Items.Add(setNs);
 
         cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Sec_Delete") };
@@ -1633,7 +1612,19 @@ public partial class MainWindow : Window
         if (_project is null) return;
         var name = await PromptDialog.Show(this, string.Format(Loc.S("Sec_NewPrompt"), SingularLabel(section)), SingularLabel(section), SingularLabel(section));
         if (string.IsNullOrWhiteSpace(name)) return;
-        var entity = new CodeEntity { Name = name.Trim(), EntityType = Enum.Parse<CodeEntityType>(section.ToString()) };
+        name = name.Trim();
+
+        // A bare entity goes in the "(none)" namespace; warn if that name is already taken there so the
+        // user knows they're about to make a twin rather than silently stacking duplicates.
+        if (CodeEntityService.LoadAll(_project, section.ToString())
+                .Any(x => string.IsNullOrEmpty(x.Namespace) && string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            var res = await MessageDialog.Show(this,
+                string.Format(Loc.S("Sec_DupMsg"), SingularLabel(section), name), Loc.S("Sec_DupTitle"), DialogButtons.YesNo);
+            if (res != DialogResult.Yes) return;
+        }
+
+        var entity = new CodeEntity { Name = name, EntityType = Enum.Parse<CodeEntityType>(section.ToString()) };
         CodeEntityService.Save(_project, section.ToString(), entity);
         ShowSection(section);
     }, "NewEntity");

@@ -39,7 +39,6 @@ public class FlowChartWindow : Window
 
     Button? _selectBtn, _connectBtn, _removeBtn;
     ContextMenu? _menu;       // the one open context menu, so a new one closes the old (no stacking)
-    ContextMenu? _hoverMenu;  // the one open toolbar category dropdown (hover-driven)
 
     // Opens a context menu over an anchor, first closing any menu still showing.
     void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
@@ -176,49 +175,72 @@ public class FlowChartWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
         bar.Child = row;
 
-        // A plain "add this exact node" toolbar button (for single-variant categories).
-        void AddShapeBtn(string label, FlowNodeKind kind)
+        // Shape categories live in one native Menu: top-level items open their variant list on hover,
+        // and hovering a sibling closes the open one and opens it instead (native menu-bar behaviour —
+        // unlike a light-dismiss ContextMenu, whose overlay swallowed hover on the other buttons).
+        var shapeMenu = new Menu { Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Center };
+
+        // A top-level category that reveals its variants; hovering opens it (no click needed).
+        MenuItem Cat(string label)
         {
-            var b = TBtn(label, string.Format(Loc.S("Flow_AddNodeTip"), kind));
-            b.Click += (_, _) => AddNode(kind);
-            row.Children.Add(b);
+            var top = new MenuItem { Header = label + "  ▾" };
+            Ui.Theme(top, MenuItem.ForegroundProperty, "SidebarTextBrush");
+            top.PointerEntered += (_, _) => top.IsSubMenuOpen = true;
+            return top;
+        }
+        // A single-variant top-level item that just adds its node when chosen.
+        MenuItem Act(string label, FlowNodeKind kind)
+        {
+            var top = new MenuItem { Header = label };
+            Ui.Theme(top, MenuItem.ForegroundProperty, "SidebarTextBrush");
+            top.Click += (_, _) => AddNode(kind);
+            return top;
         }
 
-        // Category dropdown buttons: each groups its variants, revealed by hovering the button.
-        row.Children.Add(CategoryBtn(Loc.S("Flow_CatStartEnd"), cm =>
+        var startEnd = Cat(Loc.S("Flow_CatStartEnd"));
+        startEnd.Items.Add(MI(Loc.S("Flow_Start"), () => AddNode(FlowNodeKind.Start)));
+        startEnd.Items.Add(MI(Loc.S("Flow_End"),   () => AddNode(FlowNodeKind.End)));
+        shapeMenu.Items.Add(startEnd);
+
+        var proc = Cat(Loc.S("Flow_CatProcess"));
+        proc.Items.Add(MI(Loc.S("Flow_Process"),    () => AddNode(FlowNodeKind.Process)));
+        proc.Items.Add(MI(Loc.S("Flow_Subroutine"), () => AddNode(FlowNodeKind.Subroutine)));
+        shapeMenu.Items.Add(proc);
+
+        shapeMenu.Items.Add(Act(Loc.S("Flow_Decision"), FlowNodeKind.Decision));
+
+        var io = Cat(Loc.S("Flow_CatIO"));
+        io.Items.Add(MI(Loc.S("Flow_SymAuto"),         () => AddNode(FlowNodeKind.InputOutput)));
+        io.Items.Add(new Separator());
+        io.Items.Add(MI(Loc.S("Flow_SymDocument"),     () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Document)));
+        io.Items.Add(MI(Loc.S("Flow_SymDisplay"),      () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Display)));
+        io.Items.Add(MI(Loc.S("Flow_SymManualInput"),  () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.ManualInput)));
+        io.Items.Add(MI(Loc.S("Flow_SymPunchedCard"),  () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.PunchedCard)));
+        io.Items.Add(MI(Loc.S("Flow_SymMagneticTape"), () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.MagneticTape)));
+        io.Items.Add(MI(Loc.S("Flow_SymMagneticDisk"), () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.MagneticDisk)));
+        io.Items.Add(MI(Loc.S("Flow_SymStoredData"),   () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.StoredData)));
+        shapeMenu.Items.Add(io);
+
+        // The connect menu is rebuilt each open so the active line style's ✓ stays current.
+        var conn = Cat(Loc.S("Flow_CatConnect"));
+        void FillConn()
         {
-            cm.Items.Add(MI(Loc.S("Flow_Start"), () => AddNode(FlowNodeKind.Start)));
-            cm.Items.Add(MI(Loc.S("Flow_End"),   () => AddNode(FlowNodeKind.End)));
-        }));
-        row.Children.Add(CategoryBtn(Loc.S("Flow_CatProcess"), cm =>
-        {
-            cm.Items.Add(MI(Loc.S("Flow_Process"),    () => AddNode(FlowNodeKind.Process)));
-            cm.Items.Add(MI(Loc.S("Flow_Subroutine"), () => AddNode(FlowNodeKind.Subroutine)));
-        }));
-        AddShapeBtn(Loc.S("Flow_Decision"), FlowNodeKind.Decision);
-        row.Children.Add(CategoryBtn(Loc.S("Flow_CatIO"), cm =>
-        {
-            cm.Items.Add(MI(Loc.S("Flow_SymAuto"),         () => AddNode(FlowNodeKind.InputOutput)));
-            cm.Items.Add(new Separator());
-            cm.Items.Add(MI(Loc.S("Flow_SymDocument"),     () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Document)));
-            cm.Items.Add(MI(Loc.S("Flow_SymDisplay"),      () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Display)));
-            cm.Items.Add(MI(Loc.S("Flow_SymManualInput"),  () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.ManualInput)));
-            cm.Items.Add(MI(Loc.S("Flow_SymPunchedCard"),  () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.PunchedCard)));
-            cm.Items.Add(MI(Loc.S("Flow_SymMagneticTape"), () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.MagneticTape)));
-            cm.Items.Add(MI(Loc.S("Flow_SymMagneticDisk"), () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.MagneticDisk)));
-            cm.Items.Add(MI(Loc.S("Flow_SymStoredData"),   () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.StoredData)));
-        }));
-        row.Children.Add(CategoryBtn(Loc.S("Flow_CatConnect"), cm =>
-        {
-            cm.Items.Add(MI(Loc.S("Flow_Connector"), () => AddNode(FlowNodeKind.Connector)));
-            cm.Items.Add(MI(Loc.S("Flow_SymOffPage"), () => AddNode(FlowNodeKind.Connector, FlowSymbol.OffPageConnector)));
-            cm.Items.Add(MI(Loc.S("Flow_Junction"),  () => AddNode(FlowNodeKind.Junction)));
-            cm.Items.Add(new Separator());
+            conn.Items.Clear();
+            conn.Items.Add(MI(Loc.S("Flow_Connector"),  () => AddNode(FlowNodeKind.Connector)));
+            conn.Items.Add(MI(Loc.S("Flow_SymOffPage"), () => AddNode(FlowNodeKind.Connector, FlowSymbol.OffPageConnector)));
+            conn.Items.Add(MI(Loc.S("Flow_Junction"),   () => AddNode(FlowNodeKind.Junction)));
+            conn.Items.Add(new Separator());
             // Flow-line routing style (global): DIN orthogonal vs. free diagonal arrows.
-            cm.Items.Add(MI((_data.DiagonalLines ? "" : "✓ ") + Loc.S("Flow_ArrowDin"),  () => SetDiagonal(false)));
-            cm.Items.Add(MI((_data.DiagonalLines ? "✓ " : "") + Loc.S("Flow_ArrowFree"), () => SetDiagonal(true)));
-        }));
-        AddShapeBtn(Loc.S("Flow_Note"), FlowNodeKind.Comment);
+            conn.Items.Add(MI((_data.DiagonalLines ? "" : "✓ ") + Loc.S("Flow_ArrowDin"),  () => SetDiagonal(false)));
+            conn.Items.Add(MI((_data.DiagonalLines ? "✓ " : "") + Loc.S("Flow_ArrowFree"), () => SetDiagonal(true)));
+        }
+        FillConn();
+        conn.SubmenuOpened += (_, _) => FillConn();
+        shapeMenu.Items.Add(conn);
+
+        shapeMenu.Items.Add(Act(Loc.S("Flow_Note"), FlowNodeKind.Comment));
+
+        row.Children.Add(shapeMenu);
 
         row.Children.Add(new Border { Width = 12 });
 
@@ -271,24 +293,6 @@ public class FlowChartWindow : Window
         Save();
         if (diagonal && AppSettings.NormWarn)
             await MessageDialog.Show(this, Loc.S("Norm_DiagonalWarn"), Loc.S("Norm_Title"));
-    }
-
-    // A toolbar category button: hovering (or clicking) opens a dropdown listing its variants, rebuilt
-    // each time so live state (e.g. the active line style's ✓) is current. Only one dropdown shows at once.
-    Button CategoryBtn(string label, Action<ContextMenu> fill)
-    {
-        var b = TBtn(label + "  ▾", Loc.S("Flow_CatTip"));
-        void Open()
-        {
-            _hoverMenu?.Close();
-            var cm = new ContextMenu { PlacementTarget = b, Placement = PlacementMode.BottomEdgeAlignedLeft };
-            fill(cm);
-            _hoverMenu = cm;
-            cm.Open(b);
-        }
-        b.PointerEntered += (_, _) => Open();
-        b.Click          += (_, _) => Open();   // click/touch fallback
-        return b;
     }
 
     // A dropdown menu item that runs an action when chosen.
@@ -768,10 +772,10 @@ public class FlowChartWindow : Window
     {
         if (string.IsNullOrEmpty(node.RefId))
         {
-            var name = await PromptDialog.Show(this, Loc.S("Sub_NamePrompt"), node.Text, Loc.S("Flow_Subroutine"));
-            if (string.IsNullOrWhiteSpace(name)) return;
-            var fn = new CodeEntity { Name = name.Trim(), EntityType = CodeEntityType.Function };
-            CodeEntityService.Save(_projFolder, "Function", fn);
+            var id = await SubroutineLinkDialog.Show(this, _projFolder, "");
+            if (string.IsNullOrEmpty(id)) return;
+            var fn = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == id);
+            if (fn is null) return;
             node.RefId = fn.Id; node.Text = fn.Name; Save();
             if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
             RenderNode(node); UpdateConnectionsFor(node.Id);
