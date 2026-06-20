@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     string? _secNamespace = null;          // null = all namespaces, "" = no namespace, else the name
     HomeView _secView = HomeView.DetailList;
     HomeSort _secSort = HomeSort.NameAsc;
+    Dictionary<string, string> _nsNames = new();   // namespace id → display name (for entity rows)
     bool     _secFilterOpen;
     StackPanel? _secFilterArea;
     ContentControl _secList = new();       // the filtered list region (re-rendered without rebuilding the bar)
@@ -950,20 +951,20 @@ public partial class MainWindow : Window
         find.Click += (_, _) => { _secFilterOpen = !_secFilterOpen; _secFilterArea.IsVisible = _secFilterOpen; };
         row.Children.Add(find);
 
-        // Namespace dropdown — always visible.
+        // Namespace dropdown — always visible. Items carry the namespace id; filtering is by id.
+        const string nsAll = "all";
         var nsCombo = Ui.Combo(180);
-        nsCombo.Items.Add(Loc.S("Sec_NsAll"));
-        nsCombo.Items.Add(Loc.S("Sec_NsNone"));
-        var spaces = _project is null ? new List<string>()
-            : CodeEntityService.LoadAll(_project, "Namespace").Select(n => n.Name)
-              .Concat(LoadAllEntities(_project).Values.Select(e => e.Namespace))
-              .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
-        foreach (var ns in spaces) nsCombo.Items.Add(ns);
-        nsCombo.SelectedItem = _secNamespace is null ? Loc.S("Sec_NsAll") : _secNamespace == "" ? Loc.S("Sec_NsNone") : (spaces.Contains(_secNamespace) ? _secNamespace : Loc.S("Sec_NsAll"));
+        nsCombo.Items.Add(new ComboItem(Loc.S("Sec_NsAll"), nsAll));
+        nsCombo.Items.Add(new ComboItem(Loc.S("Sec_NsNone"), ""));
+        if (_project is not null)
+            foreach (var n in CodeEntityService.LoadAll(_project, "Namespace").OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
+                nsCombo.Items.Add(new ComboItem(n.Name, n.Id));
+        var curId = _secNamespace ?? nsAll;
+        nsCombo.SelectedItem = nsCombo.Items.OfType<ComboItem>().FirstOrDefault(c => c.Id == curId) ?? nsCombo.Items[0];
         nsCombo.SelectionChanged += (_, _) =>
         {
-            var sel = nsCombo.SelectedItem as string;
-            _secNamespace = sel == Loc.S("Sec_NsAll") ? null : sel == Loc.S("Sec_NsNone") ? "" : sel;
+            var id = (nsCombo.SelectedItem as ComboItem)?.Id;
+            _secNamespace = id == nsAll ? null : id;
             RefreshSecList(section);
         };
         row.Children.Add(new TextBlock { Text = Loc.S("CodeEdit_Namespace"), VerticalAlignment = VerticalAlignment.Center });
@@ -1011,6 +1012,8 @@ public partial class MainWindow : Window
     // Re-renders just the list region for the current filter + sort (so the bar keeps focus).
     void RefreshSecList(Section section) => CrashHandler.Safe(() =>
     {
+        _nsNames = _project is null ? new()
+            : CodeEntityService.LoadAll(_project, "Namespace").GroupBy(n => n.Id).ToDictionary(g => g.Key, g => g.First().Name);
         var entities = _project is null ? new() : CodeEntityService.LoadAll(_project, section.ToString());
         if (section == Section.Function) entities = entities.Where(e => !e.IsEntryPoint).ToList();
         entities = entities.Where(e =>
@@ -1054,11 +1057,10 @@ public partial class MainWindow : Window
         if (_project is null) return;
         var ids = _selEntities.Contains(e.Id) && _selEntities.Count > 0 ? _selEntities.ToList() : new() { e.Id };
 
-        // Pick from the namespaces managed in the Namespaces tab (+ "(none)").
+        // Pick from the namespaces managed in the Namespaces tab (+ "(none)"). Value = namespace id.
         var items = new List<(string, string)> { ("", Loc.S("Sec_NsNone")) };
-        items.AddRange(CodeEntityService.LoadAll(_project, "Namespace").Select(n => n.Name)
-            .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .Select(n => (n, n)));
+        items.AddRange(CodeEntityService.LoadAll(_project, "Namespace")
+            .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase).Select(n => (n.Id, n.Name)));
         var ns = await PickListDialog.Show(this, Loc.S("Sec_SetNs"), items);
         if (ns is null) return;
         foreach (var ent in CodeEntityService.LoadAll(_project, section.ToString()))
@@ -1070,7 +1072,8 @@ public partial class MainWindow : Window
     Control EntityRowContent(CodeEntity e, HomeView view)
     {
         TextBlock Name(double size) { var t = new TextBlock { Text = e.Name, FontSize = size, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center }; Ui.Theme(t, TextBlock.ForegroundProperty, "ContentTextBrush"); return t; }
-        var nsText = string.IsNullOrWhiteSpace(e.Namespace) ? null : "🏷 " + e.Namespace;
+        var nsText = string.IsNullOrWhiteSpace(e.Namespace) ? null
+            : "🏷 " + (_nsNames.TryGetValue(e.Namespace, out var nsn) ? nsn : e.Namespace);
 
         switch (view)
         {

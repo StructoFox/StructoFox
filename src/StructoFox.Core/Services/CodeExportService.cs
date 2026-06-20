@@ -41,13 +41,21 @@ public static class CodeExportService
         var byId = all.ToDictionary(e => e.Id);
         string Name(string id) => byId.TryGetValue(id, out var e) ? e.Name : "";
 
+        // Namespaces are referenced by id; resolve id → name (from the set and/or disk). Legacy values
+        // that aren't an id fall back to being used as a literal name. Namespace entities aren't emitted.
+        var nsById = all.Where(e => e.EntityType == CodeEntityType.Namespace).ToDictionary(e => e.Id, e => e.Name);
+        if (projFolder is not null)
+            foreach (var n in CodeEntityService.LoadAll(projFolder, "Namespace")) nsById[n.Id] = n.Name;
+        string NsName(CodeEntity e) => string.IsNullOrEmpty(e.Namespace) ? "" : (nsById.TryGetValue(e.Namespace, out var nm) ? nm : e.Namespace.Trim());
+        all = all.Where(e => e.EntityType != CodeEntityType.Namespace).ToList();
+
         var sb = new StringBuilder();
         sb.AppendLine($"{Cmt(lang)} Auto-generated skeleton from StructoFox. Fill in the logic.");
         if (lang == ExportLanguage.Php) sb.AppendLine("<?php");
         if (lang == ExportLanguage.Python) sb.AppendLine(PythonImports(all));
         sb.AppendLine();
 
-        var groups = all.GroupBy(e => e.Namespace?.Trim() ?? "").OrderBy(g => g.Key);
+        var groups = all.GroupBy(NsName).OrderBy(g => g.Key);
 
         foreach (var grp in groups)
         {

@@ -78,13 +78,15 @@ public class CodeEntityEditorDialog : Window
         // Namespace
         // Namespace is chosen from the ones managed in the Namespaces tab (a combo, not free text).
         form.Children.Add(FieldLabel(Loc.S("CodeEdit_Namespace")));
+        // Items carry the namespace entity's Id (so a later rename of the namespace stays linked).
         var nsCombo = Ui.Combo();
-        nsCombo.Items.Add(Loc.S("Sec_NsNone"));
-        var nsNames = CodeEntityService.LoadAll(_projFolder, "Namespace").Select(n => n.Name)
-            .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
-        if (!string.IsNullOrWhiteSpace(entity.Namespace) && !nsNames.Contains(entity.Namespace)) nsNames.Insert(0, entity.Namespace);  // keep a legacy value
-        foreach (var n in nsNames) nsCombo.Items.Add(n);
-        nsCombo.SelectedItem = string.IsNullOrWhiteSpace(entity.Namespace) ? Loc.S("Sec_NsNone") : entity.Namespace;
+        nsCombo.Items.Add(new ComboItem(Loc.S("Sec_NsNone"), ""));
+        foreach (var n in CodeEntityService.LoadAll(_projFolder, "Namespace").OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
+            nsCombo.Items.Add(new ComboItem(n.Name, n.Id));
+        // Preselect by id, or by a legacy name value, else "(none)".
+        nsCombo.SelectedItem = nsCombo.Items.OfType<ComboItem>().FirstOrDefault(c => c.Id == entity.Namespace)
+            ?? nsCombo.Items.OfType<ComboItem>().FirstOrDefault(c => c.Name == entity.Namespace)
+            ?? nsCombo.Items[0];
         form.Children.Add(nsCombo);
 
         // Description
@@ -443,7 +445,7 @@ public class CodeEntityEditorDialog : Window
 
             entity.Name         = (nameBox.Text ?? "").Trim();
             entity.EntityType   = typeCombo.SelectedItem is CodeEntityType et ? et : entity.EntityType;
-            entity.Namespace    = nsCombo.SelectedItem is string ns && ns != Loc.S("Sec_NsNone") ? ns : "";
+            entity.Namespace    = (nsCombo.SelectedItem as ComboItem)?.Id ?? "";
             entity.Description  = (descBox.Text ?? "").Trim();
             entity.BaseClassId  = (baseCombo.SelectedItem as ComboItem)?.Id ?? "";
             entity.ImplementsIds = implChecks.Where(c => c.Cb.IsChecked == true).Select(c => c.Id).ToList();
