@@ -607,14 +607,20 @@ public class FlowChartWindow : Window
 
         if (!string.IsNullOrWhiteSpace(conn.Label))
         {
-            var mid = pts[pts.Count / 2];
             var badge = new Border { CornerRadius = new(3), Padding = new(4, 1, 4, 1) };
             Ui.Theme(badge, Border.BackgroundProperty, "SidebarBgBrush");
             var t = new TextBlock { Text = conn.Label, FontSize = 10 };
             Ui.Theme(t, TextBlock.ForegroundProperty, "SidebarTextBrush");
             badge.Child = t;
-            Canvas.SetLeft(badge, mid.X - 10);
-            Canvas.SetTop(badge, mid.Y - 9);
+
+            // Label the longest segment; horizontal text always. DIN: a horizontal line gets the label
+            // centred just ABOVE it; a vertical line gets it (still horizontal) just to the RIGHT.
+            var (sa, sb) = LongestSegment(pts);
+            var smid = new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2);
+            double estW = Math.Max(16, conn.Label.Length * 6.5 + 8);
+            bool horizontal = Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y);
+            Canvas.SetLeft(badge, horizontal ? smid.X - estW / 2 : smid.X + 6);
+            Canvas.SetTop(badge,  horizontal ? smid.Y - 20      : smid.Y - 9);
             badge.ZIndex = 4;
             _canvas.Children.Add(badge); visuals.Add(badge);
         }
@@ -857,6 +863,20 @@ public class FlowChartWindow : Window
             double midX = (exit.X + entry.X) / 2;
             return new() { exit, new(midX, exit.Y), new(midX, entry.Y), entry };
         }
+    }
+
+    // The longest segment of a polyline — where a connection label reads best.
+    static (Point a, Point b) LongestSegment(List<Point> pts)
+    {
+        var best = (a: pts[0], b: pts[^1]);
+        double bestLen = -1;
+        for (int i = 0; i < pts.Count - 1; i++)
+        {
+            double dx = pts[i + 1].X - pts[i].X, dy = pts[i + 1].Y - pts[i].Y;
+            double len = dx * dx + dy * dy;
+            if (len > bestLen) { bestLen = len; best = (pts[i], pts[i + 1]); }
+        }
+        return best;
     }
 
     // Builds a small triangular arrowhead pointing from one point to another.
