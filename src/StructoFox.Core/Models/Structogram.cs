@@ -7,7 +7,8 @@ public enum NsBlockKind
     If,         // binary branch (then / else)
     While,      // pre-test loop (kopfgesteuert)
     DoWhile,    // post-test loop (fußgesteuert)
-    Case        // multi-way selection
+    Case,       // multi-way selection
+    Subroutine  // call to a sub-program drawn elsewhere (double-bar box, links to its own diagram)
 }
 
 /// <summary>One arm of a Case block (a label + its body sequence).</summary>
@@ -37,6 +38,10 @@ public class NsBlock
     public List<NsBlock> Body  { get; set; } = [];
     public List<NsBlock> Else  { get; set; } = [];
     public List<NsArm>   Arms  { get; set; } = [];
+
+    /// <summary>For a Subroutine block: the diagram key of the sub-program it links to (its own
+    /// flowchart/structogram/board). Empty until first opened via "show chart".</summary>
+    public string        LinkKey { get; set; } = "";
 
     /// <summary>Optional cosmetic appearance overrides for this block (null = inherit the diagram style).
     /// Purely presentational — ignored by code generation.</summary>

@@ -191,6 +191,7 @@ public class StructogramWindow : Window
             NsBlockKind.While     => LoopBox(b, preTest: true),
             NsBlockKind.DoWhile   => LoopBox(b, preTest: false),
             NsBlockKind.Case      => CaseBox(b),
+            NsBlockKind.Subroutine => SubroutineBox(b),
             _                     => StatementBox(b),
         };
 
@@ -266,6 +267,33 @@ public class StructogramWindow : Window
         }
         t.DoubleTapped += (_, _) => EditText(b);
         return t;
+    }
+
+    // The subroutine (predefined-process) box: a centred name with the two vertical inner bars,
+    // double-click opens its linked diagram ("show chart").
+    Control SubroutineBox(NsBlock b)
+    {
+        var text = string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSubroutine") : b.Text;
+        var t = PrimaryLabel(text, b);
+        t.Margin = new(16, 6, 16, 6);
+        t.TextAlignment = TextAlignment.Center;
+
+        var bar   = Solid(b.Style?.LineColor) ?? _lineBrush;
+        var left  = new Border { Width = 1, Background = bar, HorizontalAlignment = HorizontalAlignment.Left,  Margin = new(7, 0, 0, 0) };
+        var right = new Border { Width = 1, Background = bar, HorizontalAlignment = HorizontalAlignment.Right, Margin = new(0, 0, 7, 0) };
+
+        var g = new Grid { Children = { t, left, right } };
+        ToolTip.SetTip(g, Loc.S("Struct_ShowChartTip"));
+        g.DoubleTapped += (_, _) => ShowChart(b);
+        return g;
+    }
+
+    // Opens the sub-program's diagram (chooser), creating a stable link key on first use.
+    void ShowChart(NsBlock b)
+    {
+        if (string.IsNullOrEmpty(b.LinkKey)) { b.LinkKey = $"{_key}#sub_{b.Id}"; Save(); }
+        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, b.LinkKey,
+            string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSubroutine") : b.Text, _themePath);
     }
 
     // The classic if/else box: centered condition, T/F labels, then two side-by-side branches.
@@ -379,6 +407,13 @@ public class StructogramWindow : Window
         edit.Click += (_, _) => EditText(b);
         cm.Items.Add(edit);
 
+        if (b.Kind == NsBlockKind.Subroutine)
+        {
+            var chart = new MenuItem { Header = Loc.S("Struct_ShowChart") };
+            chart.Click += (_, _) => ShowChart(b);
+            cm.Items.Add(chart);
+        }
+
         cm.Items.Add(new Separator());
         cm.Items.Add(InsertMenu(Loc.S("Struct_InsertAbove"), parent, parent.IndexOf(b)));
         cm.Items.Add(InsertMenu(Loc.S("Struct_InsertBelow"), parent, parent.IndexOf(b) + 1));
@@ -440,6 +475,7 @@ public class StructogramWindow : Window
         Add(Loc.S("Struct_KWhile"), NsBlockKind.While);
         Add(Loc.S("Struct_KDoWhile"), NsBlockKind.DoWhile);
         Add(Loc.S("Struct_KCase"), NsBlockKind.Case);
+        Add(Loc.S("Struct_KSubroutine"), NsBlockKind.Subroutine);
         return mi;
     }
 
@@ -475,6 +511,7 @@ public class StructogramWindow : Window
             Add(Loc.S("Struct_KWhile"), NsBlockKind.While);
             Add(Loc.S("Struct_KDoWhile"), NsBlockKind.DoWhile);
             Add(Loc.S("Struct_KCase"), NsBlockKind.Case);
+            Add(Loc.S("Struct_KSubroutine"), NsBlockKind.Subroutine);
             OpenMenu(cm, b);
         };
         return b;
@@ -505,6 +542,7 @@ public class StructogramWindow : Window
         NsBlockKind.While   => Loc.S("Struct_DefWhile"),
         NsBlockKind.DoWhile => Loc.S("Struct_DefDoWhile"),
         NsBlockKind.Case    => Loc.S("Struct_DefSelector"),
+        NsBlockKind.Subroutine => Loc.S("Struct_DefSubroutine"),
         _                   => Loc.S("Struct_DefStatement"),
     };
 
