@@ -754,9 +754,54 @@ public class FlowChartWindow : Window
         container.PointerReleased += (_, e) =>
         {
             if (!dragging) return;
-            dragging = false; e.Pointer.Capture(null); Save();
+            dragging = false; e.Pointer.Capture(null);
+            // A junction dropped onto an existing line splices itself into the flow (A→B ⇒ A→J→B).
+            if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
+            Save();
             e.Handled = true;
         };
+    }
+
+    // If the junction now sits on a connection (that doesn't already touch it), split that connection so
+    // the flow runs through the junction — so a generated structogram/code follows it too.
+    void TrySpliceJunction(FlowNode jn)
+    {
+        var jr = new Rect(jn.X, jn.Y, jn.Width, jn.Height).Inflate(4);
+        foreach (var c in _data.Connections.ToList())
+        {
+            if (c.FromId == jn.Id || c.ToId == jn.Id) continue;
+            var a = NodeRect(c.FromId); var b = NodeRect(c.ToId);
+            if (a is null || b is null) continue;
+            var pts = _data.DiagonalLines
+                ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
+                : c.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, c) : Simplify(OrthoRouteAvoiding(a.Value, b.Value, c.FromId, c.ToId));
+            if (!PolyHitsAny(pts, new List<Rect> { jr })) continue;
+
+            // Splice: A→J keeps the label/style; J→B continues. Drop manual waypoints (route is now in two).
+            _data.Connections.Remove(c);
+            _data.Connections.Add(new FlowConnection { FromId = c.FromId, ToId = jn.Id, LineColor = c.LineColor, Label = c.Label });
+            _data.Connections.Add(new FlowConnection { FromId = jn.Id, ToId = c.ToId, LineColor = c.LineColor });
+            if (_connViews.TryGetValue(c.Id, out var vs)) { foreach (var v in vs) _canvas!.Children.Remove(v); _connViews.Remove(c.Id); }
+            RenderAllConnections();
+            return;   // one splice per drop
+        }
+    }
+
+    // Lifts a junction out of the line it was spliced into: its connections are removed and, if it had
+    // exactly one in and one out, that line is rejoined (X→J→Y ⇒ X→Y). The junction node stays, unwired.
+    void DetachJunction(FlowNode jn)
+    {
+        var ins  = _data.Connections.Where(c => c.ToId   == jn.Id).ToList();
+        var outs = _data.Connections.Where(c => c.FromId == jn.Id).ToList();
+        if (ins.Count == 1 && outs.Count == 1)
+            _data.Connections.Add(new FlowConnection { FromId = ins[0].FromId, ToId = outs[0].ToId, LineColor = ins[0].LineColor, Label = ins[0].Label });
+        foreach (var c in ins.Concat(outs))
+        {
+            _data.Connections.Remove(c);
+            if (_connViews.TryGetValue(c.Id, out var vs)) { foreach (var v in vs) _canvas!.Children.Remove(v); _connViews.Remove(c.Id); }
+        }
+        Save();
+        RenderAllConnections();
     }
 
     // The node right-click menu: edit text or delete.
@@ -776,6 +821,14 @@ public class FlowChartWindow : Window
         var style = new MenuItem { Header = Loc.S("Style_Open") };
         style.Click += (_, _) => _ = EditNodeStyle(node);
         cm.Items.Add(style);
+
+        // A junction wired into a line can be lifted back out (reconnecting the line it split).
+        if (node.Kind == FlowNodeKind.Junction && _data.Connections.Any(c => c.FromId == node.Id || c.ToId == node.Id))
+        {
+            var detach = new MenuItem { Header = Loc.S("Flow_DetachJunction") };
+            detach.Click += (_, _) => DetachJunction(node);
+            cm.Items.Add(detach);
+        }
 
         // I/O nodes can take a DIN symbol variant (document, display, punched card, storage media…).
         if (node.Kind == FlowNodeKind.InputOutput)
