@@ -43,6 +43,7 @@
         </Style>
         <Style Selector="TextBox">
             <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource SidebarTextBrush}" />
         </Style>
         <Style Selector="TextBox:pointerover">
             <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}" />
