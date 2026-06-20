@@ -26,6 +26,7 @@ public class CodeBoardWindow : Window
     readonly CodeBoard _board;
     readonly string?   _themePath;
     readonly Action<IEnumerable<CodeEntity>>? _onExport;
+    readonly string?   _bodyTargetKey;   // when set, this board defines a function/method body (Generate)
     CodeBoardData      _boardData;
 
     Canvas?       _canvas;
@@ -65,12 +66,13 @@ public class CodeBoardWindow : Window
     void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
 
     public CodeBoardWindow(string projFolder, CodeBoard board, string? themePath,
-        Action<IEnumerable<CodeEntity>>? onExport = null)
+        Action<IEnumerable<CodeEntity>>? onExport = null, string? bodyTargetKey = null)
     {
         _projFolder = projFolder;
         _board      = board;
         _themePath  = themePath;
         _onExport   = onExport;
+        _bodyTargetKey = bodyTargetKey;
         _boardData  = CodeBoardDataService.Load(projFolder, board.Id);
 
         Title                 = board.Symbol + "  " + board.Name;
@@ -169,6 +171,15 @@ public class CodeBoardWindow : Window
         var delBtn = Btn(Loc.S("Code_RemoveCards"), Loc.S("Code_RemoveCardsTip"));
         delBtn.Click += (_, _) => RemoveSelectedFromBoard();
         row.Children.Add(delBtn);
+
+        // When this board authors a function/method body, offer to generate it from the wiring.
+        if (_bodyTargetKey is not null)
+        {
+            row.Children.Add(new Border { Width = 8 });
+            var genBtn = Btn(Loc.S("Code_GenBody"), Loc.S("Code_GenBodyTip"));
+            genBtn.Click += async (_, _) => await GenerateBody();
+            row.Children.Add(genBtn);
+        }
 
         if (_onExport is not null)
         {
@@ -1096,6 +1107,23 @@ public class CodeBoardWindow : Window
             off += 26;
         }
         Save();
+    }
+
+    // ── Generate the target function/method body from the wiring ─────────────
+
+    // Translates the board's dataflow into the target's structogram (topologically ordered calls),
+    // then confirms. The structogram drives the normal code export afterwards.
+    async Task GenerateBody()
+    {
+        if (_bodyTargetKey is null) return;
+        // Make sure every entity is known (names/ports) before wiring them into a call sequence.
+        foreach (var t in CodeEntityService.EntityTypes)
+            foreach (var ent in CodeEntityService.LoadAll(_projFolder, t))
+                _entities[ent.Id] = ent;
+
+        var sd = CodeBoardCodeGen.GenerateBody(_board.Name, _boardData, _entities);
+        StructogramService.Save(_projFolder, _bodyTargetKey, sd);
+        await MessageDialog.Show(this, string.Format(Loc.S("Code_GenDone"), sd.Root.Count), Loc.S("Code_GenTitle"));
     }
 
     // ── Entity editor (shared standalone dialog) ─────────────────────────────

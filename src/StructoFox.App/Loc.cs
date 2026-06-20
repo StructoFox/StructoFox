@@ -105,6 +105,13 @@ public static class Loc
         ["Diag_Ns"]        = "▦ Structogram",
         ["Diag_NsExists"]  = "▦ Structogram (exists)",
         ["Diag_NsTip"]     = "Nassi-Shneiderman structogram editor (DIN 66261)",
+        ["Diag_Board"]     = "🗺 Board",
+        ["Diag_BoardExists"] = "🗺 Board (exists)",
+        ["Diag_BoardTip"]  = "Dataflow board — wire functions together to generate this body",
+        ["Code_GenBody"]    = "⚙ Generate function",
+        ["Code_GenBodyTip"] = "Turn the board's wiring into this function/method's structogram",
+        ["Code_GenTitle"]   = "Generate from board",
+        ["Code_GenDone"]    = "Generated a structogram with {0} step(s) from the board's wiring.",
 
         // Common
         ["Common_Untitled"] = "Untitled",
@@ -345,6 +352,13 @@ public static class Loc
         ["Diag_Ns"]        = "▦ Struktogramm",
         ["Diag_NsExists"]  = "▦ Struktogramm (vorhanden)",
         ["Diag_NsTip"]     = "Nassi-Shneiderman-Struktogramm-Editor (DIN 66261)",
+        ["Diag_Board"]     = "🗺 Board",
+        ["Diag_BoardExists"] = "🗺 Board (vorhanden)",
+        ["Diag_BoardTip"]  = "Datenfluss-Board — Funktionen verdrahten, um diesen Rumpf zu erzeugen",
+        ["Code_GenBody"]    = "⚙ Funktion erzeugen",
+        ["Code_GenBodyTip"] = "Board-Verdrahtung in das Struktogramm dieser Funktion/Methode umwandeln",
+        ["Code_GenTitle"]   = "Aus Board erzeugen",
+        ["Code_GenDone"]    = "Struktogramm mit {0} Schritt(en) aus der Board-Verdrahtung erzeugt.",
 
         // Common
         ["Common_Untitled"] = "Unbenannt",
