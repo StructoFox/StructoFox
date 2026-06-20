@@ -785,7 +785,7 @@ public partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // sections
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // exit door
 
-        var stack = new StackPanel { Spacing = 4 };
+        var stack = new StackPanel { Spacing = 4, Margin = new(0, 0, 8, 0) };   // right gutter so the scrollbar doesn't overlap buttons
         (Section sec, string icon, string label)[] items =
         {
             (Section.Boards,    "🖼", "Boards"),
