@@ -23,15 +23,25 @@ public static class SuppressStore
 
     public static bool IsSuppressed(string key) => Load().Contains(key);
 
-    public static void Suppress(string key)
+    public static void Suppress(string key)   { if (Load().Add(key)) Persist(); }
+
+    /// <summary>Re-enables a previously suppressed message so it shows again.</summary>
+    public static void Unsuppress(string key) { if (Load().Remove(key)) Persist(); }
+
+    static void Persist()
     {
-        var set = Load();
-        if (!set.Add(key)) return;
         try
         {
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-            File.WriteAllText(Path, JsonSerializer.Serialize(set));
+            File.WriteAllText(Path, JsonSerializer.Serialize(_set));
         }
         catch { /* best-effort */ }
     }
+
+    /// <summary>The messages that can be toggled in Options (key + a short label loc-key).</summary>
+    public static readonly (string Key, string LabelKey)[] Known =
+    {
+        ("sub_remove",   "Opt_SubRemove"),
+        ("board_remove", "Opt_BoardRemove"),
+    };
 }

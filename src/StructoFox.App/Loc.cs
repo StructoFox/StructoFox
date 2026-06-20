@@ -374,6 +374,9 @@ public static class Loc
         // App menu
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "About StructoFox",
+        ["Menu_Options"]    = "⚙ Options (show messages)",
+        ["Opt_SubRemove"]   = "Subroutine-removal note",
+        ["Opt_BoardRemove"] = "Board-removal note",
 
         // Project context menu (home)
         ["Proj_Rename"]       = "✎ Rename…",
@@ -663,6 +666,9 @@ public static class Loc
         // App-Menü
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "Über StructoFox",
+        ["Menu_Options"]    = "⚙ Optionen (Meldungen anzeigen)",
+        ["Opt_SubRemove"]   = "Hinweis: Unterprogramm entfernen",
+        ["Opt_BoardRemove"] = "Hinweis: vom Board entfernen",
 
         // Projekt-Kontextmenü (Home)
         ["Proj_Rename"]       = "✎ Umbenennen…",

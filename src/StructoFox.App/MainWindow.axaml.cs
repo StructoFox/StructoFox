@@ -153,6 +153,17 @@ public partial class MainWindow : Window
         pal.Click += (_, _) => new PaletteEditorWindow().Show();
         cm.Items.Add(pal);
 
+        // Options: a checkbox per suppressible message (checked = shown; re-check to re-enable it).
+        var options = new MenuItem { Header = Loc.S("Menu_Options") };
+        foreach (var (key, labelKey) in SuppressStore.Known)
+        {
+            var k = key;
+            var mi = new MenuItem { Header = Loc.S(labelKey), ToggleType = MenuItemToggleType.CheckBox, IsChecked = !SuppressStore.IsSuppressed(key) };
+            mi.Click += (_, _) => { if (mi.IsChecked) SuppressStore.Unsuppress(k); else SuppressStore.Suppress(k); };
+            options.Items.Add(mi);
+        }
+        cm.Items.Add(options);
+
         cm.Items.Add(new Separator());
 
         var about = new MenuItem { Header = string.Format(Loc.S("Menu_About"), Version) };
