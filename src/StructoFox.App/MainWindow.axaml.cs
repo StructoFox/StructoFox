@@ -1096,25 +1096,32 @@ public partial class MainWindow : Window
             return new StackPanel { Orientation = Orientation.Horizontal, Children = { prefix, name } };
         }
 
+        var summary = EntitySummary(e);   // empty for kinds with nothing to summarise (e.g. namespaces)
         switch (view)
         {
             case HomeView.Cards:
-                return new StackPanel { Width = 180, Spacing = 2, Children = { NamePlate(14), Dim(EntitySummary(e), 11) } };
+            {
+                var st = new StackPanel { Width = 180, Spacing = 2, Children = { NamePlate(14) } };
+                if (summary.Length > 0) st.Children.Add(Dim(summary, 11));
+                return st;
+            }
             case HomeView.BigCards:
-                return new StackPanel { Width = 250, Spacing = 3, Children = { NamePlate(16), Dim(EntitySummary(e), 12) } };
+            {
+                var st = new StackPanel { Width = 250, Spacing = 3, Children = { NamePlate(16) } };
+                if (summary.Length > 0) st.Children.Add(Dim(summary, 12));
+                return st;
+            }
             case HomeView.MultiList:
             {
                 var dock = new DockPanel { Width = 240 };
-                var sum = Dim(EntitySummary(e), 11); sum.VerticalAlignment = VerticalAlignment.Center;
-                DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
+                if (summary.Length > 0) { var sum = Dim(summary, 11); sum.VerticalAlignment = VerticalAlignment.Center; DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum); }
                 var nm = NamePlate(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
                 return dock;
             }
             default: // DetailList — full-width row: name left, summary right
             {
                 var dock = new DockPanel();
-                var sum = Dim(EntitySummary(e), 11); sum.VerticalAlignment = VerticalAlignment.Center;
-                DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
+                if (summary.Length > 0) { var sum = Dim(summary, 11); sum.VerticalAlignment = VerticalAlignment.Center; DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum); }
                 var nm = NamePlate(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
                 return dock;
             }
@@ -1628,6 +1635,7 @@ public partial class MainWindow : Window
     // A short, type-appropriate summary of an entity's contents.
     static string EntitySummary(CodeEntity e) => e.EntityType switch
     {
+        CodeEntityType.Namespace => "",   // a namespace has no fields/methods to summarise
         CodeEntityType.Enum     => $"{e.EnumValues.Count} values",
         CodeEntityType.Function => $"{e.Ports.Count} ports",
         CodeEntityType.Object   => string.IsNullOrEmpty(e.InstanceOfId) ? "object" : "instance",
