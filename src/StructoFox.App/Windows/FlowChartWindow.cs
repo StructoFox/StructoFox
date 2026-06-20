@@ -6,6 +6,7 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using OXSUIT.Loaders.Avalonia;
 using StructoFox.Core;
 using StructoFox.Core.Models;
@@ -24,6 +25,7 @@ public class FlowChartWindow : Window
     FlowChartData    _data;
 
     Canvas?       _canvas;
+    LayoutTransformControl? _zoomHost;   // wraps the canvas so zoom scales the scrollable extent
     ScrollViewer? _scroll;
 
     readonly Dictionary<string, Border>        _nodeViews = new(); // node id → container
@@ -73,6 +75,7 @@ public class FlowChartWindow : Window
         if (!string.IsNullOrWhiteSpace(themePath))
             try { Resources.MergedDictionaries.Add(OxsuitLoader.Load(themePath)); } catch { /* unthemed is fine */ }
         Ui.ThemeWindow(this);
+        ThemeManager.FixFluentBrushes(this);   // theme popups (context menus) at window scope
 
         Build();
     }
@@ -108,7 +111,9 @@ public class FlowChartWindow : Window
             Width = 3000, Height = 2000, ClipToBounds = false,
             Background = new SolidColorBrush(Color.Parse(_style.BackgroundColor)),  // diagram surface, not app theme
         };
-        _scroll.Content = _canvas;
+        // Wrap the canvas so zoom can use a LayoutTransform (scales the scrollable extent too).
+        _zoomHost = new LayoutTransformControl { Child = _canvas };
+        _scroll.Content = _zoomHost;
 
         // Empty-canvas interactions (node clicks are handled and don't bubble here):
         //  • right-drag      → pan the canvas (also cancels an in-progress connection on right-click)
@@ -165,12 +170,14 @@ public class FlowChartWindow : Window
         _canvas.AddHandler(DragDrop.DragOverEvent, OnDragOver);
         _canvas.AddHandler(DragDrop.DropEvent, OnDrop);
 
-        // Ctrl + wheel zooms the canvas (otherwise the scroll viewer scrolls normally).
-        _scroll.PointerWheelChanged += (_, e) =>
+        // Ctrl + wheel zooms toward the pointer. Handled on the canvas (a descendant of the scroll
+        // viewer) so it fires before the viewer's own scroll handler — while Ctrl is held the wheel
+        // always zooms and never scrolls.
+        _canvas.PointerWheelChanged += (_, e) =>
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
-            SetZoom(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1));
             e.Handled = true;
+            ZoomAt(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), e.GetPosition(_scroll));
         };
 
         RenderGrid();
@@ -192,12 +199,41 @@ public class FlowChartWindow : Window
         }
     }
 
-    // Applies a clamped zoom level to the canvas.
+    // Applies the current zoom as a LayoutTransform, so the scroll viewer sees the scaled size and can
+    // scroll the whole zoomed canvas (a RenderTransform would leave the extent unscaled).
+    void ApplyZoom()
+    {
+        if (_zoomHost is not null)
+            _zoomHost.LayoutTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+    }
+
+    // Keyboard / button zoom: anchor on the viewport centre.
     void SetZoom(double z)
     {
-        _zoom = Math.Clamp(z, 0.3, 2.5);
-        if (_canvas is not null)
-            _canvas.RenderTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+        if (_scroll is null) { _zoom = Math.Clamp(z, 0.3, 2.5); ApplyZoom(); return; }
+        ZoomAt(z, new Point(_scroll.Viewport.Width / 2, _scroll.Viewport.Height / 2));
+    }
+
+    // Zooms to a clamped level while keeping the content point under the given viewport position fixed.
+    void ZoomAt(double z, Point viewportPos)
+    {
+        z = Math.Clamp(z, 0.3, 2.5);
+        if (_scroll is null || _canvas is null || Math.Abs(z - _zoom) < 0.0001) { _zoom = z; ApplyZoom(); return; }
+
+        var off = _scroll.Offset;
+        // The unscaled content point currently under the pointer.
+        double cx = (off.X + viewportPos.X) / _zoom;
+        double cy = (off.Y + viewportPos.Y) / _zoom;
+
+        _zoom = z;
+        ApplyZoom();
+
+        // After re-layout, scroll so that same content point sits back under the pointer.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_scroll is null) return;
+            _scroll.Offset = new Vector(Math.Max(0, cx * _zoom - viewportPos.X), Math.Max(0, cy * _zoom - viewportPos.Y));
+        }, DispatcherPriority.Render);
     }
 
     static string Inv(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
@@ -567,8 +603,8 @@ public class FlowChartWindow : Window
             Text   = DefaultText(kind),
             X      = 80 + _data.Nodes.Count % 6 * 30,
             Y      = 80 + _data.Nodes.Count % 6 * 30,
-            Width  = kind == FlowNodeKind.Junction ? 16 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
-            Height = kind == FlowNodeKind.Junction ? 16 : offPage ? 54 : kind is FlowNodeKind.Start or FlowNodeKind.End or FlowNodeKind.Connector ? 46 : 56,
+            Width  = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
+            Height = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind is FlowNodeKind.Start or FlowNodeKind.End or FlowNodeKind.Connector ? 46 : 56,
         };
         _data.Nodes.Add(node);
         Save();

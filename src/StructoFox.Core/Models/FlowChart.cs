@@ -86,7 +86,7 @@ public class FlowChartData
     public List<FlowNode>       Nodes       { get; set; } = [];
     public List<FlowConnection> Connections { get; set; } = [];
     public double               GridSize    { get; set; } = 10;
-    public bool                 SnapToGrid  { get; set; } = false;
+    public bool                 SnapToGrid  { get; set; } = true;   // most users keep snapping on
 
     /// <summary>Connector style: false = DIN-style orthogonal flow lines (default), true = direct
     /// diagonal centre-to-centre arrows (the non-normative convenience option).</summary>

@@ -39,10 +39,17 @@ public static class ThemeManager
         FixFluentBrushes(app);
     }
 
+    /// <summary>Writes the Fluent-brush fixes into a specific window's own resources. Secondary windows
+    /// (flowchart / structogram / board) merge their theme at window scope; their popups (context menus)
+    /// don't reliably resolve the app-level fixes, so apply the same overrides locally.</summary>
+    public static void FixFluentBrushes(Window w) => FixFluentBrushes(Application.Current!, w.Resources);
+
+    static void FixFluentBrushes(Application app) => FixFluentBrushes(app, app.Resources);
+
     // Fluent paints some control glyphs (the ComboBox chevron, the CheckBox box + label) from its own
     // light brushes — direct template values that outside styles can't override — so they vanished on
     // light themes. Point those resource keys at the active theme's brushes instead, on every swap.
-    static void FixFluentBrushes(Application app)
+    static void FixFluentBrushes(Application app, IResourceDictionary target)
     {
         object? B(string key) => app.TryGetResource(key, null, out var v) ? v : null;
         var text     = B("SidebarTextBrush");   // glyphs + label text
@@ -52,7 +59,7 @@ public static class ThemeManager
         void Set(object? val, params string[] keys)
         {
             if (val is null) return;
-            foreach (var k in keys) app.Resources[k] = val;
+            foreach (var k in keys) target[k] = val;
         }
 
         // ComboBox drop-down chevron

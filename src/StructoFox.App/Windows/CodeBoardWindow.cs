@@ -30,6 +30,7 @@ public class CodeBoardWindow : Window
     CodeBoardData      _boardData;
 
     Canvas?       _canvas;
+    LayoutTransformControl? _zoomHost;   // wraps the canvas so zoom scales the scrollable extent
     ScrollViewer? _scroll;
 
     readonly Dictionary<string, CodeEntity> _entities  = new();   // entity id → entity
@@ -90,6 +91,7 @@ public class CodeBoardWindow : Window
         if (!string.IsNullOrWhiteSpace(themePath))
             try { Resources.MergedDictionaries.Add(OxsuitLoader.Load(themePath)); } catch { /* unthemed is fine */ }
         Ui.ThemeWindow(this);
+        ThemeManager.FixFluentBrushes(this);   // theme popups (context menus) at window scope
 
         BuildContent();
     }
@@ -124,7 +126,9 @@ public class CodeBoardWindow : Window
 
         _canvas = new Canvas { Width = 3000, Height = 2000, ClipToBounds = false };
         Ui.Theme(_canvas, Canvas.BackgroundProperty, "ContentBgBrush");
-        _scroll.Content = _canvas;
+        // Wrap the canvas so zoom can use a LayoutTransform (scales the scrollable extent too).
+        _zoomHost = new LayoutTransformControl { Child = _canvas };
+        _scroll.Content = _zoomHost;
 
         KeyDown += (_, e) => HandleKey(e);
         Focusable = true;
@@ -138,12 +142,13 @@ public class CodeBoardWindow : Window
         _canvas.AddHandler(DragDrop.DragOverEvent, OnDragOver);
         _canvas.AddHandler(DragDrop.DropEvent, OnDrop);
 
-        // Ctrl + wheel zooms; plain wheel scrolls.
-        _scroll.PointerWheelChanged += (_, e) =>
+        // Ctrl + wheel zooms toward the pointer (handled on the canvas, before the viewer scrolls, so
+        // while Ctrl is held the wheel always zooms and never scrolls).
+        _canvas.PointerWheelChanged += (_, e) =>
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
-            SetZoom(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1));
             e.Handled = true;
+            ZoomAt(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), e.GetPosition(_scroll));
         };
 
         RenderGrid();
@@ -285,12 +290,39 @@ public class CodeBoardWindow : Window
         }
     }
 
-    // Applies a clamped zoom level to the canvas.
+    // Applies the current zoom as a LayoutTransform so the scroll viewer can scroll the whole zoomed
+    // canvas (a RenderTransform would leave the scrollable extent unscaled).
+    void ApplyZoom()
+    {
+        if (_zoomHost is not null)
+            _zoomHost.LayoutTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+    }
+
+    // Keyboard / button zoom: anchor on the viewport centre.
     void SetZoom(double z)
     {
-        _zoom = Math.Clamp(z, 0.25, 3.0);
-        if (_canvas is not null)
-            _canvas.RenderTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+        if (_scroll is null) { _zoom = Math.Clamp(z, 0.25, 3.0); ApplyZoom(); return; }
+        ZoomAt(z, new Point(_scroll.Viewport.Width / 2, _scroll.Viewport.Height / 2));
+    }
+
+    // Zooms to a clamped level while keeping the content point under the given viewport position fixed.
+    void ZoomAt(double z, Point viewportPos)
+    {
+        z = Math.Clamp(z, 0.25, 3.0);
+        if (_scroll is null || _canvas is null || Math.Abs(z - _zoom) < 0.0001) { _zoom = z; ApplyZoom(); return; }
+
+        var off = _scroll.Offset;
+        double cx = (off.X + viewportPos.X) / _zoom;
+        double cy = (off.Y + viewportPos.Y) / _zoom;
+
+        _zoom = z;
+        ApplyZoom();
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_scroll is null) return;
+            _scroll.Offset = new Vector(Math.Max(0, cx * _zoom - viewportPos.X), Math.Max(0, cy * _zoom - viewportPos.Y));
+        }, DispatcherPriority.Render);
     }
 
     // (Re)draws the alignment grid behind the cards as a single tiled brush.

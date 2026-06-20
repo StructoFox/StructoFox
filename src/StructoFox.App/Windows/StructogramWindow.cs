@@ -57,6 +57,7 @@ public class StructogramWindow : Window
         if (!string.IsNullOrWhiteSpace(themePath))
             try { Resources.MergedDictionaries.Add(OxsuitLoader.Load(themePath)); } catch { /* unthemed is fine */ }
         Ui.ThemeWindow(this);
+        ThemeManager.FixFluentBrushes(this);   // theme popups (context menus) at window scope
 
         Build();
     }
