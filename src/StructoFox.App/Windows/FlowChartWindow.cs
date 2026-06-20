@@ -184,6 +184,7 @@ public class FlowChartWindow : Window
         AddShapeBtn(Loc.S("Flow_Subroutine"), FlowNodeKind.Subroutine);
         AddShapeBtn(Loc.S("Flow_End"), FlowNodeKind.End);
         AddShapeBtn(Loc.S("Flow_Note"), FlowNodeKind.Comment);
+        AddShapeBtn(Loc.S("Flow_Connector"), FlowNodeKind.Connector);
 
         row.Children.Add(new Border { Width = 12 });
 
@@ -311,8 +312,8 @@ public class FlowChartWindow : Window
             Text   = DefaultText(kind),
             X      = 80 + _data.Nodes.Count % 6 * 30,
             Y      = 80 + _data.Nodes.Count % 6 * 30,
-            Width  = kind == FlowNodeKind.Decision ? 150 : 140,
-            Height = kind is FlowNodeKind.Start or FlowNodeKind.End ? 46 : 56,
+            Width  = kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
+            Height = kind is FlowNodeKind.Start or FlowNodeKind.End or FlowNodeKind.Connector ? 46 : 56,
         };
         _data.Nodes.Add(node);
         Save();
@@ -328,6 +329,7 @@ public class FlowChartWindow : Window
         FlowNodeKind.InputOutput => Loc.S("Flow_DefIO"),
         FlowNodeKind.Subroutine  => Loc.S("Flow_DefCall"),
         FlowNodeKind.Comment     => Loc.S("Flow_DefNote"),
+        FlowNodeKind.Connector   => Loc.S("Flow_DefConnector"),
         _                        => Loc.S("Flow_DefStep"),
     };
 
@@ -352,6 +354,7 @@ public class FlowChartWindow : Window
                 FlowNodeKind.InputOutput => ParallelogramShape(node.Width, node.Height, fill, stroke),
                 FlowNodeKind.Subroutine  => SubroutineShape(fill, stroke),
                 FlowNodeKind.Comment     => CommentShape(fill, stroke),
+                FlowNodeKind.Connector   => new Ellipse { Fill = new SolidColorBrush(fill), Stroke = new SolidColorBrush(stroke), StrokeThickness = 1.5 },
                 _                        => RoundedBox(4, fill, stroke),
             };
         inner.Children.Add(shape);
@@ -566,6 +569,16 @@ public class FlowChartWindow : Window
         arrow.ZIndex = 1;
         _canvas.Children.Add(arrow); visuals.Add(arrow);
 
+        // DIN departure marker: a small filled dot where the flow line leaves the source edge.
+        if (!_data.DiagonalLines)
+        {
+            const double r = 3.5;
+            var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, IsHitTestVisible = false };
+            Canvas.SetLeft(dot, pts[0].X - r); Canvas.SetTop(dot, pts[0].Y - r);
+            dot.ZIndex = 2;
+            _canvas.Children.Add(dot); visuals.Add(dot);
+        }
+
         // Fat transparent overlay so the thin line is easy to right-click / remove.
         var hit = new Polyline { Stroke = Brushes.Transparent, StrokeThickness = 12, Cursor = new Cursor(StandardCursorType.Hand) };
         foreach (var p in pts) hit.Points.Add(p);
@@ -774,6 +787,7 @@ public class FlowChartWindow : Window
         FlowNodeKind.InputOutput => (Color.FromRgb(0xBB, 0xDE, 0xFB), Color.FromRgb(0x15, 0x65, 0xC0)),
         FlowNodeKind.Subroutine  => (Color.FromRgb(0xD1, 0xC4, 0xE9), Color.FromRgb(0x51, 0x2D, 0xA8)),
         FlowNodeKind.Comment     => (Color.FromRgb(0xEC, 0xEF, 0xF1), Color.FromRgb(0x45, 0x5A, 0x64)),
+        FlowNodeKind.Connector   => (Color.FromRgb(0xFF, 0xFF, 0xFF), Color.FromRgb(0x42, 0x42, 0x42)),
         _                        => (Color.FromRgb(0xE3, 0xF2, 0xFD), Color.FromRgb(0x15, 0x65, 0xC0)),
     };
 

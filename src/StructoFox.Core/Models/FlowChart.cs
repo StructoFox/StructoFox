@@ -10,7 +10,8 @@ public enum FlowNodeKind
     Decision,     // diamond — a branch (yes/no)
     InputOutput,  // parallelogram — read/print/IO
     Subroutine,   // double-bordered rectangle — calls another function
-    Comment       // free note
+    Comment,      // free note
+    Connector     // on-page connector — a small labelled circle that continues the flow elsewhere
 }
 
 /// <summary>Cosmetic DIN 66001 symbol variants for an I/O node. Purely a drawing choice — the node's
