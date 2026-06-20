@@ -67,6 +67,10 @@ public class FlowConnection
     public string              LineColor { get; set; } = "#888888";
     public double              Thickness { get; set; } = 1.6;
     public List<BoardWaypoint> Waypoints { get; set; } = [];
+
+    /// <summary>DIN data-transmission path (communication link): drawn with a zig-zag marker to set it
+    /// apart from an ordinary control-flow line.</summary>
+    public bool                Transmission { get; set; } = false;
 }
 
 public class FlowChartData

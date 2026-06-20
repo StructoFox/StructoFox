@@ -591,6 +591,17 @@ public class FlowChartWindow : Window
         };
         _canvas.Children.Add(hit); visuals.Add(hit);
 
+        // Transmission path marker: a small zig-zag at the route's middle point.
+        if (conn.Transmission)
+        {
+            var m = pts[pts.Count / 2];
+            var zig = new Polyline { Stroke = brush, StrokeThickness = 1.6, IsHitTestVisible = false };
+            foreach (var p in new[] { new Point(m.X - 7, m.Y), new Point(m.X - 2, m.Y - 6), new Point(m.X + 2, m.Y + 6), new Point(m.X + 7, m.Y) })
+                zig.Points.Add(p);
+            zig.ZIndex = 2;
+            _canvas.Children.Add(zig); visuals.Add(zig);
+        }
+
         if (!string.IsNullOrWhiteSpace(conn.Label))
         {
             var mid = pts[pts.Count / 2];
@@ -623,6 +634,9 @@ public class FlowChartWindow : Window
         var flip = new MenuItem { Header = Loc.S("Flow_FlipArrow") };
         flip.Click += (_, _) => { (conn.FromId, conn.ToId) = (conn.ToId, conn.FromId); Save(); RenderConnection(conn); };
         cm.Items.Add(flip);
+        var trans = new MenuItem { Header = conn.Transmission ? Loc.S("Flow_TransmissionOff") : Loc.S("Flow_Transmission") };
+        trans.Click += (_, _) => { conn.Transmission = !conn.Transmission; Save(); RenderConnection(conn); };
+        cm.Items.Add(trans);
         var del = new MenuItem { Header = Loc.S("Flow_DeleteArrow") };
         del.Click += (_, _) => DeleteConnection(conn);
         cm.Items.Add(del);
