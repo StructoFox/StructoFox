@@ -32,12 +32,27 @@ public class DiagramStyle
     /// <summary>Render the diagram's title as a heading on the plan.</summary>
     public bool ShowTitle { get; set; } = false;
 
+    /// <summary>Where the title heading sits on the plan.</summary>
+    public TitlePos TitlePosition { get; set; } = TitlePos.TopCenter;
+
+    /// <summary>Title font size in px.</summary>
+    public double TitleFontSize { get; set; } = 20;
+
+    /// <summary>Title in bold.</summary>
+    public bool TitleBold { get; set; } = true;
+
+    /// <summary>Title colour (web hex); empty = inherit the diagram text colour.</summary>
+    public string TitleColor { get; set; } = "";
+
     /// <summary>A faint diagonal watermark text (e.g. "DRAFT", a company name); empty = none.</summary>
     public string Watermark { get; set; } = "";
 
     /// <summary>Path to a faint centred watermark image; empty/missing = none. Works alongside or
     /// instead of the text watermark.</summary>
     public string WatermarkImage { get; set; } = "";
+
+    /// <summary>Rotation of the watermark (text + image), in degrees.</summary>
+    public double WatermarkAngle { get; set; } = -30;
 
     /// <summary>Path to a logo image to place in a corner; empty/missing = none.</summary>
     public string LogoPath { get; set; } = "";
@@ -51,6 +66,9 @@ public class DiagramStyle
 
 /// <summary>The corner a diagram logo is anchored to.</summary>
 public enum DecorCorner { TopLeft, TopRight, BottomLeft, BottomRight }
+
+/// <summary>Where the title heading sits on the plan.</summary>
+public enum TitlePos { TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight }
 
 /// <summary>
 /// Optional per-element appearance overrides (one block / node). Every field is nullable and

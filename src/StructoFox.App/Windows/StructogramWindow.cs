@@ -97,15 +97,7 @@ public class StructogramWindow : Window
         Ui.Theme(hint, TextBlock.ForegroundProperty, "SidebarTextBrush");
 
         var decorBtn = Ui.Btn(Loc.S("Decor_Open"), Loc.S("Decor_OpenTip"));
-        decorBtn.Click += async (_, _) =>
-        {
-            var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style);
-            if (newTitle is null) return;
-            _data.Title = newTitle;
-            Save();
-            RefreshDecor();
-            Title = string.Format(Loc.S("Struct_Title"), string.IsNullOrEmpty(newTitle) ? Loc.S("Common_Untitled") : newTitle);
-        };
+        decorBtn.Click += (_, _) => _ = OpenDecor();
 
         bar.Child = new StackPanel
         {
@@ -149,9 +141,20 @@ public class StructogramWindow : Window
     {
         if (_root is null) return;
         if (_decor is not null) _root.Children.Remove(_decor);
-        _decor = DiagramDecor.Build(_data.Title, _style);
+        _decor = DiagramDecor.Build(_data.Title, _style, () => _ = OpenDecor());
         Grid.SetRow(_decor, 1);
         _root.Children.Add(_decor);
+    }
+
+    // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
+    async Task OpenDecor()
+    {
+        var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style);
+        if (newTitle is null) return;
+        _data.Title = newTitle;
+        Save();
+        RefreshDecor();
+        Title = string.Format(Loc.S("Struct_Title"), string.IsNullOrEmpty(newTitle) ? Loc.S("Common_Untitled") : newTitle);
     }
 
     // Re-renders the whole tree from the model — cheap enough to do on every change.

@@ -1,4 +1,6 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -14,12 +16,16 @@ namespace StructoFox.App;
 /// </summary>
 public static class DiagramDecor
 {
-    /// <summary>Assembles the overlay (transparent, click-through). Empty when nothing is configured.</summary>
-    public static Control Build(string title, DiagramStyle style)
+    /// <summary>Assembles the overlay (transparent, click-through). Empty when nothing is configured.
+    /// If <paramref name="onEditTitle"/> is given, the title heading is made clickable (right-click to
+    /// edit its properties).</summary>
+    public static Control Build(string title, DiagramStyle style, Action? onEditTitle = null)
     {
-        var layer = new Panel { IsHitTestVisible = false };
+        // The layer itself has no background, so empty areas already pass clicks through to the canvas;
+        // the decorative children are explicitly click-through, only the title can opt in to right-click.
+        var layer = new Panel();
 
-        // Image watermark — large, faint, centred behind everything.
+        // Image watermark — large, faint, rotated, centred behind everything.
         if (!string.IsNullOrWhiteSpace(style.WatermarkImage) && File.Exists(style.WatermarkImage))
         {
             try
@@ -27,7 +33,9 @@ public static class DiagramDecor
                 layer.Children.Add(new Image
                 {
                     Source = new Bitmap(style.WatermarkImage), Width = 440, Stretch = Stretch.Uniform, Opacity = 0.08,
+                    IsHitTestVisible = false,
                     HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                    RenderTransform = new RotateTransform(style.WatermarkAngle), RenderTransformOrigin = RelativePoint.Center,
                 });
             }
             catch { /* unreadable image → no watermark */ }
@@ -41,25 +49,43 @@ public static class DiagramDecor
                 Text = style.Watermark,
                 FontSize = 80, FontWeight = FontWeight.Bold,
                 Foreground = new SolidColorBrush(ParseOr(style.LineColor, Colors.Gray)),
-                Opacity = 0.08,
+                Opacity = 0.08, IsHitTestVisible = false,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                RenderTransform = new RotateTransform(-30),
+                RenderTransform = new RotateTransform(style.WatermarkAngle), RenderTransformOrigin = RelativePoint.Center,
             });
         }
 
-        // Title heading — top-centre.
+        // Title heading — positioned per the style; optionally right-clickable to edit.
         if (style.ShowTitle && !string.IsNullOrWhiteSpace(title))
         {
-            layer.Children.Add(new TextBlock
+            var (h, v, top) = style.TitlePosition switch
+            {
+                TitlePos.TopLeft      => (HorizontalAlignment.Left,   VerticalAlignment.Top,    true),
+                TitlePos.TopRight     => (HorizontalAlignment.Right,  VerticalAlignment.Top,    true),
+                TitlePos.BottomLeft   => (HorizontalAlignment.Left,   VerticalAlignment.Bottom, false),
+                TitlePos.BottomCenter => (HorizontalAlignment.Center, VerticalAlignment.Bottom, false),
+                TitlePos.BottomRight  => (HorizontalAlignment.Right,  VerticalAlignment.Bottom, false),
+                _                     => (HorizontalAlignment.Center, VerticalAlignment.Top,    true),
+            };
+            var heading = new TextBlock
             {
                 Text = title,
-                FontSize = 20, FontWeight = FontWeight.Bold,
-                Foreground = new SolidColorBrush(ParseOr(style.TextColor, Colors.Black)),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new(0, 10, 0, 0),
-            });
+                FontSize = style.TitleFontSize, FontWeight = style.TitleBold ? FontWeight.Bold : FontWeight.Normal,
+                Foreground = new SolidColorBrush(ParseOr(string.IsNullOrWhiteSpace(style.TitleColor) ? style.TextColor : style.TitleColor, Colors.Black)),
+                HorizontalAlignment = h, VerticalAlignment = v,
+                Margin = top ? new(14, 10, 14, 0) : new(14, 0, 14, 10),
+                IsHitTestVisible = onEditTitle is not null,
+            };
+            if (onEditTitle is not null)
+            {
+                ToolTip.SetTip(heading, Loc.S("Decor_TitleEditTip"));
+                heading.PointerPressed += (_, e) =>
+                {
+                    if (e.GetCurrentPoint(heading).Properties.IsRightButtonPressed) { onEditTitle(); e.Handled = true; }
+                };
+            }
+            layer.Children.Add(heading);
         }
 
         // Corner logo.
@@ -67,7 +93,7 @@ public static class DiagramDecor
         {
             try
             {
-                var img = new Image { Source = new Bitmap(style.LogoPath), Width = 96, Stretch = Stretch.Uniform, Margin = new(14) };
+                var img = new Image { Source = new Bitmap(style.LogoPath), Width = 96, Stretch = Stretch.Uniform, Margin = new(14), IsHitTestVisible = false };
                 (img.HorizontalAlignment, img.VerticalAlignment) = style.LogoCorner switch
                 {
                     DecorCorner.TopLeft     => (HorizontalAlignment.Left,  VerticalAlignment.Top),

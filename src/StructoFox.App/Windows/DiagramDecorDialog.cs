@@ -17,8 +17,13 @@ public class DiagramDecorDialog : Window
     readonly DiagramStyle _style;
     readonly TextBox  _title     = new() { MinWidth = 280 };
     readonly CheckBox _showTitle = new();
+    readonly ComboBox _titlePos  = Ui.Combo(140);
+    readonly TextBox  _titleSize = new() { Width = 64 };
+    readonly CheckBox _titleBold = new();
+    readonly ColorField _titleColor = new(Loc.S("Decor_TitleColor"));
     readonly TextBox  _watermark = new() { MinWidth = 280 };
     readonly TextBox  _watermarkImg = new() { MinWidth = 280 };
+    readonly TextBox  _wmAngle   = new() { Width = 64 };
     readonly TextBox  _logo      = new() { MinWidth = 280 };
     readonly ComboBox _corner    = Ui.Combo(160);
 
@@ -38,10 +43,21 @@ public class DiagramDecorDialog : Window
         _title.Text = title;
         _showTitle.Content = Loc.S("Decor_ShowTitle");
         _showTitle.IsChecked = style.ShowTitle;
-        ThemeInput(_title); ThemeInput(_watermark); ThemeInput(_watermarkImg); ThemeInput(_logo);
+        ThemeInput(_title); ThemeInput(_titleSize); ThemeInput(_watermark); ThemeInput(_watermarkImg); ThemeInput(_wmAngle); ThemeInput(_logo);
         Ui.Theme(_showTitle, CheckBox.ForegroundProperty, "ContentTextBrush");
+        _titleBold.Content = Loc.S("Decor_TitleBold");
+        _titleBold.IsChecked = style.TitleBold;
+        Ui.Theme(_titleBold, CheckBox.ForegroundProperty, "ContentTextBrush");
+
+        foreach (var p in Enum.GetValues<TitlePos>()) _titlePos.Items.Add(p);
+        _titlePos.SelectedItem = style.TitlePosition;
+        _titleSize.Text = style.TitleFontSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(style.TitleColor)) _titleColor.Inherit = true;
+        else { _titleColor.Inherit = false; try { _titleColor.Color = Color.Parse(style.TitleColor); } catch { } }
+
         _watermark.Text = style.Watermark;
         _watermarkImg.Text = style.WatermarkImage;
+        _wmAngle.Text = style.WatermarkAngle.ToString(System.Globalization.CultureInfo.InvariantCulture);
         _logo.Text = style.LogoPath;
         foreach (var c in Enum.GetValues<DecorCorner>()) _corner.Items.Add(c);
         _corner.SelectedItem = style.LogoCorner;
@@ -66,7 +82,12 @@ public class DiagramDecorDialog : Window
             {
                 Label(Loc.S("Decor_TitleText")), _title,
                 _showTitle,
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
+                    Children = { Label(Loc.S("Decor_TitlePos")), _titlePos, Label(Loc.S("Decor_TitleSize")), _titleSize, _titleBold } },
+                _titleColor,
                 Label(Loc.S("Decor_Watermark")), _watermark,
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
+                    Children = { Label(Loc.S("Decor_WmAngle")), _wmAngle } },
                 Label(Loc.S("Decor_WatermarkImg")),
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _watermarkImg, browseWm, clearWm } },
                 Label(Loc.S("Decor_Logo")),
@@ -82,8 +103,13 @@ public class DiagramDecorDialog : Window
     void Apply()
     {
         _style.ShowTitle      = _showTitle.IsChecked == true;
+        _style.TitlePosition  = _titlePos.SelectedItem is TitlePos tp ? tp : _style.TitlePosition;
+        if (double.TryParse(_titleSize.Text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ts) && ts > 0) _style.TitleFontSize = ts;
+        _style.TitleBold      = _titleBold.IsChecked == true;
+        _style.TitleColor     = _titleColor.Inherit ? "" : HexColorPicker.HexOf(_titleColor.Color);
         _style.Watermark      = (_watermark.Text ?? "").Trim();
         _style.WatermarkImage = (_watermarkImg.Text ?? "").Trim();
+        if (double.TryParse(_wmAngle.Text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var wa)) _style.WatermarkAngle = wa;
         _style.LogoPath       = (_logo.Text ?? "").Trim();
         _style.LogoCorner = _corner.SelectedItem is DecorCorner c ? c : _style.LogoCorner;
         Close((_title.Text ?? "").Trim());
