@@ -27,7 +27,8 @@ public enum FlowSymbol
     PunchedCard,   // punched card (clipped corner)
     MagneticTape,  // tape reel (circle + foot)
     MagneticDisk,  // disk / database (cylinder)
-    StoredData     // stored data (curved sides)
+    StoredData,    // stored data (curved sides)
+    OffPageConnector // off-page connector (home-plate pentagon) — continues the flow on another page
 }
 
 public class FlowNode
