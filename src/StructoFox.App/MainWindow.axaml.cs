@@ -1081,40 +1081,41 @@ public partial class MainWindow : Window
     // The inner content of an entity tile/row, laid out for the chosen view.
     Control EntityRowContent(CodeEntity e, HomeView view)
     {
-        TextBlock Name(double size) { var t = new TextBlock { Text = e.Name, FontSize = size, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center }; Ui.Theme(t, TextBlock.ForegroundProperty, "ContentTextBrush"); return t; }
-        var nsText = string.IsNullOrWhiteSpace(e.Namespace) ? null
-            : "🏷 " + (_nsNames.TryGetValue(e.Namespace, out var nsn) ? nsn : e.Namespace);
+        // The namespace (full nested path) is shown as a small dimmed "App." prefix in front of the bold
+        // name, rather than a separate 🏷 tag — clearer, and reads like the real dotted name.
+        var nsName = string.IsNullOrWhiteSpace(e.Namespace) ? null
+            : (_nsNames.TryGetValue(e.Namespace, out var nsn) ? nsn : e.Namespace);
+
+        Control NamePlate(double size)
+        {
+            var name = new TextBlock { Text = e.Name, FontSize = size, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+            Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
+            if (string.IsNullOrEmpty(nsName)) return name;
+            var prefix = new TextBlock { Text = nsName + ".", FontSize = size, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center };
+            Ui.Theme(prefix, TextBlock.ForegroundProperty, "ContentTextBrush");
+            return new StackPanel { Orientation = Orientation.Horizontal, Children = { prefix, name } };
+        }
 
         switch (view)
         {
             case HomeView.Cards:
-            {
-                var st = new StackPanel { Width = 180, Spacing = 2, Children = { Name(14), Dim(EntitySummary(e), 11) } };
-                if (nsText is not null) st.Children.Add(Dim(nsText, 10));
-                return st;
-            }
+                return new StackPanel { Width = 180, Spacing = 2, Children = { NamePlate(14), Dim(EntitySummary(e), 11) } };
             case HomeView.BigCards:
-            {
-                var st = new StackPanel { Width = 250, Spacing = 3, Children = { Name(16), Dim(EntitySummary(e), 12) } };
-                if (nsText is not null) st.Children.Add(Dim(nsText, 11));
-                return st;
-            }
+                return new StackPanel { Width = 250, Spacing = 3, Children = { NamePlate(16), Dim(EntitySummary(e), 12) } };
             case HomeView.MultiList:
             {
                 var dock = new DockPanel { Width = 240 };
                 var sum = Dim(EntitySummary(e), 11); sum.VerticalAlignment = VerticalAlignment.Center;
                 DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
-                var nm = Name(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
+                var nm = NamePlate(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
                 return dock;
             }
-            default: // DetailList — full-width row: name left, namespace + summary right
+            default: // DetailList — full-width row: name left, summary right
             {
                 var dock = new DockPanel();
-                var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-                if (nsText is not null) right.Children.Add(Dim(nsText, 11));
-                right.Children.Add(Dim(EntitySummary(e), 11));
-                DockPanel.SetDock(right, Dock.Right); dock.Children.Add(right);
-                var nm = Name(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
+                var sum = Dim(EntitySummary(e), 11); sum.VerticalAlignment = VerticalAlignment.Center;
+                DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
+                var nm = NamePlate(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
                 return dock;
             }
         }
@@ -1641,31 +1642,40 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(name)) return;
         name = name.Trim();
 
-        // A bare entity goes in the "(none)" namespace; warn if that name is already taken there so the
-        // user knows they're about to make a twin rather than silently stacking duplicates.
+        // For a new namespace, pick its parent right away (nesting). Cancelling the picker aborts.
+        var nsId = "";
+        if (section == Section.Namespace)
+        {
+            var nsFull = NamespaceService.FullNames(_project);
+            var items = new List<(string, string)> { ("", Loc.S("Sec_NsNone")) };
+            items.AddRange(CodeEntityService.LoadAll(_project, "Namespace")
+                .OrderBy(n => nsFull.GetValueOrDefault(n.Id, n.Name), StringComparer.OrdinalIgnoreCase)
+                .Select(n => (n.Id, nsFull.GetValueOrDefault(n.Id, n.Name))));
+            var picked = await PickListDialog.Show(this, Loc.S("CodeEdit_ParentNamespace"), items);
+            if (picked is null) return;
+            nsId = picked;
+        }
+
+        // Warn if that name is already taken in the chosen namespace, so the user knows they're about to
+        // make a twin rather than silently stacking duplicates.
         if (CodeEntityService.LoadAll(_project, section.ToString())
-                .Any(x => string.IsNullOrEmpty(x.Namespace) && string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)))
+                .Any(x => x.Namespace == nsId && string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
             var res = await MessageDialog.Show(this,
                 string.Format(Loc.S("Sec_DupMsg"), SingularLabel(section), name), Loc.S("Sec_DupTitle"), DialogButtons.YesNo);
             if (res != DialogResult.Yes) return;
         }
 
-        var entity = new CodeEntity { Name = name, EntityType = Enum.Parse<CodeEntityType>(section.ToString()) };
+        var entity = new CodeEntity { Name = name, EntityType = Enum.Parse<CodeEntityType>(section.ToString()), Namespace = nsId };
         CodeEntityService.Save(_project, section.ToString(), entity);
         ShowSection(section);
     }, "NewEntity");
 
-    // Plural heading label for a section.
-    static string PluralLabel(Section s) => s switch
-    {
-        Section.Namespace => "Namespaces", Section.Class => "Classes", Section.Struct => "Structs",
-        Section.Interface => "Interfaces", Section.Enum => "Enums", Section.Function => "Functions",
-        Section.Object => "Objects", Section.Boards => "Boards", _ => "Export",
-    };
+    // Plural heading label for a section (localized).
+    static string PluralLabel(Section s) => Loc.S("SecPl_" + s);
 
-    // Singular label (the entity type name) for "New …" actions.
-    static string SingularLabel(Section s) => s.ToString();
+    // Singular label (the entity type name) for "New …" actions (localized).
+    static string SingularLabel(Section s) => Loc.S("SecSg_" + s);
 
     // ── small helpers ────────────────────────────────────────────────────────
 

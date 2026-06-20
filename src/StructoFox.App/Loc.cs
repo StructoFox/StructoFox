@@ -102,6 +102,13 @@ public static class Loc
         ["Cockpit_ExitTip"] = "Back to projects",
         ["Sec_New"]         = "＋ New {0}",
         ["Sec_NewPrompt"]   = "{0} name:",
+        // Section type labels (singular for "New …", plural for headings/empties).
+        ["SecSg_Boards"] = "Board", ["SecSg_Main"] = "Main", ["SecSg_Namespace"] = "Namespace",
+        ["SecSg_Class"] = "Class", ["SecSg_Struct"] = "Struct", ["SecSg_Interface"] = "Interface",
+        ["SecSg_Enum"] = "Enum", ["SecSg_Function"] = "Function", ["SecSg_Object"] = "Object", ["SecSg_Export"] = "Export",
+        ["SecPl_Boards"] = "Boards", ["SecPl_Main"] = "Main", ["SecPl_Namespace"] = "Namespaces",
+        ["SecPl_Class"] = "Classes", ["SecPl_Struct"] = "Structs", ["SecPl_Interface"] = "Interfaces",
+        ["SecPl_Enum"] = "Enums", ["SecPl_Function"] = "Functions", ["SecPl_Object"] = "Objects", ["SecPl_Export"] = "Export",
         ["Sec_FilterName"]  = "Filter by name…",
         ["Sec_FilterSortTip"] = "Filter by name & sort",
         ["Sec_NsAll"]       = "(all namespaces)",
@@ -320,7 +327,7 @@ public static class Loc
         ["CodeEdit_Title"]         = "Edit {0}",
         ["CodeEdit_Type"]          = "Type",
         ["CodeEdit_Namespace"]     = "Namespace",
-        ["CodeEdit_ParentNamespace"] = "Parent namespace (nesting)",
+        ["CodeEdit_ParentNamespace"] = "Parent namespace",
         ["CodeEdit_Description"]   = "Description",
         ["CodeEdit_Inherits"]      = "Inherits from",
         ["CodeEdit_Implements"]    = "Implements",
@@ -436,6 +443,17 @@ public static class Loc
     // German overlay; any key not listed here quietly falls through to the English baseline.
     static readonly Dictionary<string, string> De = new()
     {
+        // Cockpit / section chrome
+        ["Sec_New"]         = "＋ Neu: {0}",
+        ["Sec_NewPrompt"]   = "{0}-Name:",
+        ["Sec_Empty"]       = "Noch keine {0}.",
+        ["SecSg_Boards"] = "Board", ["SecSg_Main"] = "Main", ["SecSg_Namespace"] = "Namespace",
+        ["SecSg_Class"] = "Klasse", ["SecSg_Struct"] = "Struct", ["SecSg_Interface"] = "Interface",
+        ["SecSg_Enum"] = "Enum", ["SecSg_Function"] = "Funktion", ["SecSg_Object"] = "Objekt", ["SecSg_Export"] = "Export",
+        ["SecPl_Boards"] = "Boards", ["SecPl_Main"] = "Main", ["SecPl_Namespace"] = "Namespaces",
+        ["SecPl_Class"] = "Klassen", ["SecPl_Struct"] = "Structs", ["SecPl_Interface"] = "Interfaces",
+        ["SecPl_Enum"] = "Enums", ["SecPl_Function"] = "Funktionen", ["SecPl_Object"] = "Objekte", ["SecPl_Export"] = "Export",
+
         ["Smoke_Header"]   = "Core-Rauchtest — aus einer Beispielklasse generiertes C#:",
         ["Diag_Title"]     = "Diagramm",
         ["Diag_SketchOf"]  = "Ablauf skizzieren von:\n{0}",
@@ -634,7 +652,7 @@ public static class Loc
         ["CodeEdit_Title"]         = "{0} bearbeiten",
         ["CodeEdit_Type"]          = "Typ",
         ["CodeEdit_Namespace"]     = "Namespace",
-        ["CodeEdit_ParentNamespace"] = "Eltern-Namespace (Verschachtelung)",
+        ["CodeEdit_ParentNamespace"] = "Übergeordneter Namespace",
         ["CodeEdit_Description"]   = "Beschreibung",
         ["CodeEdit_Inherits"]      = "Erbt von",
         ["CodeEdit_Implements"]    = "Implementiert",
