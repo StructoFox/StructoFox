@@ -596,19 +596,32 @@ public class FlowChartWindow : Window
     void AddNode(FlowNodeKind kind, FlowSymbol sym = FlowSymbol.Auto)
     {
         bool offPage = sym == FlowSymbol.OffPageConnector;
+        var at = SpawnPoint();
         var node = new FlowNode
         {
             Kind   = kind,
             Symbol = sym,
             Text   = DefaultText(kind),
-            X      = 80 + _data.Nodes.Count % 6 * 30,
-            Y      = 80 + _data.Nodes.Count % 6 * 30,
+            X      = at.X,
+            Y      = at.Y,
             Width  = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
             Height = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind is FlowNodeKind.Start or FlowNodeKind.End or FlowNodeKind.Connector ? 46 : 56,
         };
         _data.Nodes.Add(node);
         Save();
         RenderNode(node);
+    }
+
+    // A spawn position inside the currently visible viewport (accounts for scroll + zoom), with a small
+    // cascade so successive additions don't stack exactly — so new nodes always appear in view.
+    Point SpawnPoint()
+    {
+        double cascade = _data.Nodes.Count % 6 * 30;
+        if (_scroll is null) return new Point(80 + cascade, 80 + cascade);
+        double z = _zoom <= 0 ? 1 : _zoom;
+        double x = _scroll.Offset.X / z + 40 + cascade;
+        double y = _scroll.Offset.Y / z + 40 + cascade;
+        return new Point(Snap(x), Snap(y));
     }
 
     // The starter text a freshly-added node of each kind gets.

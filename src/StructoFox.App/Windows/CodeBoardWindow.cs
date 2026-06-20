@@ -1207,10 +1207,22 @@ public class CodeBoardWindow : Window
         var picked = await PickExistingEntity(available);
         if (picked is null) return;
 
-        var pos = new CodeCardPosition { X = 80, Y = 80 };
+        var at = SpawnPoint();
+        var pos = new CodeCardPosition { X = at.X, Y = at.Y };
         _boardData.Positions[picked.Id] = pos;
         Save();
         RenderCard(picked, pos);
+    }
+
+    // A spawn position inside the currently visible viewport (accounts for scroll + zoom), so newly
+    // added cards always appear in view rather than at a fixed off-screen corner.
+    Point SpawnPoint()
+    {
+        if (_scroll is null) return new Point(80, 80);
+        double z = _zoom <= 0 ? 1 : _zoom;
+        double x = _scroll.Offset.X / z + 40 + _boardData.Positions.Count % 6 * 30;
+        double y = _scroll.Offset.Y / z + 40 + _boardData.Positions.Count % 6 * 30;
+        return new Point(Snap(x), Snap(y));
     }
 
     // A small modal list picker for entities not yet on the board.
