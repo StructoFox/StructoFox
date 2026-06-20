@@ -855,10 +855,11 @@ public class FlowChartWindow : Window
         var b = NodeRect(conn.ToId);
         if (a is null || b is null) return;
 
-        // DIN flow lines route orthogonally from edge-midpoints; the diagonal style is opt-in.
+        // DIN flow lines route orthogonally from edge-midpoints, steering ≥1 grid clear of other nodes;
+        // the diagonal style is opt-in.
         var pts = _data.DiagonalLines
             ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
-            : OrthoRoute(a.Value, b.Value);
+            : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId);
 
         var brush   = new SolidColorBrush(ParseColor(conn.LineColor));
         var visuals = new List<Control>();
@@ -1235,6 +1236,131 @@ public class FlowChartWindow : Window
             double midX = (exit.X + entry.X) / 2;
             return new() { exit, new(midX, exit.Y), new(midX, entry.Y), entry };
         }
+    }
+
+    // Orthogonal route that steers clear of other nodes. Starts from the simple Z-route; if that already
+    // misses every node it's kept (cleanest). Otherwise a grid A* (one grid-unit clearance, turn-penalised
+    // for straight runs) routes around them. Falls back to the simple route if the area is huge or blocked.
+    List<Point> OrthoRouteAvoiding(Rect s, Rect t, string fromId, string toId)
+    {
+        var simple = OrthoRoute(s, t);
+        double g = _data.GridSize >= 4 ? _data.GridSize : 10;
+
+        var obstacles = new List<Rect>();
+        foreach (var n in _data.Nodes)
+        {
+            if (n.Id == fromId || n.Id == toId) continue;
+            obstacles.Add(new Rect(n.X, n.Y, n.Width, n.Height).Inflate(g));   // ≥1 grid clearance
+        }
+        if (obstacles.Count == 0 || !PolyHitsAny(simple, obstacles)) return simple;
+
+        var start = simple[0];
+        var goal  = simple[^1];
+        double pad = 5 * g;
+        double minX = Math.Max(0, Math.Min(start.X, goal.X) - pad);
+        double minY = Math.Max(0, Math.Min(start.Y, goal.Y) - pad);
+        double maxX = Math.Max(start.X, goal.X) + pad;
+        double maxY = Math.Max(start.Y, goal.Y) + pad;
+
+        int cols = (int)Math.Round((maxX - minX) / g) + 1;
+        int rows = (int)Math.Round((maxY - minY) / g) + 1;
+        if (cols < 2 || rows < 2 || (long)cols * rows > 40000) return simple;
+
+        var blk = new bool[cols, rows];
+        for (int c = 0; c < cols; c++)
+            for (int r = 0; r < rows; r++)
+            {
+                var p = new Point(minX + c * g, minY + r * g);
+                foreach (var o in obstacles) if (o.Contains(p)) { blk[c, r] = true; break; }
+            }
+
+        int Cc(double v, int max) => Math.Clamp((int)Math.Round(v), 0, max);
+        int sc = Cc((start.X - minX) / g, cols - 1), sr = Cc((start.Y - minY) / g, rows - 1);
+        int gc = Cc((goal.X  - minX) / g, cols - 1), gr = Cc((goal.Y  - minY) / g, rows - 1);
+        blk[sc, sr] = false; blk[gc, gr] = false;   // endpoints must be enterable
+
+        var cells = AStar(blk, cols, rows, sc, sr, gc, gr);
+        if (cells is null) return simple;
+
+        // Cells → points, with the exact node-edge endpoints, then drop redundant collinear points.
+        var pts = new List<Point> { start };
+        foreach (var (c, r) in cells) pts.Add(new Point(minX + c * g, minY + r * g));
+        pts.Add(goal);
+        return Simplify(pts);
+    }
+
+    // 4-direction A* with a turn penalty (prefers long straight runs). Returns cell path or null.
+    static List<(int c, int r)>? AStar(bool[,] blk, int cols, int rows, int sc, int sr, int gc, int gr)
+    {
+        const double turn = 2.0;
+        int Key(int c, int r, int d) => (r * cols + c) * 5 + (d + 1);   // d: -1 start, 0..3 dirs
+        int[] dx = { 1, -1, 0, 0 }, dy = { 0, 0, 1, -1 };
+
+        var gScore = new Dictionary<int, double>();
+        var came   = new Dictionary<int, (int c, int r, int d)>();
+        var open   = new PriorityQueue<(int c, int r, int d), double>();
+        int sKey = Key(sc, sr, -1);
+        gScore[sKey] = 0;
+        open.Enqueue((sc, sr, -1), Math.Abs(gc - sc) + Math.Abs(gr - sr));
+
+        while (open.TryDequeue(out var cur, out _))
+        {
+            if (cur.c == gc && cur.r == gr)
+            {
+                var path = new List<(int, int)>();
+                var node = cur;
+                while (!(node.c == sc && node.r == sr && node.d == -1))
+                {
+                    path.Add((node.c, node.r));
+                    node = came[Key(node.c, node.r, node.d)];
+                }
+                path.Reverse();
+                return path;
+            }
+            double cg = gScore[Key(cur.c, cur.r, cur.d)];
+            for (int d = 0; d < 4; d++)
+            {
+                int nc = cur.c + dx[d], nr = cur.r + dy[d];
+                if (nc < 0 || nr < 0 || nc >= cols || nr >= rows || blk[nc, nr]) continue;
+                double ng = cg + 1 + (cur.d != -1 && d != cur.d ? turn : 0);
+                int nk = Key(nc, nr, d);
+                if (gScore.TryGetValue(nk, out var old) && old <= ng) continue;
+                gScore[nk] = ng;
+                came[nk] = cur;
+                open.Enqueue((nc, nr, d), ng + Math.Abs(gc - nc) + Math.Abs(gr - nr));
+            }
+        }
+        return null;
+    }
+
+    // Drops middle points that lie on a straight run, leaving only the corner vertices.
+    static List<Point> Simplify(List<Point> pts)
+    {
+        if (pts.Count <= 2) return pts;
+        var outp = new List<Point> { pts[0] };
+        for (int i = 1; i < pts.Count - 1; i++)
+        {
+            var a = outp[^1]; var b = pts[i]; var c = pts[i + 1];
+            bool collinear = (Math.Abs(a.X - b.X) < 0.5 && Math.Abs(b.X - c.X) < 0.5)
+                          || (Math.Abs(a.Y - b.Y) < 0.5 && Math.Abs(b.Y - c.Y) < 0.5);
+            if (!collinear) outp.Add(b);
+        }
+        outp.Add(pts[^1]);
+        return outp;
+    }
+
+    // Whether any axis-aligned segment of a polyline crosses any obstacle rectangle.
+    static bool PolyHitsAny(List<Point> pts, List<Rect> obstacles)
+    {
+        for (int i = 0; i < pts.Count - 1; i++)
+        {
+            var p = pts[i]; var q = pts[i + 1];
+            double x0 = Math.Min(p.X, q.X), x1 = Math.Max(p.X, q.X);
+            double y0 = Math.Min(p.Y, q.Y), y1 = Math.Max(p.Y, q.Y);
+            foreach (var o in obstacles)
+                if (x1 >= o.Left && x0 <= o.Right && y1 >= o.Top && y0 <= o.Bottom) return true;
+        }
+        return false;
     }
 
     // The longest segment of a polyline — where a connection label reads best.
