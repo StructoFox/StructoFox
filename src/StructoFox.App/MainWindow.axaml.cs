@@ -157,6 +157,17 @@ public partial class MainWindow : Window
         pal.Click += (_, _) => new PaletteEditorWindow().Show();
         cm.Items.Add(pal);
 
+        // Language: a radio-style pick per built-in language, applied live.
+        var lang = new MenuItem { Header = Loc.S("Menu_Language") };
+        foreach (var (code, name) in Loc.Builtins)
+        {
+            var c = code;
+            var mi = new MenuItem { Header = name, ToggleType = MenuItemToggleType.Radio, IsChecked = Loc.Lang == code };
+            mi.Click += (_, _) => SetLanguage(c);
+            lang.Items.Add(mi);
+        }
+        cm.Items.Add(lang);
+
         // Options: norm-compliance toggles + a checkbox per suppressible message.
         var options = new MenuItem { Header = Loc.S("Menu_Options") };
 
@@ -185,6 +196,16 @@ public partial class MainWindow : Window
 
         cm.Open(anchor);
     }
+
+    // Switches language and rebuilds the whole shell so every string re-resolves immediately. Already-open
+    // child windows keep their old language until reopened (they read strings at construction).
+    void SetLanguage(string code) => CrashHandler.Safe(() =>
+    {
+        if (Loc.Lang == code) return;
+        Loc.SetLanguage(code);
+        Content = BuildShell();
+        if (_project is null) ShowHome(); else ShowSection(_section);
+    }, "SetLanguage");
 
     // A small themed About box: fox, name, version and tagline (à la Theminator / ClaudetRelay).
     void ShowAbout() => CrashHandler.Safe(() =>

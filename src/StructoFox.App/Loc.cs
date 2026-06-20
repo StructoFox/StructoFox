@@ -24,6 +24,12 @@ public static class Loc
     {
         try
         {
+            // Active language: the user's saved choice if any, otherwise the OS culture
+            // (German system → German UI), otherwise English. This is why everything used to
+            // come out English — nothing ever set Lang away from its "en" default.
+            var pref = AppSettings.Lang;
+            Lang = !string.IsNullOrWhiteSpace(pref) ? pref : DetectCulture();
+
             Directory.CreateDirectory(LangDir);
             ExportIfMissing("en", En);
             ExportIfMissing("de", De);
@@ -31,6 +37,26 @@ public static class Loc
         }
         catch { /* localization is best-effort; built-ins remain the fallback */ }
     }
+
+    /// <summary>Switches the active UI language, persists the choice and reloads its overlay. Callers
+    /// rebuild their UI afterwards to re-resolve every string.</summary>
+    public static void SetLanguage(string code)
+    {
+        Lang = code;
+        AppSettings.Lang = code;
+        _overlay = LoadOverlay(code);
+    }
+
+    // Maps the OS UI culture to one of our supported language codes (German → "de", else "en").
+    static string DetectCulture()
+    {
+        try { return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de" ? "de" : "en"; }
+        catch { return "en"; }
+    }
+
+    /// <summary>The languages StructoFox ships built-in (code → display name), for the switcher.</summary>
+    public static IReadOnlyList<(string Code, string Name)> Builtins { get; } =
+        new[] { ("en", "English"), ("de", "Deutsch") };
 
     // Writes a language table to Languages/<lang>.json the first time, as a base for translators.
     static void ExportIfMissing(string lang, Dictionary<string, string> dict)
@@ -391,6 +417,7 @@ public static class Loc
         // App menu
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "About StructoFox",
+        ["Menu_Language"]   = "🌐 Language",
         ["Menu_Options"]    = "⚙ Options",
         ["Opt_NormWarn"]    = "Warn about non-DIN elements",
         ["Opt_NormMark"]    = "Mark non-DIN elements (N̶)",
@@ -703,6 +730,7 @@ public static class Loc
         // App-Menü
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "Über StructoFox",
+        ["Menu_Language"]   = "🌐 Sprache",
         ["Menu_Options"]    = "⚙ Optionen",
         ["Opt_NormWarn"]    = "Meldung wenn nicht normgerecht",
         ["Opt_NormMark"]    = "Markierung wenn nicht normgerecht (N̶)",
