@@ -230,7 +230,14 @@ public class CodeBoardWindow : Window
         panel.Children.Add(show);
 
         var snap = new CheckBox { Content = Loc.S("Grid_Snap"), IsChecked = _boardData.SnapToGrid };
-        snap.IsCheckedChanged += (_, _) => { _boardData.SnapToGrid = snap.IsChecked == true; Save(); };
+        snap.IsCheckedChanged += (_, _) =>
+        {
+            _boardData.SnapToGrid = snap.IsChecked == true;
+            // Re-place every card's ports so they (un)snap to the grid immediately, then redraw links.
+            foreach (var id in _cards.Keys.ToList()) UpdatePortPositions(id);
+            RenderAllRelations();
+            Save();
+        };
         panel.Children.Add(snap);
 
         var styleCombo = Ui.Combo();
@@ -320,9 +327,6 @@ public class CodeBoardWindow : Window
         _canvas.Children.Add(_gridRect);
     }
 
-    // Snaps a card's top-left so its CENTRE lands on a grid line (centre-aligned → straight links).
-    double SnapCentered(double topLeft, double size) =>
-        !_boardData.SnapToGrid || _boardData.GridSize < 1 ? topLeft : Snap(topLeft + size / 2) - size / 2;
 
     void ToggleConnectMode()
     {
@@ -402,9 +406,10 @@ public class CodeBoardWindow : Window
         {
             if (!dragging) return;
             var pt = e.GetPosition(_canvas);
-            // Snap the card's CENTRE to the grid so centre-aligned cards give straight links.
-            var nx = SnapCentered(Math.Max(0, pt.X - offset.X), card.Bounds.Width);
-            var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), card.Bounds.Height);
+            // Corner-snap the card; the ports themselves are then snapped onto grid intersections
+            // (see PlacePortDots), so equally-placed ports on two cards line up for straight links.
+            var nx = Snap(Math.Max(0, pt.X - offset.X));
+            var ny = Snap(Math.Max(0, pt.Y - offset.Y));
             Canvas.SetLeft(card, nx);
             Canvas.SetTop(card,  ny);
             GrowCanvasFor(nx, ny, card.Bounds.Width, card.Bounds.Height);
@@ -624,23 +629,46 @@ public class CodeBoardWindow : Window
 
     void PlacePortDots(CodeEntity entity, List<CodePort> ports, double cardX, double cardY, double cardW, double cardH, PortOrientation orientation, bool isInput)
     {
+        bool snap = _boardData.SnapToGrid && _boardData.GridSize >= 1;
+        double g = _boardData.GridSize;
         int n = ports.Count;
+        double lastVar = double.NegativeInfinity;   // keeps snapped ports on distinct grid lines
         for (int i = 0; i < n; i++)
         {
             var dot = GetOrCreatePortDot(entity.Id, ports[i]);
-            double cx, cy;
+            // Port CENTRE: fixed on the edge across one axis, evenly distributed along the other.
+            double centerX, centerY;
             if (orientation == PortOrientation.Horizontal)
             {
-                cx = isInput ? cardX - PortRadius : cardX + cardW - PortRadius;
-                cy = cardY + cardH * (i + 1.0) / (n + 1.0) - PortRadius;
+                centerX = isInput ? cardX : cardX + cardW;
+                centerY = cardY + cardH * (i + 1.0) / (n + 1.0);
             }
             else
             {
-                cx = cardX + cardW * (i + 1.0) / (n + 1.0) - PortRadius;
-                cy = isInput ? cardY - PortRadius : cardY + cardH - PortRadius;
+                centerX = cardX + cardW * (i + 1.0) / (n + 1.0);
+                centerY = isInput ? cardY : cardY + cardH;
             }
-            Canvas.SetLeft(dot, cx);
-            Canvas.SetTop(dot,  cy);
+
+            // Snap the centre onto a grid intersection; nudge the distributing axis to the next line if a
+            // collision would stack two ports, so they stay on distinct grid lines.
+            if (snap)
+            {
+                centerX = Snap(centerX);
+                centerY = Snap(centerY);
+                if (orientation == PortOrientation.Horizontal)
+                {
+                    if (centerY <= lastVar) centerY = lastVar + g;
+                    lastVar = centerY;
+                }
+                else
+                {
+                    if (centerX <= lastVar) centerX = lastVar + g;
+                    lastVar = centerX;
+                }
+            }
+
+            Canvas.SetLeft(dot, centerX - PortRadius);
+            Canvas.SetTop(dot,  centerY - PortRadius);
         }
     }
 
