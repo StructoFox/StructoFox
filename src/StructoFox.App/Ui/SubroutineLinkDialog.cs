@@ -30,8 +30,10 @@ public static class SubroutineLinkDialog
         // Namespace picker (id-based), shared by both modes. "(none)" carries the empty id.
         var nsCombo = Ui.Combo();
         nsCombo.Items.Add(new ComboItem(Loc.S("Sec_NsNone"), ""));
-        foreach (var n in CodeEntityService.LoadAll(projFolder, "Namespace").OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
-            nsCombo.Items.Add(new ComboItem(n.Name, n.Id));
+        var nsFull = NamespaceService.FullNames(projFolder);
+        foreach (var n in CodeEntityService.LoadAll(projFolder, "Namespace")
+                     .OrderBy(n => nsFull.GetValueOrDefault(n.Id, n.Name), StringComparer.OrdinalIgnoreCase))
+            nsCombo.Items.Add(new ComboItem(nsFull.GetValueOrDefault(n.Id, n.Name), n.Id));
         nsCombo.SelectedIndex = 0;
         string NsId() => (nsCombo.SelectedItem as ComboItem)?.Id ?? "";
 

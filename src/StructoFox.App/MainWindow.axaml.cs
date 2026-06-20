@@ -981,8 +981,12 @@ public partial class MainWindow : Window
         nsCombo.Items.Add(new ComboItem(Loc.S("Sec_NsAll"), nsAll));
         nsCombo.Items.Add(new ComboItem(Loc.S("Sec_NsNone"), ""));
         if (_project is not null)
-            foreach (var n in CodeEntityService.LoadAll(_project, "Namespace").OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
-                nsCombo.Items.Add(new ComboItem(n.Name, n.Id));
+        {
+            var nsFull = NamespaceService.FullNames(_project);
+            foreach (var n in CodeEntityService.LoadAll(_project, "Namespace")
+                         .OrderBy(n => nsFull.GetValueOrDefault(n.Id, n.Name), StringComparer.OrdinalIgnoreCase))
+                nsCombo.Items.Add(new ComboItem(nsFull.GetValueOrDefault(n.Id, n.Name), n.Id));
+        }
         var curId = _secNamespace ?? nsAll;
         nsCombo.SelectedItem = nsCombo.Items.OfType<ComboItem>().FirstOrDefault(c => c.Id == curId) ?? nsCombo.Items[0];
         nsCombo.SelectionChanged += (_, _) =>
@@ -1036,8 +1040,7 @@ public partial class MainWindow : Window
     // Re-renders just the list region for the current filter + sort (so the bar keeps focus).
     void RefreshSecList(Section section) => CrashHandler.Safe(() =>
     {
-        _nsNames = _project is null ? new()
-            : CodeEntityService.LoadAll(_project, "Namespace").GroupBy(n => n.Id).ToDictionary(g => g.Key, g => g.First().Name);
+        _nsNames = _project is null ? new() : NamespaceService.FullNames(_project);
         var entities = _project is null ? new() : CodeEntityService.LoadAll(_project, section.ToString());
         if (section == Section.Function) entities = entities.Where(e => !e.IsEntryPoint).ToList();
         entities = entities.Where(e =>

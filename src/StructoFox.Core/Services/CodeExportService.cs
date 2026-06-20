@@ -41,11 +41,14 @@ public static class CodeExportService
         var byId = all.ToDictionary(e => e.Id);
         string Name(string id) => byId.TryGetValue(id, out var e) ? e.Name : "";
 
-        // Namespaces are referenced by id; resolve id → name (from the set and/or disk). Legacy values
-        // that aren't an id fall back to being used as a literal name. Namespace entities aren't emitted.
-        var nsById = all.Where(e => e.EntityType == CodeEntityType.Namespace).ToDictionary(e => e.Id, e => e.Name);
+        // Namespaces are referenced by id; resolve id → full dotted name (nested namespaces). Sources:
+        // the entity set plus disk. Legacy values that aren't an id fall back to a literal name. The
+        // Namespace entities themselves aren't emitted.
+        var nsEntities = all.Where(e => e.EntityType == CodeEntityType.Namespace).ToList();
         if (projFolder is not null)
-            foreach (var n in CodeEntityService.LoadAll(projFolder, "Namespace")) nsById[n.Id] = n.Name;
+            nsEntities = nsEntities.Concat(CodeEntityService.LoadAll(projFolder, "Namespace"))
+                                   .GroupBy(n => n.Id).Select(g => g.Last()).ToList();
+        var nsById = NamespaceService.FullNames(nsEntities);
         string NsName(CodeEntity e) => string.IsNullOrEmpty(e.Namespace) ? "" : (nsById.TryGetValue(e.Namespace, out var nm) ? nm : e.Namespace.Trim());
         all = all.Where(e => e.EntityType != CodeEntityType.Namespace).ToList();
 
