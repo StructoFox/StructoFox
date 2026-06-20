@@ -76,9 +76,16 @@ public class CodeEntityEditorDialog : Window
         form.Children.Add(typeCombo);
 
         // Namespace
+        // Namespace is chosen from the ones managed in the Namespaces tab (a combo, not free text).
         form.Children.Add(FieldLabel(Loc.S("CodeEdit_Namespace")));
-        var nsBox = EditorBox(entity.Namespace);
-        form.Children.Add(nsBox);
+        var nsCombo = Ui.Combo();
+        nsCombo.Items.Add(Loc.S("Sec_NsNone"));
+        var nsNames = CodeEntityService.LoadAll(_projFolder, "Namespace").Select(n => n.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        if (!string.IsNullOrWhiteSpace(entity.Namespace) && !nsNames.Contains(entity.Namespace)) nsNames.Insert(0, entity.Namespace);  // keep a legacy value
+        foreach (var n in nsNames) nsCombo.Items.Add(n);
+        nsCombo.SelectedItem = string.IsNullOrWhiteSpace(entity.Namespace) ? Loc.S("Sec_NsNone") : entity.Namespace;
+        form.Children.Add(nsCombo);
 
         // Description
         form.Children.Add(FieldLabel(Loc.S("CodeEdit_Description")));
@@ -436,7 +443,7 @@ public class CodeEntityEditorDialog : Window
 
             entity.Name         = (nameBox.Text ?? "").Trim();
             entity.EntityType   = typeCombo.SelectedItem is CodeEntityType et ? et : entity.EntityType;
-            entity.Namespace    = (nsBox.Text ?? "").Trim();
+            entity.Namespace    = nsCombo.SelectedItem is string ns && ns != Loc.S("Sec_NsNone") ? ns : "";
             entity.Description  = (descBox.Text ?? "").Trim();
             entity.BaseClassId  = (baseCombo.SelectedItem as ComboItem)?.Id ?? "";
             entity.ImplementsIds = implChecks.Where(c => c.Cb.IsChecked == true).Select(c => c.Id).ToList();

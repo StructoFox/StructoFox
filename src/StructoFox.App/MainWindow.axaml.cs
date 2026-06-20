@@ -955,8 +955,9 @@ public partial class MainWindow : Window
         nsCombo.Items.Add(Loc.S("Sec_NsAll"));
         nsCombo.Items.Add(Loc.S("Sec_NsNone"));
         var spaces = _project is null ? new List<string>()
-            : LoadAllEntities(_project).Values.Select(e => e.Namespace).Where(n => !string.IsNullOrWhiteSpace(n))
-              .Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            : CodeEntityService.LoadAll(_project, "Namespace").Select(n => n.Name)
+              .Concat(LoadAllEntities(_project).Values.Select(e => e.Namespace))
+              .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var ns in spaces) nsCombo.Items.Add(ns);
         nsCombo.SelectedItem = _secNamespace is null ? Loc.S("Sec_NsAll") : _secNamespace == "" ? Loc.S("Sec_NsNone") : (spaces.Contains(_secNamespace) ? _secNamespace : Loc.S("Sec_NsAll"));
         nsCombo.SelectionChanged += (_, _) =>
@@ -1052,11 +1053,17 @@ public partial class MainWindow : Window
     {
         if (_project is null) return;
         var ids = _selEntities.Contains(e.Id) && _selEntities.Count > 0 ? _selEntities.ToList() : new() { e.Id };
-        var ns = await PromptDialog.Show(this, Loc.S("Sec_NsPrompt"), e.Namespace, Loc.S("Sec_SetNs"));
+
+        // Pick from the namespaces managed in the Namespaces tab (+ "(none)").
+        var items = new List<(string, string)> { ("", Loc.S("Sec_NsNone")) };
+        items.AddRange(CodeEntityService.LoadAll(_project, "Namespace").Select(n => n.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .Select(n => (n, n)));
+        var ns = await PickListDialog.Show(this, Loc.S("Sec_SetNs"), items);
         if (ns is null) return;
         foreach (var ent in CodeEntityService.LoadAll(_project, section.ToString()))
-            if (ids.Contains(ent.Id)) { ent.Namespace = ns.Trim(); CodeEntityService.Save(_project, section.ToString(), ent); }
-        ShowSection(section);   // rebuild so the namespace dropdown picks up any new value
+            if (ids.Contains(ent.Id)) { ent.Namespace = ns; CodeEntityService.Save(_project, section.ToString(), ent); }
+        ShowSection(section);
     }, "AssignNamespace");
 
     // The inner content of an entity tile/row, laid out for the chosen view.
