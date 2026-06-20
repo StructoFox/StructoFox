@@ -56,6 +56,7 @@ public partial class MainWindow : Window
     // Cockpit entity-section filter state.
     string  _secFilter = "";
     string? _secNamespace = null;          // null = all namespaces, "" = no namespace, else the name
+    HomeView _secView = HomeView.DetailList;
     ContentControl _secList = new();       // the filtered list region (re-rendered without rebuilding the bar)
 
     // Builds the shell window and shows the project browser.
@@ -909,10 +910,23 @@ public partial class MainWindow : Window
             RefreshSecList(section);
         };
 
+        // View selector (same four modes as the home page).
+        var viewBtn = Ui.Btn(ViewIcon(_secView) + "  ▾", "View"); viewBtn.Padding = new(10, 4);
+        viewBtn.Click += (_, _) =>
+        {
+            var cm = new ContextMenu();
+            void Item(string label, HomeView v) { var mi = new MenuItem { Header = label }; mi.Click += (_, _) => { _secView = v; RefreshSecList(section); }; cm.Items.Add(mi); }
+            Item("▦  Kacheln", HomeView.Cards);
+            Item("▣  Große Kacheln", HomeView.BigCards);
+            Item("≣  Einspaltige Liste (Details)", HomeView.DetailList);
+            Item("☷  Mehrspaltige Liste", HomeView.MultiList);
+            cm.Open(viewBtn);
+        };
+
         return new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
-            Children = { nameBox, new TextBlock { Text = Loc.S("CodeEdit_Namespace"), VerticalAlignment = VerticalAlignment.Center }, nsCombo },
+            Children = { nameBox, new TextBlock { Text = Loc.S("CodeEdit_Namespace"), VerticalAlignment = VerticalAlignment.Center }, nsCombo, viewBtn },
         };
     }
 
@@ -935,9 +949,10 @@ public partial class MainWindow : Window
         if (entities.Count == 0)
             return Note(string.Format(Loc.S("Sec_Empty"), PluralLabel(section)));
 
-        var list = new StackPanel { Spacing = 4 };
+        // Single-column for the detail list; a wrap grid for the (big) card and multi-column views.
+        Panel list = _secView == HomeView.DetailList ? new StackPanel { Spacing = 4 } : new WrapPanel();
         foreach (var e in entities.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
-            list.Children.Add(EntityRow(e, section));
+            list.Children.Add(EntityRow(e, section, _secView));
 
         var overlay = new Canvas { IsHitTestVisible = false };
         var holder  = new Grid { Background = Brushes.Transparent };
@@ -959,21 +974,55 @@ public partial class MainWindow : Window
         ShowSection(section);   // rebuild so the namespace dropdown picks up any new value
     }, "AssignNamespace");
 
-    // One entity row: name + summary. Left-click selects (Ctrl toggles, Shift ranges), double-click or
+    // The inner content of an entity tile/row, laid out for the chosen view.
+    Control EntityRowContent(CodeEntity e, HomeView view)
+    {
+        TextBlock Name(double size) { var t = new TextBlock { Text = e.Name, FontSize = size, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center }; Ui.Theme(t, TextBlock.ForegroundProperty, "ContentTextBrush"); return t; }
+        var nsText = string.IsNullOrWhiteSpace(e.Namespace) ? null : "🏷 " + e.Namespace;
+
+        switch (view)
+        {
+            case HomeView.Cards:
+            {
+                var st = new StackPanel { Width = 180, Spacing = 2, Children = { Name(14), Dim(EntitySummary(e), 11) } };
+                if (nsText is not null) st.Children.Add(Dim(nsText, 10));
+                return st;
+            }
+            case HomeView.BigCards:
+            {
+                var st = new StackPanel { Width = 250, Spacing = 3, Children = { Name(16), Dim(EntitySummary(e), 12) } };
+                if (nsText is not null) st.Children.Add(Dim(nsText, 11));
+                return st;
+            }
+            case HomeView.MultiList:
+            {
+                var dock = new DockPanel { Width = 240 };
+                var sum = Dim(EntitySummary(e), 11); sum.VerticalAlignment = VerticalAlignment.Center;
+                DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
+                var nm = Name(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
+                return dock;
+            }
+            default: // DetailList — full-width row: name left, namespace + summary right
+            {
+                var dock = new DockPanel();
+                var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+                if (nsText is not null) right.Children.Add(Dim(nsText, 11));
+                right.Children.Add(Dim(EntitySummary(e), 11));
+                DockPanel.SetDock(right, Dock.Right); dock.Children.Add(right);
+                var nm = Name(13); DockPanel.SetDock(nm, Dock.Left); dock.Children.Add(nm);
+                return dock;
+            }
+        }
+    }
+
+    // One entity tile/row. Left-click selects (Ctrl toggles, Shift ranges), double-click or
     // right-click → Edit opens it; delete sits below a separator in the menu to dodge mis-clicks.
-    Control EntityRow(CodeEntity e, Section section)
+    Control EntityRow(CodeEntity e, Section section, HomeView view)
     {
         var row = new Border { Padding = new(10, 7), CornerRadius = new(6), BorderThickness = new(2), BorderBrush = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
         Ui.Theme(row, Border.BackgroundProperty, "ControlBgBrush");
-
-        var name = new TextBlock { Text = e.Name, FontSize = 13, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-        Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
-        var sum = Dim(EntitySummary(e), 11); sum.VerticalAlignment = VerticalAlignment.Center;
-
-        var dock = new DockPanel();
-        DockPanel.SetDock(sum, Dock.Right); dock.Children.Add(sum);
-        DockPanel.SetDock(name, Dock.Left); dock.Children.Add(name);
-        row.Child = dock;
+        if (view is HomeView.Cards or HomeView.BigCards or HomeView.MultiList) row.Margin = new(0, 0, 8, 8);
+        row.Child = EntityRowContent(e, view);
         _sectionRows.Add((e, row));
 
         var pressPos = default(Point);
