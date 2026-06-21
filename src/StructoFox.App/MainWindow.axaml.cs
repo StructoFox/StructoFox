@@ -135,19 +135,19 @@ public partial class MainWindow : Window
     {
         var cm = new ContextMenu();
 
-        var home = new MenuItem { Header = "🏠 Projects" };
+        var home = new MenuItem { Header = Loc.S("Menu_Home") };
         home.Click += (_, _) => ShowHome();
         cm.Items.Add(home);
         if (_project is not null)
         {
-            var close = new MenuItem { Header = "Close project" };
+            var close = new MenuItem { Header = Loc.S("Menu_CloseProject") };
             close.Click += (_, _) => ShowHome();
             cm.Items.Add(close);
         }
 
         cm.Items.Add(new Separator());
 
-        var theme = new MenuItem { Header = "🎨 Theme" };
+        var theme = new MenuItem { Header = Loc.S("Menu_Theme") };
         foreach (var (name, path) in ThemeManager.Available())
         {
             var p = path;
@@ -157,7 +157,7 @@ public partial class MainWindow : Window
         }
         cm.Items.Add(theme);
 
-        var pal = new MenuItem { Header = "Palette editor…" };
+        var pal = new MenuItem { Header = Loc.S("Menu_Palette") };
         pal.Click += (_, _) => new PaletteEditorWindow().Show();
         cm.Items.Add(pal);
 
@@ -507,7 +507,7 @@ public partial class MainWindow : Window
         Ui.Theme(card, Border.BorderBrushProperty, "AccentBgBrush");
         card.BorderThickness = new(1);
 
-        var t1 = new TextBlock { Text = "Recent", FontSize = 13, Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Center };
+        var t1 = new TextBlock { Text = Loc.S("Home_RecentLabel"), FontSize = 13, Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Center };
         Ui.Theme(t1, TextBlock.ForegroundProperty, "ContentTextBrush");
         var t2 = new TextBlock { Text = "No projects", FontSize = 18, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center };
         Ui.Theme(t2, TextBlock.ForegroundProperty, "ContentTextBrush");

@@ -458,6 +458,11 @@ public static class Loc
         // App menu
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "About StructoFox",
+        ["Menu_Home"]       = "🏠 Projects",
+        ["Menu_CloseProject"] = "Close project",
+        ["Menu_Theme"]      = "🎨 Theme",
+        ["Menu_Palette"]    = "Palette editor…",
+        ["Home_RecentLabel"] = "Recent",
         ["Menu_Language"]   = "🌐 Language",
         ["Menu_Options"]    = "⚙ Options",
         ["Opt_NormWarn"]    = "Warn about non-DIN elements",
@@ -476,18 +481,29 @@ public static class Loc
     // German overlay; any key not listed here quietly falls through to the English baseline.
     static readonly Dictionary<string, string> De = new()
     {
-        // Sketchbook (Einzel-Diagramme ohne Projekt)
-        ["Sketch_Nav"]      = "✏  Skizzenbuch",
-        ["Sketch_NavTip"]   = "Einzel-Diagramme ohne Projekt (in Dokumente/StructoFox/Sketchbook)",
-        ["Sketch_Title"]    = "Skizzenbuch",
+        // Entwürfe (Einzel-Diagramme ohne Projekt)
+        ["Sketch_Nav"]      = "✏  Entwürfe",
+        ["Sketch_NavTip"]   = "Einzel-Diagramme ohne Projekt (Ordner: Dokumente/StructoFox/Sketchbook)",
+        ["Sketch_Title"]    = "Entwürfe",
         ["Sketch_NewPap"]   = "＋ 🔁 PAP",
         ["Sketch_NewStruct"] = "＋ ▦ Struktogramm",
         ["Sketch_NewBoard"] = "＋ 🗺 Board",
-        ["Sketch_Empty"]    = "Noch keine Skizzen — oben eine anlegen.",
-        ["Sketch_NamePrompt"] = "Skizzen-Name:",
-        ["Sketch_DeleteConfirm"] = "Skizze “{0}” löschen? Das Diagramm wird mitgelöscht.",
+        ["Sketch_Empty"]    = "Noch keine Entwürfe — oben einen anlegen.",
+        ["Sketch_NamePrompt"] = "Entwurf-Name:",
+        ["Sketch_DeleteConfirm"] = "Entwurf “{0}” löschen? Das Diagramm wird mitgelöscht.",
         ["Sketch_Open"]     = "📂 Im Editor öffnen",
-        ["Sketch_OpenTip"]  = "Das ganze Skizzenbuch als Arbeitsbereich öffnen — zum Aufräumen von Klassen/Objekten, die auf einem Board entstanden sind",
+        ["Sketch_OpenTip"]  = "Alle Entwürfe als Arbeitsbereich öffnen — zum Aufräumen von Klassen/Objekten, die auf einem Board entstanden sind",
+
+        // Startseite / Projekt-Browser
+        ["Home_NewProject"]    = "➕  Neues Projekt",
+        ["Home_AddLibrary"]    = "📁  Bibliothek hinzufügen",
+        ["Home_NewProjectTip"] = "Ein neues Projekt anlegen — ein Ordner mit Klassen, Funktionen, Diagrammen und Boards",
+        ["Home_AddLibraryTip"] = "Einen Ordner registrieren, der mehrere Projekte enthält — ein Regal, das StructoFox durchsucht",
+        ["Home_Recent"]        = "🕘  Zuletzt",
+        ["Home_Libraries"]     = "Bibliotheken",
+        ["Home_RemoveLibrary"] = "✕  Bibliothek entfernen",
+        ["Home_NoProjects"]    = "Keine Projekte",
+        ["Home_NoProjectsHint"] = "Noch keine Projekte hier — leg eins mit ➕ an",
 
         // Cockpit / section chrome
         ["Sec_New"]         = "＋ Neu: {0}",
@@ -812,6 +828,11 @@ public static class Loc
         // App-Menü
         ["Menu_About"]      = "ℹ Info  (v{0})",
         ["Menu_AboutTitle"] = "Über StructoFox",
+        ["Menu_Home"]       = "🏠 Projekte",
+        ["Menu_CloseProject"] = "Projekt schließen",
+        ["Menu_Theme"]      = "🎨 Theme",
+        ["Menu_Palette"]    = "Palette-Editor…",
+        ["Home_RecentLabel"] = "Zuletzt",
         ["Menu_Language"]   = "🌐 Sprache",
         ["Menu_Options"]    = "⚙ Optionen",
         ["Opt_NormWarn"]    = "Meldung wenn nicht normgerecht",
