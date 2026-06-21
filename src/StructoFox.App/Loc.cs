@@ -106,6 +106,7 @@ public static class Loc
         ["Sketch_Empty"]    = "No sketches yet — create one above.",
         ["Sketch_NamePrompt"] = "Sketch name:",
         ["Sketch_DeleteConfirm"] = "Delete sketch “{0}”? Its diagram is removed too.",
+        ["Sketch_TypeAll"]  = "All",
         ["Sketch_Open"]     = "📂 Open in editor",
         ["Sketch_OpenTip"]  = "Browse the whole sketchbook as a workspace — to clean up classes/objects created on a board",
 
@@ -492,6 +493,7 @@ public static class Loc
         ["Sketch_Empty"]    = "Noch keine Entwürfe — oben einen anlegen.",
         ["Sketch_NamePrompt"] = "Entwurf-Name:",
         ["Sketch_DeleteConfirm"] = "Entwurf “{0}” löschen? Das Diagramm wird mitgelöscht.",
+        ["Sketch_TypeAll"]  = "Alle",
         ["Sketch_Open"]     = "📂 Im Editor öffnen",
         ["Sketch_OpenTip"]  = "Alle Entwürfe als Arbeitsbereich öffnen — zum Aufräumen von Klassen/Objekten, die auf einem Board entstanden sind",
 

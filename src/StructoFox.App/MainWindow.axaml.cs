@@ -42,6 +42,9 @@ public partial class MainWindow : Window
     // Home browser state.
     string?  _homeSource;                        // null = Recent, else a library path
     bool     _sketchMode;                        // home showing the sketchbook (standalone diagrams)
+    SketchType? _sketchType;                     // sketch type filter (null = all)
+    ContentControl _sketchList = new();          // sketch-list region (re-created per build)
+    StackPanel? _sketchFilterBar;                // collapsible name+sort bar in the sketch view
     HomeView _homeView   = HomeView.Cards;
     HomeSort _homeSort   = HomeSort.DateDesc;
     string   _homeFilter = "";
@@ -370,14 +373,16 @@ public partial class MainWindow : Window
     }
 
     // Right column: top third = the most-recent project (hero); bottom two-thirds = the project list.
-    // The sketchbook view: quick-create buttons for each diagram type + a grid of existing sketches.
+    // The sketchbook view — mirrors the project view: create buttons, a "most recent" hero, the list,
+    // and a pinned control row (view switcher + name/sort filter + a PAP/Structogram/Board type filter).
     Control BuildSketchView()
     {
         var grid = new Grid { Margin = new(20) };
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));   // create row (the left tab already names this view)
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));                        // create row
+        grid.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));  // hero
+        grid.RowDefinitions.Add(new RowDefinition(new GridLength(2, GridUnitType.Star)));  // list + controls
 
-        var create = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 0, 0, 14) };
+        var create = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 0, 0, 12) };
         void NewBtn(string label, SketchType type) { var b = Ui.Btn(label); b.Click += async (_, _) => await NewSketch(type); create.Children.Add(b); }
         NewBtn(Loc.S("Sketch_NewPap"),    SketchType.Pap);
         NewBtn(Loc.S("Sketch_NewStruct"), SketchType.Structogram);
@@ -388,35 +393,107 @@ public partial class MainWindow : Window
         create.Children.Add(browse);
         Grid.SetRow(create, 0); grid.Children.Add(create);
 
-        var sketches = SketchbookService.Load();
-        Control body;
-        if (sketches.Count == 0)
-            body = Note(Loc.S("Sketch_Empty"));
-        else
-        {
-            var wrap = new WrapPanel();
-            foreach (var s in sketches) wrap.Children.Add(SketchCard(s));
-            body = new ScrollViewer { Content = wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        }
-        Grid.SetRow((Control)body, 1); grid.Children.Add((Control)body);
+        var hero = SketchHero(); Grid.SetRow(hero, 1); grid.Children.Add(hero);
+        var bottom = BuildSketchBottom(); Grid.SetRow(bottom, 2); grid.Children.Add(bottom);
         return grid;
     }
 
-    // One sketch tile: click opens it; right-click → rename / delete.
-    Control SketchCard(Sketch s)
+    // Top third of the sketch view: the most-recently-opened sketch as a centred hero (or a placeholder).
+    Control SketchHero()
+    {
+        var last = SketchbookService.Load().FirstOrDefault();
+        Control card = last is null ? PlaceholderCard() : SketchTile(last, HomeView.BigCards);
+        card.HorizontalAlignment = HorizontalAlignment.Center;
+        card.VerticalAlignment   = VerticalAlignment.Center;
+        return card;
+    }
+
+    // List region + a pinned control row: view dropdown, 🔎 (name+sort), and the type filter.
+    Control BuildSketchBottom()
+    {
+        _sketchList = new ContentControl();
+        var grid = new Grid { Margin = new(0, 8, 0, 0) };
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+
+        var listScroll = new ScrollViewer { Content = _sketchList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(listScroll, 0); grid.Children.Add(listScroll);
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 8, 0, 0) };
+        row.Children.Add(ViewDropdown());
+
+        var filter = Ui.Btn("🔎", Loc.S("Sec_FilterSortTip")); filter.Padding = new(10, 4);
+        _sketchFilterBar = BuildFilterBar(RefreshSketchList); _sketchFilterBar.IsVisible = _homeFilterOpen;
+        filter.Click += (_, _) => { _homeFilterOpen = !_homeFilterOpen; _sketchFilterBar.IsVisible = _homeFilterOpen; };
+        row.Children.Add(filter);
+        row.Children.Add(_sketchFilterBar);
+
+        // Always-visible type filter (Alle / PAP / Structogram / Board).
+        row.Children.Add(new Border { Width = 8 });
+        void TypeBtn(string label, SketchType? t)
+        {
+            var b = Ui.Btn(label); b.Padding = new(8, 4);
+            bool active = _sketchType == t;
+            Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
+            Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
+            b.Click += (_, _) => { _sketchType = t; _body.Content = BuildHome(); };
+            row.Children.Add(b);
+        }
+        TypeBtn(Loc.S("Sketch_TypeAll"), null);
+        TypeBtn("🔁", SketchType.Pap);
+        TypeBtn("▦", SketchType.Structogram);
+        TypeBtn("🗺", SketchType.Board);
+
+        var bar = new ScrollViewer { Content = row, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Grid.SetRow(bar, 1); grid.Children.Add(bar);
+
+        RefreshSketchList();
+        return grid;
+    }
+
+    // Filters (name + type), sorts and renders the sketch list into the chosen view.
+    void RefreshSketchList() => CrashHandler.Safe(() =>
+    {
+        if (!_sketchMode) return;
+        var items = SketchbookService.Load();
+        if (_sketchType is { } t) items = items.Where(s => s.Type == t).ToList();
+        if (!string.IsNullOrWhiteSpace(_homeFilter))
+            items = items.Where(s => s.Name.Contains(_homeFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+        items = _homeSort switch
+        {
+            HomeSort.DateAsc  => items.OrderBy(s => s.UpdatedAt).ToList(),
+            HomeSort.NameAsc  => items.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            HomeSort.NameDesc => items.OrderByDescending(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            _                 => items.OrderByDescending(s => s.UpdatedAt).ToList(),
+        };
+
+        if (items.Count == 0) { _sketchList.Content = Note(Loc.S("Sketch_Empty")); return; }
+        Panel panel = _homeView == HomeView.DetailList ? new StackPanel { Spacing = 4 } : new WrapPanel();
+        foreach (var s in items) panel.Children.Add(SketchTile(s, _homeView));
+        _sketchList.Content = panel;
+    }, "RefreshSketchList");
+
+    // One sketch tile in the chosen view; click opens it, right-click → rename / delete.
+    Control SketchTile(Sketch s, HomeView view)
     {
         var icon = s.Type switch { SketchType.Pap => "🔁", SketchType.Structogram => "▦", _ => "🗺" };
-        var card = new Border { Width = 180, Padding = new(12), Margin = new(0, 0, 10, 10), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
-        Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
-        var name = new TextBlock { Text = s.Name, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis };
-        Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
-        card.Child = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = icon, FontFamily = Emoji, FontSize = 22 }, name, Dim(s.UpdatedAt.ToLocalTime().ToString("g"), 10) } };
+        var date = s.UpdatedAt.ToLocalTime().ToString("g");
+        TextBlock Name(double size) { var t = new TextBlock { Text = s.Name, FontSize = size, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center }; Ui.Theme(t, TextBlock.ForegroundProperty, "ContentTextBrush"); return t; }
+        TextBlock Ico(double size) => new() { Text = icon, FontFamily = Emoji, FontSize = size, VerticalAlignment = VerticalAlignment.Center };
 
-        card.PointerPressed += (_, e) =>
+        Control content = view switch
         {
-            if (e.GetCurrentPoint(card).Properties.IsRightButtonPressed) return;   // menu via ContextRequested
-            OpenSketch(s);
+            HomeView.BigCards => new StackPanel { Width = 230, Spacing = 4, Children = { Ico(26), Name(16), Dim(date, 11) } },
+            HomeView.DetailList => new DockPanel { Children = { Tuck(Dim(date, 11), Dock.Right), Ico(16), new Border { Width = 6 }, Name(13) } },
+            HomeView.MultiList => new DockPanel { Width = 240, Children = { Ico(15), new Border { Width = 6 }, Name(13) } },
+            _ => new StackPanel { Width = 160, Spacing = 3, Children = { Ico(22), Name(14), Dim(date, 10) } },
         };
+
+        var card = new Border { Padding = new(10, 8), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand), Child = content };
+        Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
+        if (view is HomeView.Cards or HomeView.BigCards or HomeView.MultiList) card.Margin = new(0, 0, 10, 10);
+
+        card.PointerPressed += (_, e) => { if (!e.GetCurrentPoint(card).Properties.IsRightButtonPressed) OpenSketch(s); };
         var cm = new ContextMenu();
         var rename = new MenuItem { Header = Loc.S("Proj_Rename") };
         rename.Click += async (_, _) =>
@@ -436,6 +513,9 @@ public partial class MainWindow : Window
         card.ContextMenu = cm;
         return card;
     }
+
+    // Docks a control to a side and returns it (small inline helper for tile layouts).
+    static Control Tuck(Control c, Dock side) { DockPanel.SetDock(c, side); return c; }
 
     // Prompts for a name, creates a sketch of the given type and opens it.
     Task NewSketch(SketchType type) => CrashHandler.SafeAsync(async () =>
@@ -577,12 +657,14 @@ public partial class MainWindow : Window
     // The glyph for a view (shown on the dropdown button).
     static string ViewIcon(HomeView v) => v switch { HomeView.BigCards => "▣", HomeView.DetailList => "≣", HomeView.MultiList => "☷", _ => "▦" };
 
-    // The collapsible filter + sort bar: a name filter and four sort buttons.
-    StackPanel BuildFilterBar()
+    // The collapsible filter + sort bar: a name filter and two sort toggles. The refresh action lets it
+    // serve both the projects list and the sketch list.
+    StackPanel BuildFilterBar(Action? refresh = null)
     {
+        refresh ??= RefreshHomeList;
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var nameBox = new TextBox { PlaceholderText = Loc.S("Sec_FilterName"), Width = 200, Text = _homeFilter };
-        nameBox.TextChanged += (_, _) => { _homeFilter = nameBox.Text ?? ""; RefreshHomeList(); };
+        nameBox.TextChanged += (_, _) => { _homeFilter = nameBox.Text ?? ""; refresh(); };
         bar.Children.Add(nameBox);
 
         // Two sort toggles (consistent with the cockpit): Date ↓↑ and A–Z / Z–A, active one highlighted.
@@ -598,9 +680,9 @@ public partial class MainWindow : Window
             Ui.Theme(azBtn,   TemplatedControl.ForegroundProperty, !dateActive ? "AccentTextBrush" : "SidebarTextBrush");
         }
         dateBtn = Ui.Btn("Date ↓"); dateBtn.Padding = new(8, 4);
-        dateBtn.Click += (_, _) => { _homeSort = _homeSort == HomeSort.DateDesc ? HomeSort.DateAsc : HomeSort.DateDesc; Restyle(); RefreshHomeList(); };
+        dateBtn.Click += (_, _) => { _homeSort = _homeSort == HomeSort.DateDesc ? HomeSort.DateAsc : HomeSort.DateDesc; Restyle(); refresh(); };
         azBtn = Ui.Btn("A–Z"); azBtn.Padding = new(8, 4);
-        azBtn.Click += (_, _) => { _homeSort = _homeSort == HomeSort.NameAsc ? HomeSort.NameDesc : HomeSort.NameAsc; Restyle(); RefreshHomeList(); };
+        azBtn.Click += (_, _) => { _homeSort = _homeSort == HomeSort.NameAsc ? HomeSort.NameDesc : HomeSort.NameAsc; Restyle(); refresh(); };
         Restyle();
         bar.Children.Add(dateBtn);
         bar.Children.Add(azBtn);
