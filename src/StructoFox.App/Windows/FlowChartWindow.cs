@@ -1670,7 +1670,10 @@ public class FlowChartWindow : Window
         double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
         ShiftWorld(dx, dy);   // bring the top-left of the content near the margin (grow or shrink that side)
 
-        double cw = maxX + dx + pad, ch = maxY + dy + pad;
+        // Never shrink below the visible viewport (so a near-empty chart doesn't collapse to a tiny box).
+        double minW = Math.Max(800, _scroll?.Viewport.Width  / (_zoom <= 0 ? 1 : _zoom) ?? 800);
+        double minH = Math.Max(600, _scroll?.Viewport.Height / (_zoom <= 0 ? 1 : _zoom) ?? 600);
+        double cw = Math.Max(minW, maxX + dx + pad), ch = Math.Max(minH, maxY + dy + pad);
         if (Math.Abs(_canvas.Width  - cw) > 0.5) _canvas.Width  = cw;
         if (Math.Abs(_canvas.Height - ch) > 0.5) _canvas.Height = ch;
         if (_gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }

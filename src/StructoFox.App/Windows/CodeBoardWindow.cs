@@ -834,8 +834,11 @@ public class CodeBoardWindow : Window
         double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
         ShiftWorld(dx, dy);
 
-        _canvas.Width  = maxX + dx + pad;
-        _canvas.Height = maxY + dy + pad;
+        // Never shrink below the visible viewport (so a near-empty board doesn't collapse to a tiny box).
+        double minW = Math.Max(800, _scroll?.Viewport.Width  / (_zoom <= 0 ? 1 : _zoom) ?? 800);
+        double minH = Math.Max(600, _scroll?.Viewport.Height / (_zoom <= 0 ? 1 : _zoom) ?? 600);
+        _canvas.Width  = Math.Max(minW, maxX + dx + pad);
+        _canvas.Height = Math.Max(minH, maxY + dy + pad);
         if (_gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
     }
 
