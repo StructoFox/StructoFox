@@ -70,14 +70,26 @@ public static class Ui
         if (AppIcon() is { } icon) w.Icon = icon;   // taskbar + title-bar icon, every window
     }
 
-    // The embedded app icon, loaded once and shared across all windows.
+    // The embedded app logo, decoded once and shared (taskbar icon + the in-app title-bar brand).
+    static readonly Uri AppIconUri = new("avares://StructoFox.App/Assets/appicon.png");
+
     static WindowIcon? _appIcon;
     static WindowIcon? AppIcon()
     {
         if (_appIcon is not null) return _appIcon;
-        try { _appIcon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://StructoFox.App/Assets/appicon.png"))); }
+        try { _appIcon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(AppIconUri)); }
         catch { /* no icon is fine */ }
         return _appIcon;
+    }
+
+    static Avalonia.Media.Imaging.Bitmap? _appLogo;
+    /// <summary>The app logo as a bitmap, for placing in the themed title bar. Cached; null if missing.</summary>
+    public static Avalonia.Media.Imaging.Bitmap? AppLogo()
+    {
+        if (_appLogo is not null) return _appLogo;
+        try { _appLogo = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(AppIconUri)); }
+        catch { /* no logo is fine */ }
+        return _appLogo;
     }
 
     /// <summary>Binds a property to an OXSUIT theme brush via DynamicResource — present-theme or default,

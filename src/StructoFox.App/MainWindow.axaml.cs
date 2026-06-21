@@ -103,7 +103,11 @@ public partial class MainWindow : Window
         Ui.Theme(bar, Border.BackgroundProperty, "SidebarBgBrush");
 
         var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        brand.Children.Add(new TextBlock { Text = "🦊", FontFamily = Emoji, FontSize = 22, VerticalAlignment = VerticalAlignment.Center });
+        // The fox logo (or the emoji as a fallback if the image resource is missing).
+        if (Ui.AppLogo() is { } logo)
+            brand.Children.Add(new Image { Source = logo, Width = 26, Height = 26, VerticalAlignment = VerticalAlignment.Center });
+        else
+            brand.Children.Add(new TextBlock { Text = "🦊", FontFamily = Emoji, FontSize = 22, VerticalAlignment = VerticalAlignment.Center });
         var title = new TextBlock { Text = "StructoFox", FontSize = 17, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center };
         Ui.Theme(title, TextBlock.ForegroundProperty, "SidebarTextBrush");
         var tag = new TextBlock { Text = "Flow · Struct · Code", FontSize = 11, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Bottom, Margin = new(2, 0, 0, 2) };
