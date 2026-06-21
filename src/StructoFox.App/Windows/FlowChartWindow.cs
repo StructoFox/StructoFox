@@ -55,7 +55,12 @@ public class FlowChartWindow : Window
     void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
 
     // The diagram surface look (theme-independent), persisted with the diagram.
-    readonly DiagramStyle _style;
+    DiagramStyle _style;   // not readonly: undo/redo swaps _data (and thus its Style)
+
+    // Snapshot-based undo/redo of the diagram (JSON of _data), recorded at each Save() boundary.
+    readonly List<string> _undo = new();
+    readonly List<string> _redo = new();
+    string _snapshot = "";
 
     // Loads (or starts) the flowchart for one function/method and builds the editor.
     public FlowChartWindow(string projFolder, string key, string title, string? themePath)
@@ -66,6 +71,7 @@ public class FlowChartWindow : Window
         _data       = FlowChartService.Load(projFolder, key);
         if (string.IsNullOrEmpty(_data.Title)) _data.Title = title;
         _style      = _data.Style;   // persisted with the diagram
+        _snapshot   = Serialize(_data);   // baseline for undo
 
         Title                 = string.Format(Loc.S("Flow_Title"),
                                     string.IsNullOrEmpty(title) ? Loc.S("Common_Untitled") : title);
@@ -83,8 +89,68 @@ public class FlowChartWindow : Window
         Build();
     }
 
-    // Persists the flowchart after each change.
-    void Save() => FlowChartService.Save(_projFolder, _key, _data);
+    // Persists the flowchart after each change, recording the previous state for undo (one step per
+    // discrete action — drags Save only on release, so a whole drag is a single undo step).
+    void Save()
+    {
+        var cur = Serialize(_data);
+        if (cur != _snapshot)
+        {
+            _undo.Add(_snapshot);
+            if (_undo.Count > 100) _undo.RemoveAt(0);
+            _redo.Clear();
+            _snapshot = cur;
+        }
+        FlowChartService.Save(_projFolder, _key, _data);
+    }
+
+    static readonly System.Text.Json.JsonSerializerOptions _undoJson = new() { PropertyNameCaseInsensitive = true };
+    static string Serialize(FlowChartData d) => System.Text.Json.JsonSerializer.Serialize(d);
+
+    void Undo()
+    {
+        if (_undo.Count == 0) return;
+        _redo.Add(_snapshot);
+        _snapshot = _undo[^1]; _undo.RemoveAt(_undo.Count - 1);
+        ApplySnapshot(_snapshot);
+    }
+
+    void Redo()
+    {
+        if (_redo.Count == 0) return;
+        _undo.Add(_snapshot);
+        _snapshot = _redo[^1]; _redo.RemoveAt(_redo.Count - 1);
+        ApplySnapshot(_snapshot);
+    }
+
+    // Restores a serialized diagram state, persists it and rebuilds the canvas.
+    void ApplySnapshot(string json)
+    {
+        FlowChartData? d;
+        try { d = System.Text.Json.JsonSerializer.Deserialize<FlowChartData>(json, _undoJson); } catch { return; }
+        if (d is null) return;
+        _data = d;
+        _style = _data.Style;
+        FlowChartService.Save(_projFolder, _key, _data);
+        RebuildAll();
+    }
+
+    // Clears and re-renders the whole canvas from _data (after an undo/redo).
+    void RebuildAll()
+    {
+        if (_canvas is null) return;
+        _canvas.Children.Clear();
+        _nodeViews.Clear(); _connViews.Clear();
+        _gridRect = null; _selRect = null; _rubberBand = null;
+        _selected.Clear(); _connectFromId = null; _segConn = null;
+        _canvas.Background = new SolidColorBrush(Color.Parse(_style.BackgroundColor));
+        RenderGrid();
+        foreach (var n in _data.Nodes) RenderNode(n);
+        RenderAllConnections();
+        RefreshDecor();
+        RefreshConnHeader();
+        if (Title is not null) Title = string.Format(Loc.S("Flow_Title"), string.IsNullOrEmpty(_data.Title) ? Loc.S("Common_Untitled") : _data.Title);
+    }
 
     // ── Build ──────────────────────────────────────────────────────────────
 
@@ -191,13 +257,17 @@ public class FlowChartWindow : Window
         RefreshDecor();
     }
 
-    // Keyboard: Delete removes the selection; Ctrl+0 resets zoom, Ctrl +/- and Ctrl+Up/Down zoom.
+    // Keyboard: Delete removes the selection; Ctrl+Z/Y undo/redo; Ctrl+0 resets zoom, Ctrl +/- and
+    // Ctrl+Up/Down zoom.
     void HandleKey(KeyEventArgs e)
     {
         if (e.Key == Key.Delete) { RemoveSelected(); return; }
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
+            case Key.Z when !shift:                     Undo(); e.Handled = true; break;
+            case Key.Y or Key.Z:                        Redo(); e.Handled = true; break;   // Ctrl+Y or Ctrl+Shift+Z
             case Key.D0 or Key.NumPad0:                 SetZoom(1.0); e.Handled = true; break;
             case Key.OemPlus or Key.Add or Key.Up:      SetZoom(_zoom + 0.1); e.Handled = true; break;
             case Key.OemMinus or Key.Subtract or Key.Down: SetZoom(_zoom - 0.1); e.Handled = true; break;
@@ -1002,7 +1072,23 @@ public class FlowChartWindow : Window
         var pts = new List<Point> { EdgeMid(a, wps[0]) };
         pts.AddRange(wps);
         pts.Add(EdgeMid(b, wps[^1]));
-        return pts;
+        return Orthogonalize(pts);   // never let a manual route draw a diagonal segment
+    }
+
+    // Guarantees an orthogonal polyline: between any two points that aren't axis-aligned, insert an
+    // L-corner. Consecutive duplicates/collinear points are dropped. So no segment is ever diagonal,
+    // and no end ever cuts a slanted line behind a moved node.
+    static List<Point> Orthogonalize(List<Point> pts)
+    {
+        var res = new List<Point> { pts[0] };
+        for (int i = 1; i < pts.Count; i++)
+        {
+            var prev = res[^1]; var cur = pts[i];
+            if (Math.Abs(prev.X - cur.X) > 0.5 && Math.Abs(prev.Y - cur.Y) > 0.5)
+                res.Add(new Point(prev.X, cur.Y));   // bend: leave prev vertically, then run horizontally
+            if (Math.Abs(res[^1].X - cur.X) > 0.5 || Math.Abs(res[^1].Y - cur.Y) > 0.5) res.Add(cur);
+        }
+        return Simplify(res);
     }
 
     // The midpoint of the rectangle edge facing a target point (keeps exits/entries orthogonal).
