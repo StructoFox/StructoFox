@@ -42,6 +42,9 @@ public class FlowChartWindow : Window
     double   _zoom = 1.0;
     bool     _liveDrag;    // a node is being dragged → route attached arrows cheaply (no A*) until release
     bool     _culling;     // re-entrancy guard for viewport culling
+    bool     _crossoverHops;   // temporary, non-DIN crossover "bridges" at line crossings (per-window, not saved)
+    readonly List<Control> _hopVisuals = new();
+    readonly Dictionary<string, List<Point>> _connPts = new();   // last rendered polyline per connection
     Point?   _mousePos;    // last pointer position over the canvas (null when outside) — for paste-at-cursor
     Dictionary<string, Point>? _dragStart;   // start positions of all selected nodes during a multi-drag
 
@@ -236,7 +239,7 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
-            if (_segConn is not null) { NormalizeWaypoints(_segConn); RenderConnection(_segConn); Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
+            if (_segConn is not null) { NormalizeWaypoints(_segConn); RenderConnection(_segConn); RenderCrossovers(); Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
             if (_panning)
             {
                 _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null);
@@ -323,6 +326,7 @@ public class FlowChartWindow : Window
                 if (show && !realized) RenderConnection(c);
                 else if (!show && realized) { foreach (var v in _connViews[c.Id]) _canvas.Children.Remove(v); _connViews.Remove(c.Id); }
             }
+            if (_crossoverHops) RenderCrossovers();
         }
         finally { _culling = false; }
     }
@@ -768,6 +772,17 @@ public class FlowChartWindow : Window
         op.PointerCaptureLost += (_, _) => Save();
         panel.Children.Add(op);
 
+        // Crossover bridges — non-DIN, temporary marker (not saved, gone on next load).
+        panel.Children.Add(new Separator());
+        var hops = new CheckBox { Content = Loc.S("Flow_Crossover"), IsChecked = _crossoverHops };
+        hops.IsCheckedChanged += async (_, _) =>
+        {
+            _crossoverHops = hops.IsChecked == true;
+            RenderCrossovers();
+            if (_crossoverHops) await MessageDialog.Show(this, Loc.S("Flow_CrossoverHint"), Loc.S("Flow_Crossover"));
+        };
+        panel.Children.Add(hops);
+
         return new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
     }
 
@@ -1042,6 +1057,7 @@ public class FlowChartWindow : Window
                         if ((c.FromId == id || c.ToId == id) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
                     UpdateConnectionsFor(id);   // re-route attached arrows with full A* now the drag settled
                 }
+                RenderCrossovers();
                 Save();
             }
             else if (ConnectMode) HandleConnectClick(node.Id);   // a click (no drag) wires the arrow
@@ -1216,6 +1232,52 @@ public class FlowChartWindow : Window
     void RenderAllConnections()
     {
         foreach (var c in _data.Connections) RenderConnection(c);
+        RenderCrossovers();
+    }
+
+    // Optional, non-DIN overlay: at every place a horizontal flow line crosses a vertical one, draw a small
+    // "bridge"/hop on the horizontal line (old ANSI / electronics style). Purely a visual marker — never
+    // saved, cleared while dragging, and gone on the next load.
+    void RenderCrossovers()
+    {
+        if (_canvas is null) return;
+        foreach (var v in _hopVisuals) _canvas.Children.Remove(v);
+        _hopVisuals.Clear();
+        if (!_crossoverHops || _liveDrag) return;
+
+        var bg   = new SolidColorBrush(ParseColor(_style.BackgroundColor));
+        var line = new SolidColorBrush(ParseColor(_style.LineColor));
+
+        // Collect axis-aligned segments of the currently realized connections.
+        var segs = new List<(Point a, Point b)>();
+        foreach (var (id, pts) in _connPts)
+        {
+            if (!_connViews.ContainsKey(id)) continue;
+            for (int i = 0; i < pts.Count - 1; i++) segs.Add((pts[i], pts[i + 1]));
+        }
+
+        const double r = 5;
+        foreach (var h in segs)
+        {
+            if (Math.Abs(h.a.Y - h.b.Y) > 0.5) continue;   // h must be horizontal
+            double hy = h.a.Y, hx1 = Math.Min(h.a.X, h.b.X), hx2 = Math.Max(h.a.X, h.b.X);
+            foreach (var v in segs)
+            {
+                if (Math.Abs(v.a.X - v.b.X) > 0.5) continue;   // v must be vertical
+                double vx = v.a.X, vy1 = Math.Min(v.a.Y, v.b.Y), vy2 = Math.Max(v.a.Y, v.b.Y);
+                if (vx <= hx1 + 1 || vx >= hx2 - 1 || hy <= vy1 + 1 || hy >= vy2 - 1) continue;   // strict interior cross
+
+                // Erase the horizontal line under the bridge, then arc the horizontal over the vertical.
+                var gap = new Line { StartPoint = new(vx - r, hy), EndPoint = new(vx + r, hy), Stroke = bg, StrokeThickness = 3, ZIndex = 2 };
+                var arc = new Avalonia.Controls.Shapes.Path
+                {
+                    Stroke = line, StrokeThickness = 1.6, ZIndex = 2,
+                    Data = Geometry.Parse($"M {Inv(vx - r)},{Inv(hy)} A {Inv(r)},{Inv(r)} 0 0 1 {Inv(vx + r)},{Inv(hy)}"),
+                };
+                _canvas.Children.Add(gap); _hopVisuals.Add(gap);
+                _canvas.Children.Add(arc); _hopVisuals.Add(arc);
+            }
+        }
     }
 
     // The route for a connection that has manual waypoints: node-edge exit/entry (chosen toward the first
@@ -1324,6 +1386,8 @@ public class FlowChartWindow : Window
                 // During a live node drag, route cheaply (no A*); the full obstacle-avoiding route is
                 // recomputed once on release.
                 : Simplify(_liveDrag ? OrthoRoute(a.Value, b.Value) : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
+
+        _connPts[conn.Id] = pts;   // remembered for the optional crossover-bridge overlay
 
         // All arrows share the diagram's arrow colour, so they stay uniform (and follow the Options picker).
         var brush   = new SolidColorBrush(ParseColor(_style.LineColor));
