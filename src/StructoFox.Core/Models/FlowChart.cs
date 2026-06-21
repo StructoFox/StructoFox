@@ -77,6 +77,10 @@ public class FlowConnection
     /// <summary>DIN data-transmission path (communication link): drawn with a zig-zag marker to set it
     /// apart from an ordinary control-flow line.</summary>
     public bool                Transmission { get; set; } = false;
+
+    /// <summary>Arrowhead override: null = automatic (an arrow, except into a junction); true = force an
+    /// arrowhead (e.g. a line pointing onto another line); false = plain line, no arrowhead.</summary>
+    public bool?               Arrow { get; set; } = null;
 }
 
 public class FlowChartData

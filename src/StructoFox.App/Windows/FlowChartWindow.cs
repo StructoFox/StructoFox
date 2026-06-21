@@ -1339,7 +1339,8 @@ public class FlowChartWindow : Window
         bool toJunction   = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId)?.Kind   == FlowNodeKind.Junction;
         bool fromJunction = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Junction;
 
-        if (!toJunction)
+        // Arrowhead: explicit per-connection override wins, else automatic (an arrow, except into a junction).
+        if (conn.Arrow ?? !toJunction)
         {
             var arrow = BuildArrow(pts[^2], pts[^1], brush);
             arrow.ZIndex = 1;
@@ -1445,6 +1446,15 @@ public class FlowChartWindow : Window
             conn.Label = t; Save(); RenderConnection(conn);
         };
         cm.Items.Add(relabel);
+
+        // Toggle arrowhead: the menu offers the OTHER style (line ⇄ arrow). The current effective state
+        // is the explicit override, or the automatic one (no arrow into a junction).
+        bool toJunction = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId)?.Kind == FlowNodeKind.Junction;
+        bool hasArrow   = conn.Arrow ?? !toJunction;
+        var style = new MenuItem { Header = hasArrow ? Loc.S("Flow_StyleLine") : Loc.S("Flow_StyleArrow") };
+        style.Click += (_, _) => { conn.Arrow = !hasArrow; Save(); RenderConnection(conn); };
+        cm.Items.Add(style);
+
         var flip = new MenuItem { Header = Loc.S("Flow_FlipArrow") };
         flip.Click += (_, _) => { (conn.FromId, conn.ToId) = (conn.ToId, conn.FromId); Save(); RenderConnection(conn); };
         cm.Items.Add(flip);
