@@ -53,7 +53,7 @@ public static class DiagramLauncher
         papBtn.Click += (_, _) =>
         {
             dlg.Close();
-            new FlowChartWindow(projFolder, key, title, themePath).Show();
+            DiagramWindows.OpenOrActivate(DiagramWindows.FlowId(projFolder, key), () => new FlowChartWindow(projFolder, key, title, themePath));
         };
         stack.Children.Add(papBtn);
 
@@ -63,7 +63,7 @@ public static class DiagramLauncher
         nsBtn.Click += (_, _) =>
         {
             dlg.Close();
-            new StructogramWindow(projFolder, key, title, themePath).Show();
+            DiagramWindows.OpenOrActivate(DiagramWindows.StructId(projFolder, key), () => new StructogramWindow(projFolder, key, title, themePath));
         };
         stack.Children.Add(nsBtn);
 
@@ -83,7 +83,7 @@ public static class DiagramLauncher
                 boards.Add(board);
                 CodeBoardRegistryService.Save(projFolder, boards);
             }
-            new CodeBoardWindow(projFolder, board, themePath).Show();
+            DiagramWindows.OpenOrActivate(DiagramWindows.BoardId(projFolder, board.Id), () => new CodeBoardWindow(projFolder, board, themePath));
         };
         stack.Children.Add(boardBtn);
 

@@ -560,9 +560,9 @@ public partial class MainWindow : Window
         System.IO.Directory.CreateDirectory(root);
         switch (s.Type)
         {
-            case SketchType.Pap:         new FlowChartWindow(root, s.Id, s.Name, null).Show(); break;
-            case SketchType.Structogram: new StructogramWindow(root, s.Id, s.Name, null).Show(); break;
-            default:                     new CodeBoardWindow(root, new CodeBoard { Id = s.Id, Name = s.Name, Symbol = "🗺" }, null).Show(); break;
+            case SketchType.Pap:         DiagramWindows.OpenOrActivate(DiagramWindows.FlowId(root, s.Id),   () => new FlowChartWindow(root, s.Id, s.Name, null)); break;
+            case SketchType.Structogram: DiagramWindows.OpenOrActivate(DiagramWindows.StructId(root, s.Id), () => new StructogramWindow(root, s.Id, s.Name, null)); break;
+            default:                     DiagramWindows.OpenOrActivate(DiagramWindows.BoardId(root, s.Id),  () => new CodeBoardWindow(root, new CodeBoard { Id = s.Id, Name = s.Name, Symbol = "🗺" }, null)); break;
         }
     }, "OpenSketch");
 
@@ -1823,8 +1823,8 @@ public partial class MainWindow : Window
     void OpenBoard(CodeBoard board) => CrashHandler.Safe(() =>
     {
         if (_project is null) return;
-        new CodeBoardWindow(_project, board, null,
-            ents => new ExportWindow(_project, ents, board.Name).Show()).Show();
+        DiagramWindows.OpenOrActivate(DiagramWindows.BoardId(_project, board.Id),
+            () => new CodeBoardWindow(_project, board, null, ents => new ExportWindow(_project, ents, board.Name).Show()));
     }, "OpenBoard");
 
     // ── Export section ─────────────────────────────────────────────────────

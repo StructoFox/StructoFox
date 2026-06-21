@@ -853,7 +853,7 @@ public class FlowChartWindow : Window
         if (AnyFlagged(sd.Root))
             await MessageDialog.Show(this, Loc.S("Flow_ToStructogramPartial"), Loc.S("Flow_ToStructogramTitle"));
 
-        new StructogramWindow(_projFolder, _key, title, _themePath).Show();
+        DiagramWindows.OpenOrActivate(DiagramWindows.StructId(_projFolder, _key), () => new StructogramWindow(_projFolder, _key, title, _themePath));
     }
 
     // Recursively reports whether any block in the tree was flagged as unstructurable.
