@@ -95,6 +95,17 @@ public static class Loc
         ["Home_NoProjects"]    = "No projects",
         ["Home_NoProjectsHint"] = "No projects here yet — create one with ➕",
 
+        // Sketchbook (standalone diagrams)
+        ["Sketch_Nav"]      = "✏  Sketchbook",
+        ["Sketch_NavTip"]   = "Standalone diagrams that belong to no project (in Documents/StructoFox/Sketchbook)",
+        ["Sketch_Title"]    = "Sketchbook",
+        ["Sketch_NewPap"]   = "＋ 🔁 Flowchart",
+        ["Sketch_NewStruct"] = "＋ ▦ Structogram",
+        ["Sketch_NewBoard"] = "＋ 🗺 Board",
+        ["Sketch_Empty"]    = "No sketches yet — create one above.",
+        ["Sketch_NamePrompt"] = "Sketch name:",
+        ["Sketch_DeleteConfirm"] = "Delete sketch “{0}”? Its diagram is removed too.",
+
         // Main (entry point) tab
         ["Main_Blurb"]  = "The program's entry point — its main(). One per project; it gets its own tab so it stays in sight.",
         ["Main_Create"] = "▶ Create main",
@@ -463,6 +474,17 @@ public static class Loc
     // German overlay; any key not listed here quietly falls through to the English baseline.
     static readonly Dictionary<string, string> De = new()
     {
+        // Sketchbook (Einzel-Diagramme ohne Projekt)
+        ["Sketch_Nav"]      = "✏  Skizzenbuch",
+        ["Sketch_NavTip"]   = "Einzel-Diagramme ohne Projekt (in Dokumente/StructoFox/Sketchbook)",
+        ["Sketch_Title"]    = "Skizzenbuch",
+        ["Sketch_NewPap"]   = "＋ 🔁 PAP",
+        ["Sketch_NewStruct"] = "＋ ▦ Struktogramm",
+        ["Sketch_NewBoard"] = "＋ 🗺 Board",
+        ["Sketch_Empty"]    = "Noch keine Skizzen — oben eine anlegen.",
+        ["Sketch_NamePrompt"] = "Skizzen-Name:",
+        ["Sketch_DeleteConfirm"] = "Skizze “{0}” löschen? Das Diagramm wird mitgelöscht.",
+
         // Cockpit / section chrome
         ["Sec_New"]         = "＋ Neu: {0}",
         ["Sec_NewPrompt"]   = "{0}-Name:",

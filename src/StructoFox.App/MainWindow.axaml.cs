@@ -41,6 +41,7 @@ public partial class MainWindow : Window
 
     // Home browser state.
     string?  _homeSource;                        // null = Recent, else a library path
+    bool     _sketchMode;                        // home showing the sketchbook (standalone diagrams)
     HomeView _homeView   = HomeView.Cards;
     HomeSort _homeSort   = HomeSort.DateDesc;
     string   _homeFilter = "";
@@ -305,10 +306,25 @@ public partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // library folders (middle)
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // Add library (bottom)
 
+        var topStack = new StackPanel { Spacing = 6 };
         var newBtn = Ui.Btn(Loc.S("Home_NewProject"), Loc.S("Home_NewProjectTip"));
         newBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
         newBtn.Click += async (_, _) => await NewProject();
-        Grid.SetRow(newBtn, 0); grid.Children.Add(newBtn);
+        topStack.Children.Add(newBtn);
+
+        // Sketchbook: standalone diagrams, no project needed.
+        var sketchBtn = new Button
+        {
+            Content = Loc.S("Sketch_Nav"), HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new(8, 6), CornerRadius = new(6),
+        };
+        Ui.Theme(sketchBtn, TemplatedControl.BackgroundProperty, _sketchMode ? "AccentBgBrush"  : "ControlBgBrush");
+        Ui.Theme(sketchBtn, TemplatedControl.ForegroundProperty, _sketchMode ? "AccentTextBrush" : "SidebarTextBrush");
+        ToolTip.SetTip(sketchBtn, Loc.S("Sketch_NavTip"));
+        sketchBtn.Click += (_, _) => { _sketchMode = !_sketchMode; _homeSource = null; _body.Content = BuildHome(); };
+        topStack.Children.Add(sketchBtn);
+
+        Grid.SetRow(topStack, 0); grid.Children.Add(topStack);
 
         // The library folders float in the middle, centred, scrolling if many.
         var libs = Libraries.Load();
@@ -340,7 +356,7 @@ public partial class MainWindow : Window
         };
         Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
         Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
-        b.Click += (_, _) => { _homeSource = active ? null : source; _body.Content = BuildHome(); };
+        b.Click += (_, _) => { _homeSource = active ? null : source; _sketchMode = false; _body.Content = BuildHome(); };
 
         ToolTip.SetTip(b, source);   // full library path on hover
         var remove = new MenuItem { Header = Loc.S("Home_RemoveLibrary") };
@@ -352,8 +368,100 @@ public partial class MainWindow : Window
     }
 
     // Right column: top third = the most-recent project (hero); bottom two-thirds = the project list.
+    // The sketchbook view: quick-create buttons for each diagram type + a grid of existing sketches.
+    Control BuildSketchView()
+    {
+        var grid = new Grid { Margin = new(20) };
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+
+        grid.Children.Add(Heading(Loc.S("Sketch_Title")));
+
+        var create = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 10, 0, 14) };
+        void NewBtn(string label, SketchType type) { var b = Ui.Btn(label); b.Click += async (_, _) => await NewSketch(type); create.Children.Add(b); }
+        NewBtn(Loc.S("Sketch_NewPap"),    SketchType.Pap);
+        NewBtn(Loc.S("Sketch_NewStruct"), SketchType.Structogram);
+        NewBtn(Loc.S("Sketch_NewBoard"),  SketchType.Board);
+        Grid.SetRow(create, 1); grid.Children.Add(create);
+
+        var sketches = SketchbookService.Load();
+        Control body;
+        if (sketches.Count == 0)
+            body = Note(Loc.S("Sketch_Empty"));
+        else
+        {
+            var wrap = new WrapPanel();
+            foreach (var s in sketches) wrap.Children.Add(SketchCard(s));
+            body = new ScrollViewer { Content = wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        }
+        Grid.SetRow((Control)body, 2); grid.Children.Add((Control)body);
+        return grid;
+    }
+
+    // One sketch tile: click opens it; right-click → rename / delete.
+    Control SketchCard(Sketch s)
+    {
+        var icon = s.Type switch { SketchType.Pap => "🔁", SketchType.Structogram => "▦", _ => "🗺" };
+        var card = new Border { Width = 180, Padding = new(12), Margin = new(0, 0, 10, 10), CornerRadius = new(8), Cursor = new Cursor(StandardCursorType.Hand) };
+        Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
+        var name = new TextBlock { Text = s.Name, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis };
+        Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
+        card.Child = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = icon, FontFamily = Emoji, FontSize = 22 }, name, Dim(s.UpdatedAt.ToLocalTime().ToString("g"), 10) } };
+
+        card.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(card).Properties.IsRightButtonPressed) return;   // menu via ContextRequested
+            OpenSketch(s);
+        };
+        var cm = new ContextMenu();
+        var rename = new MenuItem { Header = Loc.S("Proj_Rename") };
+        rename.Click += async (_, _) =>
+        {
+            var n = await PromptDialog.Show(this, Loc.S("Sketch_NamePrompt"), s.Name);
+            if (string.IsNullOrWhiteSpace(n)) return;
+            SketchbookService.Rename(s.Id, n); _body.Content = BuildHome();
+        };
+        var del = new MenuItem { Header = Loc.S("Sec_Delete") };
+        del.Click += async (_, _) =>
+        {
+            var res = await MessageDialog.Show(this, string.Format(Loc.S("Sketch_DeleteConfirm"), s.Name), Loc.S("Sec_DeleteTitle"), DialogButtons.YesNo);
+            if (res != DialogResult.Yes) return;
+            SketchbookService.Delete(s.Id); _body.Content = BuildHome();
+        };
+        cm.Items.Add(rename); cm.Items.Add(new Separator()); cm.Items.Add(del);
+        card.ContextMenu = cm;
+        return card;
+    }
+
+    // Prompts for a name, creates a sketch of the given type and opens it.
+    Task NewSketch(SketchType type) => CrashHandler.SafeAsync(async () =>
+    {
+        var name = await PromptDialog.Show(this, Loc.S("Sketch_NamePrompt"), "");
+        if (name is null) return;
+        var s = SketchbookService.Create(type, name);
+        OpenSketch(s);
+        _body.Content = BuildHome();   // refresh the list
+    }, "NewSketch");
+
+    // Opens a sketch in its editor (the sketchbook folder doubles as the project folder).
+    void OpenSketch(Sketch s) => CrashHandler.Safe(() =>
+    {
+        SketchbookService.Touch(s.Id);
+        var root = SketchbookService.Root;
+        System.IO.Directory.CreateDirectory(root);
+        switch (s.Type)
+        {
+            case SketchType.Pap:         new FlowChartWindow(root, s.Id, s.Name, null).Show(); break;
+            case SketchType.Structogram: new StructogramWindow(root, s.Id, s.Name, null).Show(); break;
+            default:                     new CodeBoardWindow(root, new CodeBoard { Id = s.Id, Name = s.Name, Symbol = "🗺" }, null).Show(); break;
+        }
+    }, "OpenSketch");
+
     Control BuildHomeMain()
     {
+        if (_sketchMode) return BuildSketchView();
+
         var grid = new Grid { Margin = new(20) };
         grid.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));  // top 1/3
         grid.RowDefinitions.Add(new RowDefinition(new GridLength(2, GridUnitType.Star)));  // bottom 2/3
@@ -494,6 +602,7 @@ public partial class MainWindow : Window
     // Recomputes the project list from the current source + filter + sort, refreshing it in place.
     void RefreshHomeList() => CrashHandler.Safe(() =>
     {
+        if (_sketchMode) return;   // sketch view manages its own list
         var items = HomeItems();
         if (!string.IsNullOrWhiteSpace(_homeFilter))
             items = items.Where(it => ProjectName(it.path).Contains(_homeFilter, StringComparison.OrdinalIgnoreCase)).ToList();
