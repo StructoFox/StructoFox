@@ -14,11 +14,11 @@ public static class CodeEntityService
 
     // The plan's structure folder (entities + diagrams + boards). Named "structure", not "code": it holds
     // the design/model, while generated code is an export-time output that lives elsewhere.
-    public static string CodeFolder(string projFolder) =>
+    public static string StructureFolder(string projFolder) =>
         Path.Combine(projFolder, "PROJECTPLAN", "structure");
 
     private static string EntityFolder(string projFolder, string entityType) =>
-        Path.Combine(CodeFolder(projFolder), entityType);
+        Path.Combine(StructureFolder(projFolder), entityType);
 
     private static string EntityFilePath(string projFolder, string entityType, string entityId) =>
         Path.Combine(EntityFolder(projFolder, entityType), entityId + ".json");
@@ -84,7 +84,7 @@ public static class CodeBoardDataService
     private static readonly JsonSerializerOptions ReadOpts  = new() { PropertyNameCaseInsensitive = true };
 
     private static string BoardFilePath(string projFolder, string boardId) =>
-        Path.Combine(CodeEntityService.CodeFolder(projFolder), $"_board_{boardId}.json");
+        Path.Combine(CodeEntityService.StructureFolder(projFolder), $"_board_{boardId}.json");
 
     public static CodeBoardData Load(string projFolder, string boardId)
     {
@@ -98,7 +98,7 @@ public static class CodeBoardDataService
     {
         try
         {
-            Directory.CreateDirectory(CodeEntityService.CodeFolder(projFolder));
+            Directory.CreateDirectory(CodeEntityService.StructureFolder(projFolder));
             File.WriteAllText(BoardFilePath(projFolder, boardId),
                 JsonSerializer.Serialize(data, WriteOpts));
         }
@@ -119,7 +119,7 @@ public static class FlowChartService
         key.Replace('#', '_').Replace(':', '_');
 
     private static string FlowFilePath(string projFolder, string key) =>
-        Path.Combine(CodeEntityService.CodeFolder(projFolder), "flow", $"_flow_{SafeKey(key)}.json");
+        Path.Combine(CodeEntityService.StructureFolder(projFolder), "flow", $"_flow_{SafeKey(key)}.json");
 
     public static bool Exists(string projFolder, string key) =>
         File.Exists(FlowFilePath(projFolder, key));
@@ -136,7 +136,7 @@ public static class FlowChartService
     {
         try
         {
-            Directory.CreateDirectory(Path.Combine(CodeEntityService.CodeFolder(projFolder), "flow"));
+            Directory.CreateDirectory(Path.Combine(CodeEntityService.StructureFolder(projFolder), "flow"));
             File.WriteAllText(FlowFilePath(projFolder, key),
                 JsonSerializer.Serialize(data, WriteOpts));
         }
@@ -156,7 +156,7 @@ public static class StructogramService
     private static string SafeKey(string key) => key.Replace('#', '_').Replace(':', '_');
 
     private static string FilePath(string projFolder, string key) =>
-        Path.Combine(CodeEntityService.CodeFolder(projFolder), "struct", $"_struct_{SafeKey(key)}.json");
+        Path.Combine(CodeEntityService.StructureFolder(projFolder), "struct", $"_struct_{SafeKey(key)}.json");
 
     public static bool Exists(string projFolder, string key) => File.Exists(FilePath(projFolder, key));
 
@@ -172,7 +172,7 @@ public static class StructogramService
     {
         try
         {
-            Directory.CreateDirectory(Path.Combine(CodeEntityService.CodeFolder(projFolder), "struct"));
+            Directory.CreateDirectory(Path.Combine(CodeEntityService.StructureFolder(projFolder), "struct"));
             File.WriteAllText(FilePath(projFolder, key), JsonSerializer.Serialize(data, WriteOpts));
         }
         catch { }
@@ -189,7 +189,7 @@ public static class CodeBoardRegistryService
     private static readonly JsonSerializerOptions ReadOpts  = new() { PropertyNameCaseInsensitive = true };
 
     private static string RegistryPath(string projFolder) =>
-        Path.Combine(CodeEntityService.CodeFolder(projFolder), "_boards.json");
+        Path.Combine(CodeEntityService.StructureFolder(projFolder), "_boards.json");
 
     public static List<CodeBoard> Load(string projFolder)
     {
@@ -207,7 +207,7 @@ public static class CodeBoardRegistryService
     {
         try
         {
-            Directory.CreateDirectory(CodeEntityService.CodeFolder(projFolder));
+            Directory.CreateDirectory(CodeEntityService.StructureFolder(projFolder));
             File.WriteAllText(RegistryPath(projFolder),
                 JsonSerializer.Serialize(boards, WriteOpts));
         }

@@ -97,12 +97,12 @@ public static class SketchbookService
         list.RemoveAll(x => x.Id == id);
         SaveAll(list);
         // Best-effort cleanup of the backing diagram data.
-        var code = CodeEntityService.CodeFolder(Root);
+        var dir = CodeEntityService.StructureFolder(Root);
         foreach (var p in new[]
         {
-            System.IO.Path.Combine(code, "flow",   $"_flow_{id}.json"),
-            System.IO.Path.Combine(code, "struct", $"_struct_{id}.json"),
-            System.IO.Path.Combine(code, $"_board_{id}.json"),
+            System.IO.Path.Combine(dir, "flow",   $"_flow_{id}.json"),
+            System.IO.Path.Combine(dir, "struct", $"_struct_{id}.json"),
+            System.IO.Path.Combine(dir, $"_board_{id}.json"),
         })
             try { if (File.Exists(p)) File.Delete(p); } catch { }
     }
