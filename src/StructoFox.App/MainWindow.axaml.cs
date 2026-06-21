@@ -536,7 +536,10 @@ public partial class MainWindow : Window
     {
         var root = SketchbookService.Root;
         System.IO.Directory.CreateDirectory(root);
-        _ = ProjectService.Load(root) ?? ProjectService.Create(root, Loc.S("Sketch_Title"));
+        // Name the workspace exactly like its folder ("Sketchbook") in every language, so the cockpit name
+        // matches what the user sees in the file system. Also corrects an older marker (e.g. "Skizzenbuch").
+        var info = ProjectService.Load(root);
+        if (info is null || info.Name != "Sketchbook") ProjectService.Create(root, "Sketchbook");
         _project = root;
         _sketchMode = false;
         _railButtons.Clear();
