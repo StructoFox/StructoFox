@@ -105,6 +105,8 @@ public static class Loc
         ["Sketch_Empty"]    = "No sketches yet — create one above.",
         ["Sketch_NamePrompt"] = "Sketch name:",
         ["Sketch_DeleteConfirm"] = "Delete sketch “{0}”? Its diagram is removed too.",
+        ["Sketch_Open"]     = "📂 Open in editor",
+        ["Sketch_OpenTip"]  = "Browse the whole sketchbook as a workspace — to clean up classes/objects created on a board",
 
         // Main (entry point) tab
         ["Main_Blurb"]  = "The program's entry point — its main(). One per project; it gets its own tab so it stays in sight.",
@@ -484,6 +486,8 @@ public static class Loc
         ["Sketch_Empty"]    = "Noch keine Skizzen — oben eine anlegen.",
         ["Sketch_NamePrompt"] = "Skizzen-Name:",
         ["Sketch_DeleteConfirm"] = "Skizze “{0}” löschen? Das Diagramm wird mitgelöscht.",
+        ["Sketch_Open"]     = "📂 Im Editor öffnen",
+        ["Sketch_OpenTip"]  = "Das ganze Skizzenbuch als Arbeitsbereich öffnen — zum Aufräumen von Klassen/Objekten, die auf einem Board entstanden sind",
 
         // Cockpit / section chrome
         ["Sec_New"]         = "＋ Neu: {0}",

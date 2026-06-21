@@ -383,6 +383,10 @@ public partial class MainWindow : Window
         NewBtn(Loc.S("Sketch_NewPap"),    SketchType.Pap);
         NewBtn(Loc.S("Sketch_NewStruct"), SketchType.Structogram);
         NewBtn(Loc.S("Sketch_NewBoard"),  SketchType.Board);
+        create.Children.Add(new Border { Width = 16 });
+        var browse = Ui.Btn(Loc.S("Sketch_Open"), Loc.S("Sketch_OpenTip"));
+        browse.Click += (_, _) => OpenSketchbookWorkspace();
+        create.Children.Add(browse);
         Grid.SetRow(create, 1); grid.Children.Add(create);
 
         var sketches = SketchbookService.Load();
@@ -443,6 +447,20 @@ public partial class MainWindow : Window
         OpenSketch(s);
         _body.Content = BuildHome();   // refresh the list
     }, "NewSketch");
+
+    // Opens the whole sketchbook folder in the cockpit — the browser for cleaning up entities/boards that
+    // were created on a sketch (so deleting a board's classes/objects is possible). Not added to recents.
+    void OpenSketchbookWorkspace() => CrashHandler.Safe(() =>
+    {
+        var root = SketchbookService.Root;
+        System.IO.Directory.CreateDirectory(root);
+        _ = ProjectService.Load(root) ?? ProjectService.Create(root, Loc.S("Sketch_Title"));
+        _project = root;
+        _sketchMode = false;
+        _railButtons.Clear();
+        _body.Content = BuildCockpit();
+        ShowSection(_section);
+    }, "OpenSketchbookWorkspace");
 
     // Opens a sketch in its editor (the sketchbook folder doubles as the project folder).
     void OpenSketch(Sketch s) => CrashHandler.Safe(() =>
