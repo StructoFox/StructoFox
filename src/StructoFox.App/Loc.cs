@@ -486,9 +486,9 @@ public static class Loc
     static readonly Dictionary<string, string> De = new()
     {
         // Entwürfe (Einzel-Diagramme ohne Projekt)
-        ["Sketch_Nav"]      = "✏  Entwürfe",
+        ["Sketch_Nav"]      = "✏  Sketchbook",
         ["Sketch_NavTip"]   = "Einzel-Diagramme ohne Projekt (Ordner: Dokumente/StructoFox/Sketchbook)",
-        ["Sketch_Title"]    = "Entwürfe",
+        ["Sketch_Title"]    = "Sketchbook",
         ["Sketch_NewPap"]   = "＋ 🔁 PAP",
         ["Sketch_NewStruct"] = "＋ ▦ Struktogramm",
         ["Sketch_NewBoard"] = "＋ 🗺 Board",
