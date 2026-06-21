@@ -324,12 +324,62 @@ public class FlowChartWindow : Window
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
+            case Key.C:                                 CopySelection(); e.Handled = true; break;
+            case Key.V:                                 PasteClipboard(); e.Handled = true; break;
             case Key.Z when !shift:                     Undo(); e.Handled = true; break;
             case Key.Y or Key.Z:                        Redo(); e.Handled = true; break;   // Ctrl+Y or Ctrl+Shift+Z
             case Key.D0 or Key.NumPad0:                 SetZoom(1.0); e.Handled = true; break;
             case Key.OemPlus or Key.Add or Key.Up:      SetZoom(_zoom + 0.1); e.Handled = true; break;
             case Key.OemMinus or Key.Subtract or Key.Down: SetZoom(_zoom - 0.1); e.Handled = true; break;
         }
+    }
+
+    // ── Copy / paste (selected nodes + the connections wholly within the selection) ──────────────────
+    sealed class ClipPayload { public List<FlowNode> Nodes { get; set; } = new(); public List<FlowConnection> Connections { get; set; } = new(); }
+    static string? _clip;   // shared across flowchart windows (in-process)
+
+    void CopySelection()
+    {
+        if (_selected.Count == 0) return;
+        var payload = new ClipPayload
+        {
+            Nodes       = _data.Nodes.Where(n => _selected.Contains(n.Id)).ToList(),
+            Connections = _data.Connections.Where(c => _selected.Contains(c.FromId) && _selected.Contains(c.ToId)).ToList(),
+        };
+        _clip = System.Text.Json.JsonSerializer.Serialize(payload);
+    }
+
+    void PasteClipboard()
+    {
+        if (_clip is null) return;
+        ClipPayload? p;
+        try { p = System.Text.Json.JsonSerializer.Deserialize<ClipPayload>(_clip, _undoJson); } catch { return; }
+        if (p is null || p.Nodes.Count == 0) return;
+
+        const double off = 24;
+        var idMap = new Dictionary<string, string>();
+        _selected.Clear();
+        foreach (var n in p.Nodes)
+        {
+            var old = n.Id;
+            n.Id = Guid.NewGuid().ToString("N")[..8];
+            idMap[old] = n.Id;
+            n.X = Snap(n.X + off); n.Y = Snap(n.Y + off);
+            _data.Nodes.Add(n);
+            _selected.Add(n.Id);
+            RenderNode(n);
+        }
+        foreach (var c in p.Connections)
+        {
+            if (!idMap.TryGetValue(c.FromId, out var f) || !idMap.TryGetValue(c.ToId, out var t)) continue;
+            c.Id = Guid.NewGuid().ToString("N")[..8];
+            c.FromId = f; c.ToId = t;
+            foreach (var w in c.Waypoints) { w.X += off; w.Y += off; }
+            _data.Connections.Add(c);
+            RenderConnection(c);
+        }
+        RefreshSelection();
+        Save();
     }
 
     // Applies the current zoom as a LayoutTransform, so the scroll viewer sees the scaled size and can

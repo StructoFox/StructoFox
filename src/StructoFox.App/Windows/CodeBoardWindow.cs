@@ -343,6 +343,66 @@ public class CodeBoardWindow : Window
 
     // Keyboard: Delete removes the selection; Ctrl+Z/Y undo/redo; Ctrl+0 resets zoom, Ctrl +/- and
     // Ctrl+Up/Down zoom.
+    // ── Copy / paste: duplicates the selected entities (new ids + new port ids) and the relations among
+    // them, so pasted cards are independent copies wired up correctly. Shared across board windows. ──
+    sealed class BoardClip
+    {
+        public List<CodeEntity>                     Entities  { get; set; } = new();
+        public Dictionary<string, CodeCardPosition> Positions { get; set; } = new();   // keyed by old entity id
+        public List<CodeRelation>                   Relations { get; set; } = new();
+    }
+    static string? _boardClip;
+
+    void CopySelection()
+    {
+        if (_selectedIds.Count == 0) return;
+        var clip = new BoardClip
+        {
+            Entities  = _selectedIds.Where(_entities.ContainsKey).Select(id => _entities[id]).ToList(),
+            Positions = _selectedIds.Where(_boardData.Positions.ContainsKey).ToDictionary(id => id, id => _boardData.Positions[id]),
+            Relations = _boardData.Relations.Where(r => _selectedIds.Contains(r.FromId) && _selectedIds.Contains(r.ToId)).ToList(),
+        };
+        _boardClip = System.Text.Json.JsonSerializer.Serialize(clip);
+    }
+
+    void PasteClipboard()
+    {
+        if (_boardClip is null) return;
+        BoardClip? p;
+        try { p = System.Text.Json.JsonSerializer.Deserialize<BoardClip>(_boardClip, _undoJson); } catch { return; }
+        if (p is null || p.Entities.Count == 0) return;
+
+        const double off = 24;
+        string Nid() => Guid.NewGuid().ToString("N")[..8];
+        var entMap = new Dictionary<string, string>();
+        var portMap = new Dictionary<string, string>();
+        _selectedIds.Clear();
+
+        foreach (var e in p.Entities)
+        {
+            var oldE = e.Id; e.Id = Nid(); entMap[oldE] = e.Id;
+            foreach (var port in e.Ports) { var oldP = port.Id; port.Id = Nid(); portMap[oldP] = port.Id; }
+            CodeEntityService.Save(_projFolder, e.EntityType.ToString(), e);   // a copy is a new entity
+            _entities[e.Id] = e;
+
+            var pos = p.Positions.TryGetValue(oldE, out var pp) ? pp : new CodeCardPosition();
+            pos.X = Math.Max(0, pos.X + off); pos.Y = Math.Max(0, pos.Y + off);
+            _boardData.Positions[e.Id] = pos;
+            RenderCard(e, pos);
+            _selectedIds.Add(e.Id);
+        }
+        foreach (var r in p.Relations)
+        {
+            if (!entMap.TryGetValue(r.FromId, out var nf) || !entMap.TryGetValue(r.ToId, out var nt)) continue;
+            r.Id = Nid(); r.FromId = nf; r.ToId = nt;
+            if (portMap.TryGetValue(r.FromPortId, out var fp)) r.FromPortId = fp;
+            if (portMap.TryGetValue(r.ToPortId, out var tp)) r.ToPortId = tp;
+            _boardData.Relations.Add(r);
+        }
+        Save();
+        Dispatcher.UIThread.Post(() => { RenderAllRelations(); RefreshSelectionVisuals(); }, DispatcherPriority.Loaded);
+    }
+
     void HandleKey(KeyEventArgs e)
     {
         if (e.Key == Key.Delete && _selectedIds.Count > 0) { RemoveSelectedFromBoard(); return; }
@@ -350,6 +410,8 @@ public class CodeBoardWindow : Window
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
+            case Key.C:                                    CopySelection(); e.Handled = true; break;
+            case Key.V:                                    PasteClipboard(); e.Handled = true; break;
             case Key.Z when !shift:                        Undo(); e.Handled = true; break;
             case Key.Y or Key.Z:                           Redo(); e.Handled = true; break;
             case Key.D0 or Key.NumPad0:                    SetZoom(1.0); e.Handled = true; break;
