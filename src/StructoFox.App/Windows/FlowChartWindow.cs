@@ -188,8 +188,15 @@ public class FlowChartWindow : Window
             Width = 3000, Height = 2000, ClipToBounds = false,
             Background = new SolidColorBrush(Color.Parse(_style.BackgroundColor)),  // diagram surface, not app theme
         };
-        // Wrap the canvas so zoom can use a LayoutTransform (scales the scrollable extent too).
-        _zoomHost = new LayoutTransformControl { Child = _canvas };
+        // Wrap the canvas so zoom can use a LayoutTransform (scales the scrollable extent too). Pin it
+        // top-left so that when it's zoomed smaller than the viewport it stays at the top-left corner
+        // instead of drifting to the right/bottom.
+        _zoomHost = new LayoutTransformControl
+        {
+            Child = _canvas,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment   = VerticalAlignment.Top,
+        };
         _scroll.Content = _zoomHost;
 
         // Empty-canvas interactions (node clicks are handled and don't bubble here):
@@ -1100,6 +1107,7 @@ public class FlowChartWindow : Window
                         if ((c.FromId == id || c.ToId == id) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
                     UpdateConnectionsFor(id);   // re-route attached arrows with full A* now the drag settled
                 }
+                GrowLeftTopFor(moved);   // make room if something was pushed to the left/top edge
                 RenderCrossovers();
                 Save();
             }
@@ -1630,6 +1638,35 @@ public class FlowChartWindow : Window
         if (x + w + margin > _canvas.Width)  { _canvas.Width  = x + w + margin; grew = true; }
         if (y + h + margin > _canvas.Height) { _canvas.Height = y + h + margin; grew = true; }
         if (grew && _gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
+    }
+
+    // Grows the canvas towards the LEFT/TOP: since a Canvas can't hold negative coordinates, shift every
+    // node + waypoint by (dx,dy), enlarge the surface, and scroll by the same amount so the view doesn't
+    // jump. Used when content is pushed against the left/top edge.
+    void ShiftWorld(double dx, double dy)
+    {
+        if (_canvas is null || (dx <= 0 && dy <= 0)) return;
+        dx = Math.Max(0, dx); dy = Math.Max(0, dy);
+        foreach (var n in _data.Nodes) { n.X += dx; n.Y += dy; }
+        foreach (var c in _data.Connections) foreach (var w in c.Waypoints) { w.X += dx; w.Y += dy; }
+        _canvas.Width += dx; _canvas.Height += dy;
+        if (_gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
+        if (_scroll is not null) _scroll.Offset = new Vector(_scroll.Offset.X + dx * _zoom, _scroll.Offset.Y + dy * _zoom);
+        foreach (var (id, v) in _nodeViews)
+            if (_data.Nodes.FirstOrDefault(n => n.Id == id) is { } nd) { Canvas.SetLeft(v, nd.X); Canvas.SetTop(v, nd.Y); }
+        foreach (var c in _data.Connections) RenderConnection(c);
+    }
+
+    // After moving nodes, if any sits hard against the left/top edge, grow the canvas there (shift the
+    // world) so there's room to keep working in that direction.
+    void GrowLeftTopFor(IEnumerable<string> movedIds)
+    {
+        const double pad = 40;
+        double minX = double.MaxValue, minY = double.MaxValue;
+        foreach (var id in movedIds)
+            if (_data.Nodes.FirstOrDefault(n => n.Id == id) is { } nd) { minX = Math.Min(minX, nd.X); minY = Math.Min(minY, nd.Y); }
+        if (minX == double.MaxValue) return;
+        ShiftWorld(minX < pad ? pad - minX : 0, minY < pad ? pad - minY : 0);
     }
 
     // ── Remove ─────────────────────────────────────────────────────────────
