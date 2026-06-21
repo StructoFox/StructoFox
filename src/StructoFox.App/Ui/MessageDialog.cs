@@ -55,20 +55,20 @@ public static class MessageDialog
         switch (buttons)
         {
             case DialogButtons.OkCancel:
-                Add("Cancel", DialogResult.Cancel);
-                Add("OK", DialogResult.Ok, isDefault: true);
+                Add(Loc.S("Common_Cancel"), DialogResult.Cancel);
+                Add(Loc.S("Common_OK"), DialogResult.Ok, isDefault: true);
                 break;
             case DialogButtons.YesNo:
-                Add("No", DialogResult.No);
-                Add("Yes", DialogResult.Yes, isDefault: true);
+                Add(Loc.S("Common_No"), DialogResult.No);
+                Add(Loc.S("Common_Yes"), DialogResult.Yes, isDefault: true);
                 break;
             case DialogButtons.YesNoCancel:
-                Add("Cancel", DialogResult.Cancel);
-                Add("No", DialogResult.No);
-                Add("Yes", DialogResult.Yes, isDefault: true);
+                Add(Loc.S("Common_Cancel"), DialogResult.Cancel);
+                Add(Loc.S("Common_No"), DialogResult.No);
+                Add(Loc.S("Common_Yes"), DialogResult.Yes, isDefault: true);
                 break;
             default:
-                Add("OK", DialogResult.Ok, isDefault: true);
+                Add(Loc.S("Common_OK"), DialogResult.Ok, isDefault: true);
                 break;
         }
 

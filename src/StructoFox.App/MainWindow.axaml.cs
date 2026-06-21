@@ -794,15 +794,33 @@ public partial class MainWindow : Window
     // Asks (via NewProjectDialog) where + what to name the project, registers the library, creates & opens it.
     Task NewProject() => CrashHandler.SafeAsync(async () =>
     {
-        var res = await NewProjectDialog.Show(this, Libraries.Load());
-        if (res is not { } r) return;
-        var (parent, name) = r;
-        if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(name)) return;
+        while (true)
+        {
+            var res = await NewProjectDialog.Show(this, Libraries.Load());
+            if (res is not { } r) return;
+            var (parent, name) = r;
+            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(name)) return;
 
-        Libraries.Add(parent);   // register the chosen folder as a library (no-op if already one)
-        var folder = Path.Combine(parent, SafeFolder(name));
-        ProjectService.Create(folder, name);
-        OpenProject(folder);
+            var folder = Path.Combine(parent, SafeFolder(name));
+
+            // Name/folder already a project in this library? Don't silently reopen it — ask.
+            if (ProjectService.IsProject(folder))
+            {
+                var ans = await MessageDialog.Show(this, string.Format(Loc.S("NewProj_ExistsMsg"), name),
+                    Loc.S("NewProj_ExistsTitle"), DialogButtons.YesNoCancel);
+                if (ans == DialogResult.Cancel) return;
+                if (ans == DialogResult.No) continue;   // pick another name
+                // Yes → open the existing one
+                Libraries.Add(parent);
+                OpenProject(folder);
+                return;
+            }
+
+            Libraries.Add(parent);   // register the chosen folder as a library (no-op if already one)
+            ProjectService.Create(folder, name);
+            OpenProject(folder);
+            return;
+        }
     }, "NewProject");
 
     // Registers a folder as a library to scan for projects.

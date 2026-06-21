@@ -152,8 +152,12 @@ public static class Loc
         ["NewProj_ChooseLib"] = "Create the project in:",
         ["NewProj_Browse"]    = "Browse…",
         ["NewProj_FreeFmt"]   = "{0} MB free on {1}",
+        ["NewProj_ExistsTitle"] = "Name already exists",
+        ["NewProj_ExistsMsg"]   = "A project “{0}” already exists in this library.\n\nYes = open it,  No = choose another name,  Cancel = abort.",
         ["Common_OK"]         = "OK",
         ["Common_Cancel"]     = "Cancel",
+        ["Common_Yes"]        = "Yes",
+        ["Common_No"]         = "No",
         ["Common_DontShowAgain"] = "Don't show this again",
 
         // Diagram chooser (DiagramLauncher)
@@ -732,7 +736,11 @@ public static class Loc
         ["StyleEd_SlotName"]  = "Slot-Name:",
         ["Common_OK"]         = "OK",
         ["Common_Cancel"]     = "Abbrechen",
+        ["Common_Yes"]        = "Ja",
+        ["Common_No"]         = "Nein",
         ["Common_DontShowAgain"] = "Nicht wieder anzeigen",
+        ["NewProj_ExistsTitle"] = "Name existiert bereits",
+        ["NewProj_ExistsMsg"]   = "Ein Projekt „{0}“ existiert in dieser Bibliothek bereits.\n\nJa = öffnen,  Nein = anderen Namen wählen,  Abbrechen = abbrechen.",
 
         // Entity editor dialog
         ["Common_Name"]            = "Name",
