@@ -39,6 +39,8 @@ public class FlowChartWindow : Window
     Line?    _rubberBand;
     readonly HashSet<string> _selected = new();
     double   _zoom = 1.0;
+    bool     _liveDrag;    // a node is being dragged → route attached arrows cheaply (no A*) until release
+    bool     _culling;     // re-entrancy guard for viewport culling
 
     Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
@@ -145,8 +147,7 @@ public class FlowChartWindow : Window
         _selected.Clear(); _connectFromId = null; _segConn = null;
         _canvas.Background = new SolidColorBrush(Color.Parse(_style.BackgroundColor));
         RenderGrid();
-        foreach (var n in _data.Nodes) RenderNode(n);
-        RenderAllConnections();
+        CullToViewport();   // realize only what's visible
         RefreshDecor();
         RefreshConnHeader();
         if (Title is not null) Title = string.Format(Loc.S("Flow_Title"), string.IsNullOrEmpty(_data.Title) ? Loc.S("Common_Untitled") : _data.Title);
@@ -252,9 +253,66 @@ public class FlowChartWindow : Window
         };
 
         RenderGrid();
-        foreach (var n in _data.Nodes) RenderNode(n);
-        RenderAllConnections();
         RefreshDecor();
+        // Realize only what's in (or near) the viewport, and re-cull on scroll/zoom — so a canvas with
+        // hundreds/thousands of symbols keeps few live controls.
+        _scroll!.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == ScrollViewer.OffsetProperty || e.Property == ScrollViewer.ViewportProperty) CullToViewport();
+        };
+        Dispatcher.UIThread.Post(CullToViewport, DispatcherPriority.Loaded);
+    }
+
+    // The visible canvas region in content coordinates (accounts for scroll offset and zoom). A huge
+    // fallback rect (everything visible) until the scroll viewer has measured.
+    Rect VisibleRect()
+    {
+        if (_scroll is null) return new Rect(0, 0, 1e6, 1e6);
+        double z = _zoom <= 0 ? 1 : _zoom;
+        var o = _scroll.Offset;
+        double w = _scroll.Viewport.Width  > 0 ? _scroll.Viewport.Width  : _scroll.Bounds.Width;
+        double h = _scroll.Viewport.Height > 0 ? _scroll.Viewport.Height : _scroll.Bounds.Height;
+        if (w <= 0 || h <= 0) return new Rect(0, 0, 1e6, 1e6);
+        return new Rect(o.X / z, o.Y / z, w / z, h / z);
+    }
+
+    // Realizes the nodes/connections that intersect the viewport (plus a margin) and drops those well
+    // outside — keeping the live control count proportional to what's on screen, not to the whole diagram.
+    void CullToViewport()
+    {
+        if (_canvas is null || _culling) return;
+        _culling = true;
+        try
+        {
+            var vis = VisibleRect().Inflate(400);
+
+            foreach (var n in _data.Nodes)
+            {
+                bool show = vis.Intersects(new Rect(n.X, n.Y, n.Width, n.Height)) || _selected.Contains(n.Id);
+                bool realized = _nodeViews.ContainsKey(n.Id);
+                if (show && !realized) RenderNode(n);
+                else if (!show && realized) { _canvas.Children.Remove(_nodeViews[n.Id]); _nodeViews.Remove(n.Id); }
+            }
+
+            foreach (var c in _data.Connections)
+            {
+                var a = NodeRect(c.FromId); var b = NodeRect(c.ToId);
+                bool realized = _connViews.ContainsKey(c.Id);
+                bool show = false;
+                if (a is not null && b is not null)
+                {
+                    var bbox = new Rect(
+                        Math.Min(a.Value.X, b.Value.X), Math.Min(a.Value.Y, b.Value.Y),
+                        Math.Abs(a.Value.X - b.Value.X) + Math.Max(a.Value.Width, b.Value.Width),
+                        Math.Abs(a.Value.Y - b.Value.Y) + Math.Max(a.Value.Height, b.Value.Height));
+                    foreach (var w in c.Waypoints) bbox = bbox.Union(new Rect(w.X - 1, w.Y - 1, 2, 2));
+                    show = vis.Intersects(bbox);
+                }
+                if (show && !realized) RenderConnection(c);
+                else if (!show && realized) { foreach (var v in _connViews[c.Id]) _canvas.Children.Remove(v); _connViews.Remove(c.Id); }
+            }
+        }
+        finally { _culling = false; }
     }
 
     // Keyboard: Delete removes the selection; Ctrl+Z/Y undo/redo; Ctrl+0 resets zoom, Ctrl +/- and
@@ -281,6 +339,7 @@ public class FlowChartWindow : Window
         if (_zoomHost is not null)
             _zoomHost.LayoutTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
         UpdateZoomLabel();
+        CullToViewport();
     }
 
     // Keyboard / button zoom: anchor on the viewport centre.
@@ -869,7 +928,7 @@ public class FlowChartWindow : Window
             if (!dragging)
             {
                 if (Math.Abs(pt.X - pressPos.X) < 4 && Math.Abs(pt.Y - pressPos.Y) < 4) return;   // movement threshold
-                dragging = true;
+                dragging = true; _liveDrag = true;   // route attached arrows cheaply until release
             }
             // Snap the node's CENTRE to the grid: centre-aligned nodes give straight orthogonal arrows.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
@@ -886,10 +945,11 @@ public class FlowChartWindow : Window
             pressed = false; e.Pointer.Capture(null);
             if (dragging)
             {
-                dragging = false;
+                dragging = false; _liveDrag = false;
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
                 foreach (var c in _data.Connections)
-                    if ((c.FromId == node.Id || c.ToId == node.Id) && c.Waypoints.Count > 0) { NormalizeWaypoints(c); RenderConnection(c); }
+                    if ((c.FromId == node.Id || c.ToId == node.Id) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
+                UpdateConnectionsFor(node.Id);   // re-route attached arrows with full A* now the drag settled
                 Save();
             }
             else if (ConnectMode) HandleConnectClick(node.Id);   // a click (no drag) wires the arrow
@@ -1169,7 +1229,9 @@ public class FlowChartWindow : Window
             ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
             : conn.Waypoints.Count > 0
                 ? ManualRoute(a.Value, b.Value, conn)
-                : Simplify(OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
+                // During a live node drag, route cheaply (no A*); the full obstacle-avoiding route is
+                // recomputed once on release.
+                : Simplify(_liveDrag ? OrthoRoute(a.Value, b.Value) : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
 
         // All arrows share the diagram's arrow colour, so they stay uniform (and follow the Options picker).
         var brush   = new SolidColorBrush(ParseColor(_style.LineColor));
