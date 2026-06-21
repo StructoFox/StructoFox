@@ -26,10 +26,16 @@ public class StructogramWindow : Window
     Border? _hostBorder;
 
     // The diagram surface look — user-controlled, theme-independent, persisted with the diagram.
-    readonly DiagramStyle _style;
+    DiagramStyle _style;   // not readonly: undo/redo swaps _data (and thus its Style)
     IBrush _lineBrush = Brushes.Black;   // structural lines / borders
     IBrush _textBrush = Brushes.Black;   // block text
     IBrush _bgBrush   = Brushes.White;   // canvas background
+
+    // Snapshot-based undo/redo of the structogram (JSON of _data), recorded at each Save() boundary.
+    readonly List<string> _undo = new();
+    readonly List<string> _redo = new();
+    string _snapshot = "";
+    static readonly System.Text.Json.JsonSerializerOptions _undoJson = new() { PropertyNameCaseInsensitive = true };
 
     ContextMenu? _menu;   // the one open context menu, so a new one closes the old (no stacking)
 
@@ -45,6 +51,7 @@ public class StructogramWindow : Window
         _data       = StructogramService.Load(projFolder, key);
         if (string.IsNullOrEmpty(_data.Title)) _data.Title = title;
         _style      = _data.Style;   // persisted with the diagram
+        _snapshot   = System.Text.Json.JsonSerializer.Serialize(_data);   // baseline for undo
 
         Title                 = string.Format(Loc.S("Struct_Title"),
                                     string.IsNullOrEmpty(title) ? Loc.S("Common_Untitled") : title);
@@ -63,7 +70,52 @@ public class StructogramWindow : Window
     }
 
     // Persists the current structogram to disk after every edit.
-    void Save() => StructogramService.Save(_projFolder, _key, _data);
+    void Save()
+    {
+        var cur = System.Text.Json.JsonSerializer.Serialize(_data);
+        if (cur != _snapshot)
+        {
+            _undo.Add(_snapshot);
+            if (_undo.Count > 100) _undo.RemoveAt(0);
+            _redo.Clear();
+            _snapshot = cur;
+        }
+        StructogramService.Save(_projFolder, _key, _data);
+    }
+
+    void Undo()
+    {
+        if (_undo.Count == 0) return;
+        _redo.Add(_snapshot);
+        _snapshot = _undo[^1]; _undo.RemoveAt(_undo.Count - 1);
+        ApplySnapshot(_snapshot);
+    }
+
+    void Redo()
+    {
+        if (_redo.Count == 0) return;
+        _undo.Add(_snapshot);
+        _snapshot = _redo[^1]; _redo.RemoveAt(_redo.Count - 1);
+        ApplySnapshot(_snapshot);
+    }
+
+    // Restores a serialized state, persists it and rebuilds the diagram (incl. its surface brushes).
+    void ApplySnapshot(string json)
+    {
+        StructogramData? d;
+        try { d = System.Text.Json.JsonSerializer.Deserialize<StructogramData>(json, _undoJson); } catch { return; }
+        if (d is null) return;
+        _data = d;
+        _style = _data.Style;
+        _lineBrush = new SolidColorBrush(Color.Parse(_style.LineColor));
+        _textBrush = new SolidColorBrush(Color.Parse(_style.TextColor));
+        _bgBrush   = new SolidColorBrush(Color.Parse(_style.BackgroundColor));
+        if (_hostBorder is not null) _hostBorder.Background = _bgBrush;
+        StructogramService.Save(_projFolder, _key, _data);
+        Rebuild();
+        RefreshDecor();
+        Title = string.Format(Loc.S("Struct_Title"), string.IsNullOrEmpty(_data.Title) ? Loc.S("Common_Untitled") : _data.Title);
+    }
 
     // Assembles the toolbar + scrollable diagram host, then renders the tree once.
     void Build()
@@ -73,6 +125,15 @@ public class StructogramWindow : Window
         root.RowDefinitions.Add(new RowDefinition(GridLength.Star));
         Content = root;
         _root = root;
+
+        Focusable = true;
+        KeyDown += (_, e) =>
+        {
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+            bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            if (e.Key == Key.Z && !shift) { Undo(); e.Handled = true; }
+            else if (e.Key == Key.Y || e.Key == Key.Z) { Redo(); e.Handled = true; }
+        };
 
         // Toolbar: a background-colour button plus a usage hint.
         var bar = new Border { Padding = new(12, 8, 12, 8) };

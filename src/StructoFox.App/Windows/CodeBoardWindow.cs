@@ -39,6 +39,12 @@ public class CodeBoardWindow : Window
     readonly Dictionary<string, Ellipse>    _portDots  = new();   // "{entityId}:{portId}" → dot
     readonly Dictionary<string, List<Control>> _relViews = new(); // relation id → line/arrow/hit visuals
 
+    // Snapshot-based undo/redo of the board (JSON of _boardData), recorded at each Save() boundary.
+    readonly List<string> _undo = new();
+    readonly List<string> _redo = new();
+    string _snapshot = "";
+    static readonly System.Text.Json.JsonSerializerOptions _undoJson = new() { PropertyNameCaseInsensitive = true };
+
     // Connect mode
     bool    _connectMode;
     string? _connectFromEntityId;
@@ -81,6 +87,7 @@ public class CodeBoardWindow : Window
         // A board authors a body when it carries an assignment — the single source of truth.
         _bodyTargetKey = string.IsNullOrWhiteSpace(board.TargetKey) ? null : board.TargetKey;
         _boardData  = CodeBoardDataService.Load(projFolder, board.Id);
+        _snapshot   = System.Text.Json.JsonSerializer.Serialize(_boardData);   // baseline for undo
 
         Title                 = board.Symbol + "  " + board.Name;
         Width                 = 1280;
@@ -97,7 +104,62 @@ public class CodeBoardWindow : Window
         BuildContent();
     }
 
-    void Save() => CodeBoardDataService.Save(_projFolder, _board.Id, _boardData);
+    void Save()
+    {
+        var cur = System.Text.Json.JsonSerializer.Serialize(_boardData);
+        if (cur != _snapshot)
+        {
+            _undo.Add(_snapshot);
+            if (_undo.Count > 100) _undo.RemoveAt(0);
+            _redo.Clear();
+            _snapshot = cur;
+        }
+        CodeBoardDataService.Save(_projFolder, _board.Id, _boardData);
+    }
+
+    void Undo()
+    {
+        if (_undo.Count == 0) return;
+        _redo.Add(_snapshot);
+        _snapshot = _undo[^1]; _undo.RemoveAt(_undo.Count - 1);
+        ApplySnapshot(_snapshot);
+    }
+
+    void Redo()
+    {
+        if (_redo.Count == 0) return;
+        _undo.Add(_snapshot);
+        _snapshot = _redo[^1]; _redo.RemoveAt(_redo.Count - 1);
+        ApplySnapshot(_snapshot);
+    }
+
+    // Restores a serialized board state, persists it and rebuilds the canvas.
+    void ApplySnapshot(string json)
+    {
+        CodeBoardData? d;
+        try { d = System.Text.Json.JsonSerializer.Deserialize<CodeBoardData>(json, _undoJson); } catch { return; }
+        if (d is null) return;
+        _boardData = d;
+        CodeBoardDataService.Save(_projFolder, _board.Id, _boardData);
+        RebuildBoard();
+    }
+
+    // Clears and re-renders the whole board from _boardData (after an undo/redo).
+    void RebuildBoard()
+    {
+        if (_canvas is null) return;
+        _canvas.Children.Clear();
+        _cards.Clear(); _portDots.Clear(); _relViews.Clear();
+        _gridRect = null;
+        _selectedIds.Clear(); _selectionAnchor = null;
+        RenderGrid();
+        foreach (var kv in _boardData.Positions.ToList())
+        {
+            if (_entities.TryGetValue(kv.Key, out var entity)) RenderCard(entity, kv.Value);
+            else _boardData.Positions.Remove(kv.Key);
+        }
+        Dispatcher.UIThread.Post(RenderAllRelations, DispatcherPriority.Loaded);
+    }
 
     // ── Build ──────────────────────────────────────────────────────────────
 
@@ -279,13 +341,17 @@ public class CodeBoardWindow : Window
 
     static string Inv(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
-    // Keyboard: Delete removes the selection; Ctrl+0 resets zoom, Ctrl +/- and Ctrl+Up/Down zoom.
+    // Keyboard: Delete removes the selection; Ctrl+Z/Y undo/redo; Ctrl+0 resets zoom, Ctrl +/- and
+    // Ctrl+Up/Down zoom.
     void HandleKey(KeyEventArgs e)
     {
         if (e.Key == Key.Delete && _selectedIds.Count > 0) { RemoveSelectedFromBoard(); return; }
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
+            case Key.Z when !shift:                        Undo(); e.Handled = true; break;
+            case Key.Y or Key.Z:                           Redo(); e.Handled = true; break;
             case Key.D0 or Key.NumPad0:                    SetZoom(1.0); e.Handled = true; break;
             case Key.OemPlus or Key.Add or Key.Up:         SetZoom(_zoom + 0.1); e.Handled = true; break;
             case Key.OemMinus or Key.Subtract or Key.Down: SetZoom(_zoom - 0.1); e.Handled = true; break;
