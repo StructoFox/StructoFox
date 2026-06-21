@@ -380,6 +380,10 @@ public class CodeBoardWindow : Window
 
         foreach (var e in p.Entities)
         {
+            // Only the entity itself + its ports get fresh ids. Cross-references are deliberately NOT
+            // remapped, so they stay pointing at the originals: an Object keeps InstanceOfId (stays an
+            // instance of the SAME class — many objects of one class is normal), and BaseClassId /
+            // ImplementsIds / Namespace stay as-is too.
             var oldE = e.Id; e.Id = Nid(); entMap[oldE] = e.Id;
             foreach (var port in e.Ports) { var oldP = port.Id; port.Id = Nid(); portMap[oldP] = port.Id; }
             CodeEntityService.Save(_projFolder, e.EntityType.ToString(), e);   // a copy is a new entity

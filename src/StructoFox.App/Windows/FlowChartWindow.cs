@@ -361,6 +361,8 @@ public class FlowChartWindow : Window
         _selected.Clear();
         foreach (var n in p.Nodes)
         {
+            // Only the node gets a fresh id. RefId is deliberately preserved: a copied subroutine node
+            // still references the SAME library function (a subroutine is itself just a reference).
             var old = n.Id;
             n.Id = Guid.NewGuid().ToString("N")[..8];
             idMap[old] = n.Id;
