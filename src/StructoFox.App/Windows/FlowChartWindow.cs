@@ -576,6 +576,12 @@ public class FlowChartWindow : Window
         var proc = Cat(Loc.S("Flow_CatProcess"));
         proc.Items.Add(MI(Loc.S("Flow_Process"),    () => AddNode(FlowNodeKind.Process)));
         proc.Items.Add(MI(Loc.S("Flow_Subroutine"), () => AddNode(FlowNodeKind.Subroutine)));
+        proc.Items.Add(new Separator());
+        proc.Items.Add(MI(Loc.S("Flow_SymPreparation"),     () => AddNode(FlowNodeKind.Process, FlowSymbol.Preparation)));
+        proc.Items.Add(MI(Loc.S("Flow_SymManualOperation"), () => AddNode(FlowNodeKind.Process, FlowSymbol.ManualOperation)));
+        proc.Items.Add(MI(Loc.S("Flow_SymLoopLimit"),       () => AddNode(FlowNodeKind.Process, FlowSymbol.LoopLimit)));
+        proc.Items.Add(MI(Loc.S("Flow_SymDelay"),           () => AddNode(FlowNodeKind.Process, FlowSymbol.Delay)));
+        proc.Items.Add(MI(Loc.S("Flow_SymParallel"),        () => AddNode(FlowNodeKind.Process, FlowSymbol.Parallel)));
         shapeMenu.Items.Add(proc);
 
         shapeMenu.Items.Add(Act(Loc.S("Flow_Decision"), FlowNodeKind.Decision));
@@ -591,6 +597,23 @@ public class FlowChartWindow : Window
         io.Items.Add(MI(Loc.S("Flow_SymMagneticDisk"), () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.MagneticDisk)));
         io.Items.Add(MI(Loc.S("Flow_SymStoredData"),   () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.StoredData)));
         shapeMenu.Items.Add(io);
+
+        // Extended ISO data/system symbols + cloud — rebuilt on open so it reflects the "extended ISO"
+        // option (the whole category is hidden when that's off).
+        var data = Cat(Loc.S("Flow_CatData"));
+        void FillData()
+        {
+            data.Items.Clear();
+            if (!_data.ExtendedIso) { data.Items.Add(new MenuItem { Header = Loc.S("Flow_ExtOff"), IsEnabled = false }); return; }
+            data.Items.Add(MI(Loc.S("Flow_SymSort"),    () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Sort)));
+            data.Items.Add(MI(Loc.S("Flow_SymMerge"),   () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Merge)));
+            data.Items.Add(MI(Loc.S("Flow_SymExtract"), () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Extract)));
+            data.Items.Add(MI(Loc.S("Flow_SymCollate"), () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.Collate)));
+            data.Items.Add(MI(Loc.S("Flow_SymCloud"),   () => AddNode(FlowNodeKind.InputOutput, FlowSymbol.CloudStorage)));
+        }
+        FillData();
+        data.SubmenuOpened += (_, _) => FillData();
+        shapeMenu.Items.Add(data);
 
         // The merged Connect menu: drawing mode + connector/junction/off-page + the line style. Its header
         // shows the active arrow style (and a ● when drawing), so "Verbinder"/"Verbinden" are one button.
@@ -771,6 +794,13 @@ public class FlowChartWindow : Window
         op.PropertyChanged += (_, ev) => { if (ev.Property == Slider.ValueProperty) { _style.GridOpacity = op.Value; RenderGrid(); } };
         op.PointerCaptureLost += (_, _) => Save();
         panel.Children.Add(op);
+
+        // Extended ISO symbols (data/system + cloud). Off = core program-flowchart symbols only; placed
+        // extended symbols get flagged. Saved with the diagram.
+        panel.Children.Add(new Separator());
+        var ext = new CheckBox { Content = Loc.S("Flow_ExtIso"), IsChecked = _data.ExtendedIso };
+        ext.IsCheckedChanged += (_, _) => { _data.ExtendedIso = ext.IsChecked == true; Save(); RebuildAll(); };
+        panel.Children.Add(ext);
 
         // Crossover bridges — non-DIN, temporary marker (not saved, gone on next load).
         panel.Children.Add(new Separator());
@@ -963,6 +993,19 @@ public class FlowChartWindow : Window
         };
         ApplyTextFormat(label, node);   // text + font/size/style/decorations (multiline-aware)
         inner.Children.Add(label);
+
+        // Flag an extended ISO symbol as non-conforming when the "extended ISO" option is off.
+        if (!_data.ExtendedIso && FlowSymbols.IsExtended(node.Symbol))
+        {
+            var mark = new TextBlock
+            {
+                Text = "N", FontSize = 11, FontWeight = FontWeight.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xE5, 0x39, 0x35)),
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new(0, -2, -2, 0),
+                TextDecorations = new TextDecorationCollection { new TextDecoration { Location = TextDecorationLocation.Strikethrough } },
+            };
+            inner.Children.Add(mark);
+        }
 
         // Transparent container = the draggable/selectable hit area; carries the selection glow.
         var container = new Border
@@ -1772,6 +1815,41 @@ public class FlowChartWindow : Window
                 g.Children.Add(P($"M0,{F(h * 0.16)} C0,{F(h * 0.34)} {F(w)},{F(h * 0.34)} {F(w)},{F(h * 0.16)}", filled: false));
                 return g;
             }
+            case FlowSymbol.Preparation:   // elongated hexagon (setup / loop init)
+                return P($"M{F(w * 0.18)},0 L{F(w * 0.82)},0 L{F(w)},{F(h * 0.5)} L{F(w * 0.82)},{F(h)} L{F(w * 0.18)},{F(h)} L0,{F(h * 0.5)} Z");
+            case FlowSymbol.Delay:         // rectangle with a rounded right end (D shape)
+                return P($"M0,0 L{F(w * 0.6)},0 C{F(w)},0 {F(w)},{F(h)} {F(w * 0.6)},{F(h)} L0,{F(h)} Z");
+            case FlowSymbol.ManualOperation: // trapezoid, wider at the top
+                return P($"M0,0 L{F(w)},0 L{F(w * 0.82)},{F(h)} L{F(w * 0.18)},{F(h)} Z");
+            case FlowSymbol.LoopLimit:     // rectangle with the two top corners cut off
+                return P($"M{F(w * 0.18)},0 L{F(w * 0.82)},0 L{F(w)},{F(h * 0.28)} L{F(w)},{F(h)} L0,{F(h)} L0,{F(h * 0.28)} Z");
+            case FlowSymbol.Parallel:      // two horizontal bars (parallel-mode fork/join)
+            {
+                var g = new Grid();
+                g.Children.Add(new Line { StartPoint = new(0, h * 0.22), EndPoint = new(w, h * 0.22), Stroke = sb, StrokeThickness = 2 });
+                g.Children.Add(new Line { StartPoint = new(0, h * 0.78), EndPoint = new(w, h * 0.78), Stroke = sb, StrokeThickness = 2 });
+                return g;
+            }
+            case FlowSymbol.Merge:         // downward triangle ▽
+                return P($"M0,0 L{F(w)},0 L{F(w * 0.5)},{F(h)} Z");
+            case FlowSymbol.Extract:       // upward triangle △
+                return P($"M{F(w * 0.5)},0 L{F(w)},{F(h)} L0,{F(h)} Z");
+            case FlowSymbol.Collate:       // two triangles tip-to-tip (hourglass)
+            {
+                var g = new Grid();
+                g.Children.Add(P($"M0,0 L{F(w)},0 L{F(w * 0.5)},{F(h * 0.5)} Z"));
+                g.Children.Add(P($"M{F(w * 0.5)},{F(h * 0.5)} L{F(w)},{F(h)} L0,{F(h)} Z"));
+                return g;
+            }
+            case FlowSymbol.Sort:          // diamond split by a horizontal line
+            {
+                var g = new Grid();
+                g.Children.Add(P($"M{F(w * 0.5)},0 L{F(w)},{F(h * 0.5)} L{F(w * 0.5)},{F(h)} L0,{F(h * 0.5)} Z"));
+                g.Children.Add(new Line { StartPoint = new(0, h * 0.5), EndPoint = new(w, h * 0.5), Stroke = sb, StrokeThickness = 1.5 });
+                return g;
+            }
+            case FlowSymbol.CloudStorage:  // a simple cloud outline (modern)
+                return P($"M{F(w * 0.25)},{F(h * 0.85)} C{F(w * 0.02)},{F(h * 0.85)} {F(w * 0.02)},{F(h * 0.5)} {F(w * 0.22)},{F(h * 0.48)} C{F(w * 0.24)},{F(h * 0.2)} {F(w * 0.6)},{F(h * 0.18)} {F(w * 0.64)},{F(h * 0.42)} C{F(w * 0.9)},{F(h * 0.36)} {F(w * 0.98)},{F(h * 0.78)} {F(w * 0.75)},{F(h * 0.85)} Z");
             default: return RoundedBox(4, fill, stroke);
         }
     }

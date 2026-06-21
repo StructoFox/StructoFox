@@ -28,7 +28,29 @@ public enum FlowSymbol
     MagneticTape,  // tape reel (circle + foot)
     MagneticDisk,  // disk / database (cylinder)
     StoredData,    // stored data (curved sides)
-    OffPageConnector // off-page connector (home-plate pentagon) — continues the flow on another page
+    OffPageConnector, // off-page connector (home-plate pentagon) — continues the flow on another page
+
+    // ── Program-flowchart symbols (DIN 66001 / ISO 5807 core) ──
+    Preparation,   // hexagon — setup / loop or switch initialization
+    Delay,         // D-shape — a wait / timeout
+    ManualOperation, // trapezoid (wider top) — a step done by hand
+    LoopLimit,     // rectangle with cut top corners — loop start/limit
+    Parallel,      // two horizontal bars — parallel-mode (fork/join)
+
+    // ── Extended ISO data/system symbols + modern (gated by the "extended ISO" option) ──
+    Sort,          // diamond split by a line — order data
+    Extract,       // upward triangle — pull a subset out
+    Merge,         // downward triangle — combine streams
+    Collate,       // two triangles (hourglass) — merge + extract
+    CloudStorage   // cloud — cloud-based storage/service (modern, not classic ISO 5807)
+}
+
+/// <summary>Whether a <see cref="FlowSymbol"/> is part of the classic DIN/ISO program-flowchart core, or
+/// an extended ISO data/system (or modern) symbol that the per-chart "extended ISO" option can switch off.</summary>
+public static class FlowSymbols
+{
+    public static bool IsExtended(FlowSymbol s) =>
+        s is FlowSymbol.Sort or FlowSymbol.Extract or FlowSymbol.Merge or FlowSymbol.Collate or FlowSymbol.CloudStorage;
 }
 
 public class FlowNode
@@ -95,6 +117,10 @@ public class FlowChartData
     /// <summary>Connector style: false = DIN-style orthogonal flow lines (default), true = direct
     /// diagonal centre-to-centre arrows (the non-normative convenience option).</summary>
     public bool                 DiagonalLines { get; set; } = false;
+
+    /// <summary>Allow extended ISO data/system (+ modern) symbols. On by default; off restricts the menus to
+    /// the DIN/ISO program-flowchart core and flags any already-placed extended symbol as non-conforming.</summary>
+    public bool                 ExtendedIso  { get; set; } = true;
 
     /// <summary>The diagram's surface appearance, persisted with it (user-controlled, theme-independent).</summary>
     public DiagramStyle         Style       { get; set; } = new();
