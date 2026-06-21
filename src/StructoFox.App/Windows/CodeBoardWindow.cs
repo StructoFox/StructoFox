@@ -830,8 +830,11 @@ public class CodeBoardWindow : Window
 
         // Shift by a whole number of grid cells, so everything stays aligned to the grid (which tiles
         // from 0,0) — a non-grid shift would knock all placements off the grid.
+        // Only ever GROW toward the top-left (dx/dy >= 0). Never pull content leftward/upward to trim a
+        // margin: a deliberately centered layout must keep its left/top whitespace. Right/bottom still
+        // shrink, since that just resizes the surface.
         double g = _boardData.GridSize >= 1 ? _boardData.GridSize : 10;
-        double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
+        double dx = Math.Max(0, Math.Round((pad - minX) / g) * g), dy = Math.Max(0, Math.Round((pad - minY) / g) * g);
         ShiftWorld(dx, dy);
 
         // Never shrink below the visible viewport (so a near-empty board doesn't collapse to a tiny box).

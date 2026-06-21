@@ -1666,9 +1666,12 @@ public class FlowChartWindow : Window
 
         // Shift by a whole number of grid cells, so everything stays aligned to the grid (which tiles from
         // 0,0) — a non-grid shift would knock all placements off the grid.
+        // Only ever GROW toward the top-left (dx/dy >= 0). Never pull content leftward/upward to trim a
+        // margin: a deliberately centered layout (e.g. a tree fanning down from a top-centre start) must
+        // keep its left/top whitespace. Right/bottom still shrink, since that just resizes the surface.
         double g = _data.GridSize >= 1 ? _data.GridSize : 10;
-        double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
-        ShiftWorld(dx, dy);   // bring the top-left of the content near the margin (grow or shrink that side)
+        double dx = Math.Max(0, Math.Round((pad - minX) / g) * g), dy = Math.Max(0, Math.Round((pad - minY) / g) * g);
+        ShiftWorld(dx, dy);   // bring the top-left of the content near the margin (grow that side only)
 
         // Never shrink below the visible viewport (so a near-empty chart doesn't collapse to a tiny box).
         double minW = Math.Max(800, _scroll?.Viewport.Width  / (_zoom <= 0 ? 1 : _zoom) ?? 800);
