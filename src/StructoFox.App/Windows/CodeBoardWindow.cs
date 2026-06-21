@@ -375,12 +375,14 @@ public class CodeBoardWindow : Window
         try { p = System.Text.Json.JsonSerializer.Deserialize<BoardClip>(_boardClip, _undoJson); } catch { return; }
         if (p is null || p.Entities.Count == 0) return;
 
-        // Offset the group so its top-left lands at the cursor (if inside the canvas), else cascade.
+        // Offset the group so its top-left lands at the cursor (if inside the canvas), else cascade. The
+        // offset is snapped ONCE (a grid-multiple delta) and applied uniformly — relative layout is kept
+        // exactly, so no card drifts by a cell relative to the others.
         var poss = p.Positions.Values.ToList();
         double minX = poss.Count > 0 ? poss.Min(q => q.X) : 0, minY = poss.Count > 0 ? poss.Min(q => q.Y) : 0;
         double offX, offY;
-        if (_mousePos is { } m) { offX = m.X - minX; offY = m.Y - minY; }
-        else                    { offX = 24; offY = 24; }
+        if (_mousePos is { } m) { offX = Snap(m.X - minX); offY = Snap(m.Y - minY); }
+        else                    { offX = Snap(24); offY = Snap(24); }
 
         string Nid() => Guid.NewGuid().ToString("N")[..8];
         var entMap = new Dictionary<string, string>();

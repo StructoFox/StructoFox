@@ -361,10 +361,12 @@ public class FlowChartWindow : Window
         if (p is null || p.Nodes.Count == 0) return;
 
         // Offset the whole group so its top-left lands at the cursor (if inside the canvas), else cascade.
+        // The offset is snapped ONCE (a grid-multiple delta), then applied to every node without further
+        // per-node snapping — so the group's relative layout is preserved exactly (no one-cell drift).
         double minX = p.Nodes.Min(n => n.X), minY = p.Nodes.Min(n => n.Y);
         double offX, offY;
-        if (_mousePos is { } m) { offX = m.X - minX; offY = m.Y - minY; }
-        else                    { offX = 24; offY = 24; }
+        if (_mousePos is { } m) { offX = Snap(m.X - minX); offY = Snap(m.Y - minY); }
+        else                    { offX = Snap(24); offY = Snap(24); }
 
         var idMap = new Dictionary<string, string>();
         _selected.Clear();
@@ -375,7 +377,7 @@ public class FlowChartWindow : Window
             var old = n.Id;
             n.Id = Guid.NewGuid().ToString("N")[..8];
             idMap[old] = n.Id;
-            n.X = Snap(n.X + offX); n.Y = Snap(n.Y + offY);
+            n.X += offX; n.Y += offY;
             _data.Nodes.Add(n);
             _selected.Add(n.Id);
             RenderNode(n);
