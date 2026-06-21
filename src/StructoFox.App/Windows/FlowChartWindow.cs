@@ -993,16 +993,17 @@ public class FlowChartWindow : Window
         ApplyTextFormat(label, node);   // text + font/size/style/decorations (multiline-aware)
         inner.Children.Add(label);
 
-        // Flag an extended ISO symbol as non-conforming when the "extended ISO" option is off.
+        // Mark an extended ISO symbol that's outside the chosen set (option off) — neutral, not "non-norm":
+        // these symbols are part of ISO 5807, just not in the selected subset.
         if (!_data.ExtendedIso && FlowSymbols.IsExtended(node.Symbol))
         {
             var mark = new TextBlock
             {
-                Text = "N", FontSize = 11, FontWeight = FontWeight.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xE5, 0x39, 0x35)),
+                Text = "ⓘ", FontSize = 11, FontWeight = FontWeight.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x9E, 0x9E, 0x9E)),
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new(0, -2, -2, 0),
-                TextDecorations = new TextDecorationCollection { new TextDecoration { Location = TextDecorationLocation.Strikethrough } },
             };
+            ToolTip.SetTip(mark, Loc.S("Flow_ExtOutsideSet"));
             inner.Children.Add(mark);
         }
 

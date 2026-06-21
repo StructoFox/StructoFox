@@ -315,6 +315,7 @@ public static class Loc
         ["Flow_CatData"]              = "⛁ Data",
         ["Flow_ExtOff"]               = "(extended ISO symbols off)",
         ["Flow_ExtIso"]               = "Extended ISO symbols",
+        ["Flow_ExtOutsideSet"]        = "Outside the chosen symbol set (still ISO 5807)",
         ["Flow_CatStartEnd"]          = "⬭ Start / End",
         ["Flow_CatProcess"]           = "▭ Process",
         ["Flow_CatIO"]                = "▱ I/O",
@@ -492,8 +493,6 @@ public static class Loc
         ["Opt_NormMark"]    = "Mark non-DIN elements (N̶)",
         ["Opt_SubRemove"]   = "Subroutine-removal note",
         ["Opt_BoardRemove"] = "Board-removal note",
-        ["Norm_Title"]      = "Not DIN-compliant",
-        ["Norm_DiagonalWarn"] = "Diagonal centre-to-centre arrows aren't DIN 66001-compliant. Use orthogonal flow lines for a norm-compliant chart. (You can turn this warning off in Options.)",
         ["Norm_AvoidDiagonal"] = "Diagonal arrows are allowed but should be avoided — use only in rare cases.",
 
         // Project context menu (home)
@@ -704,6 +703,7 @@ public static class Loc
         ["Flow_CatData"]              = "⛁ Daten",
         ["Flow_ExtOff"]               = "(erweiterte ISO-Symbole aus)",
         ["Flow_ExtIso"]               = "Erweiterte ISO-Symbole",
+        ["Flow_ExtOutsideSet"]        = "Außerhalb des gewählten Symbolsatzes (dennoch ISO 5807)",
         ["Flow_CatStartEnd"]          = "⬭ Start / Ende",
         ["Flow_CatProcess"]           = "▭ Prozess",
         ["Flow_CatIO"]                = "▱ E/A",
@@ -886,8 +886,6 @@ public static class Loc
         ["Opt_NormMark"]    = "Markierung wenn nicht normgerecht (N̶)",
         ["Opt_SubRemove"]   = "Hinweis: Unterprogramm entfernen",
         ["Opt_BoardRemove"] = "Hinweis: vom Board entfernen",
-        ["Norm_Title"]      = "Nicht normgerecht",
-        ["Norm_DiagonalWarn"] = "Diagonale Mitte-zu-Mitte-Pfeile sind nicht DIN-66001-konform. Für ein normgerechtes Diagramm orthogonale Flusslinien verwenden. (Diese Meldung lässt sich in den Optionen abschalten.)",
         ["Norm_AvoidDiagonal"] = "Schräge Pfeile sind zulässig, sollten aber vermieden werden — nur in Ausnahmefällen einsetzen.",
 
         // Projekt-Kontextmenü (Home)
