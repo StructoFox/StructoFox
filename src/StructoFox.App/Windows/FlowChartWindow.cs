@@ -1995,15 +1995,13 @@ public class FlowChartWindow : Window
     {
         if (_connectFromId is null) return;
         var from = _connectFromId;
-        double jx = Snap(at.X), jy = Snap(at.Y);
-        var jn = new FlowNode { Kind = FlowNodeKind.Junction, Text = "", Width = 9, Height = 9, X = jx - 4.5, Y = jy - 4.5 };
-        _data.Nodes.Add(jn);
-        RenderNode(jn);
 
-        // Preserve the line's existing shape: split its rendered route at the junction so A→J keeps the
-        // bends before it and J→B the bends after — otherwise a manually-routed line would snap back to auto.
+        // Find which segment of the line was clicked and project the click exactly ONTO it, so the
+        // junction sits on the line — both halves stay straight (no spurious left-right jog). The along-edge
+        // coordinate is grid-snapped; the cross-edge one is taken from the line.
         var a = NodeRect(line.FromId); var b = NodeRect(line.ToId);
         List<Point> pre = new(), post = new();
+        double jx = Snap(at.X), jy = Snap(at.Y);   // fallback if the line can't be resolved
         if (a is not null && b is not null)
         {
             var route = line.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, line)
@@ -2011,13 +2009,23 @@ public class FlowChartWindow : Window
             int k = 0; double best = double.MaxValue;
             for (int i = 0; i < route.Count - 1; i++)
             {
-                double d = DistToSegment(new Point(jx, jy), route[i], route[i + 1]);
+                double d = DistToSegment(at, route[i], route[i + 1]);
                 if (d < best) { best = d; k = i; }
             }
+            var s = route[k]; var en = route[k + 1];
+            if (Math.Abs(s.X - en.X) <= Math.Abs(s.Y - en.Y))   // vertical segment → keep X on the line
+            { jx = s.X; jy = Snap(Math.Clamp(at.Y, Math.Min(s.Y, en.Y), Math.Max(s.Y, en.Y))); }
+            else                                                // horizontal segment → keep Y on the line
+            { jy = s.Y; jx = Snap(Math.Clamp(at.X, Math.Min(s.X, en.X), Math.Max(s.X, en.X))); }
+
             if (k > 0) pre = route.GetRange(1, k);
             int postStart = k + 1, postCount = Math.Max(0, route.Count - 1 - postStart);
             if (postCount > 0) post = route.GetRange(postStart, postCount);
         }
+
+        var jn = new FlowNode { Kind = FlowNodeKind.Junction, Text = "", Width = 9, Height = 9, X = jx - 4.5, Y = jy - 4.5 };
+        _data.Nodes.Add(jn);
+        RenderNode(jn);
 
         _data.Connections.Remove(line);
         if (_connViews.TryGetValue(line.Id, out var vs)) { foreach (var v in vs) _canvas!.Children.Remove(v); _connViews.Remove(line.Id); }
