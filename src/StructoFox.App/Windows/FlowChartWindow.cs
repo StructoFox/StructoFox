@@ -952,7 +952,9 @@ public class FlowChartWindow : Window
 
         Canvas.SetLeft(container, node.X);
         Canvas.SetTop(container, node.Y);
-        container.ZIndex = 2;
+        // Above the connections' fat hit-zones (ZIndex 3) so a node sitting on a line — e.g. a junction or
+        // connector — is grabbed/selected instead of the line beneath it.
+        container.ZIndex = 6;
         _canvas!.Children.Add(container);
         _nodeViews[node.Id] = container;
         GrowCanvasFor(node.X, node.Y, node.Width, node.Height);
