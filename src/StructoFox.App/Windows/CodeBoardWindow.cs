@@ -193,8 +193,14 @@ public class CodeBoardWindow : Window
 
         _canvas = new Canvas { Width = 3000, Height = 2000, ClipToBounds = false };
         Ui.Theme(_canvas, Canvas.BackgroundProperty, "ContentBgBrush");
-        // Wrap the canvas so zoom can use a LayoutTransform (scales the scrollable extent too).
-        _zoomHost = new LayoutTransformControl { Child = _canvas };
+        // Wrap the canvas so zoom can use a LayoutTransform (scales the scrollable extent too). Pin it
+        // top-left so a zoomed-out / shrunk canvas stays anchored there instead of drifting to the edge.
+        _zoomHost = new LayoutTransformControl
+        {
+            Child = _canvas,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment   = VerticalAlignment.Top,
+        };
         _scroll.Content = _zoomHost;
 
         KeyDown += (_, e) => HandleKey(e);
@@ -615,6 +621,7 @@ public class CodeBoardWindow : Window
                 if (_cards.TryGetValue(id, out var cc) && _boardData.Positions.TryGetValue(id, out var p))
                 { p.X = Canvas.GetLeft(cc); p.Y = Canvas.GetTop(cc); }
             _dragStart = null;
+            FitCanvas();   // fit the canvas to the content (grow/shrink, anchor top-left) after the move
             Save();
             e.Handled = true;
         };
@@ -795,6 +802,58 @@ public class CodeBoardWindow : Window
         if (x + w + margin > _canvas.Width)  { _canvas.Width  = x + w + margin; grew = true; }
         if (y + h + margin > _canvas.Height) { _canvas.Height = y + h + margin; grew = true; }
         if (grew && _gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
+    }
+
+    // Fits the canvas size to its content with an even margin, growing AND shrinking on every side, and
+    // re-anchors the content's top-left near the margin. Called on drag-release / removal.
+    void FitCanvas()
+    {
+        if (_canvas is null || _cards.Count == 0) return;
+        const double pad = 80;
+
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+        foreach (var (id, pos) in _boardData.Positions)
+        {
+            if (!_cards.TryGetValue(id, out var card)) continue;
+            double w = card.Bounds.Width  > 0 ? card.Bounds.Width  : DefaultCardW;
+            double h = card.Bounds.Height > 0 ? card.Bounds.Height : 80;
+            minX = Math.Min(minX, pos.X); minY = Math.Min(minY, pos.Y);
+            maxX = Math.Max(maxX, pos.X + w); maxY = Math.Max(maxY, pos.Y + h);
+        }
+        foreach (var rel in _boardData.Relations)
+            foreach (var wp in rel.Waypoints)
+            {
+                minX = Math.Min(minX, wp.X); minY = Math.Min(minY, wp.Y);
+                maxX = Math.Max(maxX, wp.X); maxY = Math.Max(maxY, wp.Y);
+            }
+        if (minX == double.MaxValue) return;
+
+        // Shift by a whole number of grid cells, so everything stays aligned to the grid (which tiles
+        // from 0,0) — a non-grid shift would knock all placements off the grid.
+        double g = _boardData.GridSize >= 1 ? _boardData.GridSize : 10;
+        double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
+        ShiftWorld(dx, dy);
+
+        _canvas.Width  = maxX + dx + pad;
+        _canvas.Height = maxY + dy + pad;
+        if (_gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
+    }
+
+    // Translates every card + waypoint by (dx,dy) and compensates the scroll offset, so the view stays put.
+    void ShiftWorld(double dx, double dy)
+    {
+        if (_canvas is null || (dx == 0 && dy == 0)) return;
+        foreach (var (id, pos) in _boardData.Positions)
+        {
+            pos.X += dx; pos.Y += dy;
+            if (_cards.TryGetValue(id, out var card)) { Canvas.SetLeft(card, pos.X); Canvas.SetTop(card, pos.Y); }
+            UpdatePortPositions(id);
+        }
+        foreach (var rel in _boardData.Relations)
+            foreach (var wp in rel.Waypoints) { wp.X += dx; wp.Y += dy; }
+        RenderAllRelations();
+        if (_scroll is not null)
+            _scroll.Offset = new Vector(Math.Max(0, _scroll.Offset.X + dx * _zoom), Math.Max(0, _scroll.Offset.Y + dy * _zoom));
     }
 
     void UpdatePortPositions(string entityId)
@@ -1579,6 +1638,7 @@ public class CodeBoardWindow : Window
             }
         }
         _selectedIds.Clear();
+        if (any) FitCanvas();   // shrink the canvas back when edge cards were removed
         Save();
         RefreshSelectionVisuals();
         if (any) _ = InfoDialog.Show(this, "board_remove", Loc.S("Board_RemoveInfo"), Loc.S("Code_RemoveFromBoard"));
