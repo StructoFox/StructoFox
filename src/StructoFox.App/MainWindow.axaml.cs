@@ -316,8 +316,10 @@ public partial class MainWindow : Window
         topStack.Children.Add(HomeTab(Loc.S("Sketch_Nav"),       Loc.S("Sketch_NavTip"), active:  _sketchMode, () => { if (!_sketchMode) { _sketchMode = true; _homeSource = null; _body.Content = BuildHome(); } }));
         Grid.SetRow(topStack, 0); grid.Children.Add(topStack);
 
-        // The library folders float in the middle, centred, scrolling if many.
-        var libs = Libraries.Load();
+        // The library folders float in the middle, centred, scrolling if many. Only show libraries that
+        // still exist on disk (a deleted folder shouldn't linger; a disconnected drive just hides until back).
+        if (_homeSource is not null && !Directory.Exists(_homeSource)) _homeSource = null;
+        var libs = Libraries.Load().Where(Directory.Exists).ToList();
         if (libs.Count > 0)
         {
             var libPanel = new StackPanel { Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
@@ -591,7 +593,7 @@ public partial class MainWindow : Window
     // Top third: the most-recent project as a centred hero card, or a placeholder tile if there is none.
     Control BuildHero()
     {
-        var last = RecentProjects.Load().FirstOrDefault(e => !IsSketchbook(e.Path));
+        var last = RecentProjects.Load().FirstOrDefault(e => !IsSketchbook(e.Path) && Directory.Exists(e.Path));
         Control card = last is null ? PlaceholderCard() : ProjectCard(last.Path, last.Opened, big: true);
         card.HorizontalAlignment = HorizontalAlignment.Center;
         card.VerticalAlignment   = VerticalAlignment.Center;
@@ -708,7 +710,7 @@ public partial class MainWindow : Window
     List<(string path, DateTime date)> HomeItems()
     {
         if (_homeSource is null)
-            return RecentProjects.Load().Where(e => !IsSketchbook(e.Path)).Select(e => (e.Path, e.Opened)).ToList();
+            return RecentProjects.Load().Where(e => !IsSketchbook(e.Path) && Directory.Exists(e.Path)).Select(e => (e.Path, e.Opened)).ToList();
         return ProjectService.Scan(_homeSource).Where(p => !IsSketchbook(p)).Select(p => (p, ProjectDate(p))).ToList();
     }
 
