@@ -494,6 +494,7 @@ public static class Loc
         ["Opt_BoardRemove"] = "Board-removal note",
         ["Norm_Title"]      = "Not DIN-compliant",
         ["Norm_DiagonalWarn"] = "Diagonal centre-to-centre arrows aren't DIN 66001-compliant. Use orthogonal flow lines for a norm-compliant chart. (You can turn this warning off in Options.)",
+        ["Norm_AvoidDiagonal"] = "Diagonal arrows are allowed but should be avoided — use only in rare cases.",
 
         // Project context menu (home)
         ["Proj_Rename"]       = "✎ Rename…",
@@ -887,6 +888,7 @@ public static class Loc
         ["Opt_BoardRemove"] = "Hinweis: vom Board entfernen",
         ["Norm_Title"]      = "Nicht normgerecht",
         ["Norm_DiagonalWarn"] = "Diagonale Mitte-zu-Mitte-Pfeile sind nicht DIN-66001-konform. Für ein normgerechtes Diagramm orthogonale Flusslinien verwenden. (Diese Meldung lässt sich in den Optionen abschalten.)",
+        ["Norm_AvoidDiagonal"] = "Schräge Pfeile sind zulässig, sollten aber vermieden werden — nur in Ausnahmefällen einsetzen.",
 
         // Projekt-Kontextmenü (Home)
         ["Proj_Rename"]       = "✎ Umbenennen…",

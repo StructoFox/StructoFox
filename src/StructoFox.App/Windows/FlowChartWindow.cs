@@ -818,15 +818,14 @@ public class FlowChartWindow : Window
 
     // Switches the global flow-line routing style and re-draws every arrow. Diagonal centre-to-centre
     // arrows are non-DIN, so warn (unless turned off in Options) when switching to them.
-    async void SetDiagonal(bool diagonal)
+    void SetDiagonal(bool diagonal)
     {
         if (_data.DiagonalLines == diagonal) return;
         _data.DiagonalLines = diagonal;
         foreach (var c in _data.Connections) RenderConnection(c);
         RefreshConnHeader();
         Save();
-        if (diagonal && AppSettings.NormWarn)
-            await MessageDialog.Show(this, Loc.S("Norm_DiagonalWarn"), Loc.S("Norm_Title"));
+        // No popup: diagonal lines are allowed but discouraged — the on-line "avoid" marker says enough.
     }
 
     // A dropdown menu item that runs an action when chosen.
@@ -1492,16 +1491,17 @@ public class FlowChartWindow : Window
             _canvas.Children.Add(seg); visuals.Add(seg);
         }
 
-        // Non-DIN marker: a small crossed-out N on a diagonal (non-norm) line, if marking is on.
+        // Diagonal lines are allowed but discouraged: a gentle amber "⚠ avoid" marker (no harsh "non-norm"),
+        // shown when marking is on.
         if (_data.DiagonalLines && AppSettings.NormMark)
         {
             var m = pts[pts.Count / 2];
             var n = new TextBlock
             {
-                Text = "N", FontSize = 11, FontWeight = FontWeight.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xE5, 0x39, 0x35)), IsHitTestVisible = false,
-                TextDecorations = new TextDecorationCollection { new TextDecoration { Location = TextDecorationLocation.Strikethrough } },
+                Text = "⚠", FontSize = 12, FontWeight = FontWeight.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xF9, 0xA8, 0x25)), IsHitTestVisible = false,
             };
+            ToolTip.SetTip(n, Loc.S("Norm_AvoidDiagonal"));
             Canvas.SetLeft(n, m.X + 4); Canvas.SetTop(n, m.Y + 4);
             n.ZIndex = 5;
             _canvas.Children.Add(n); visuals.Add(n);
