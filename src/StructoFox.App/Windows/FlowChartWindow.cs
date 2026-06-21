@@ -228,7 +228,7 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
-            if (_segConn is not null) { Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
+            if (_segConn is not null) { NormalizeWaypoints(_segConn); RenderConnection(_segConn); Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
             if (_panning) { _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null); return; }
             if (_selecting) { _selecting = false; CommitSelectRect(); e.Pointer.Capture(null); }
         };
@@ -888,6 +888,8 @@ public class FlowChartWindow : Window
             {
                 dragging = false;
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
+                foreach (var c in _data.Connections)
+                    if ((c.FromId == node.Id || c.ToId == node.Id) && c.Waypoints.Count > 0) { NormalizeWaypoints(c); RenderConnection(c); }
                 Save();
             }
             else if (ConnectMode) HandleConnectClick(node.Id);   // a click (no drag) wires the arrow
@@ -1221,6 +1223,8 @@ public class FlowChartWindow : Window
             {
                 if (e.GetCurrentPoint(seg).Properties.IsRightButtonPressed) { ShowConnMenu(capConn, seg); e.Handled = true; return; }
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
+                // Connecting and clicking a line: drop a junction there, split the line and wire into it.
+                if (ConnectMode && _connectFromId is not null) { InsertJunctionOnLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
             _canvas.Children.Add(seg); visuals.Add(seg);
@@ -1331,6 +1335,18 @@ public class FlowChartWindow : Window
         var entry = EdgeMid(b.Value, new Point(wl.X, wl.Y));
         if (Math.Abs(entry.Y - wl.Y) >= Math.Abs(entry.X - wl.X)) wl.X = entry.X;
         else                                                      wl.Y = entry.Y;
+    }
+
+    // Tidies a manual route's stored waypoints to the fewest needed (drops collinear runs and the little
+    // back-and-forth jogs that pile up while shoving a connected node about). Only ever removes points,
+    // so it can't accumulate. Called when an edit settles (on release).
+    void NormalizeWaypoints(FlowConnection c)
+    {
+        if (c.Waypoints.Count == 0) return;
+        var a = NodeRect(c.FromId); var b = NodeRect(c.ToId);
+        if (a is null || b is null) return;
+        var full = ManualRoute(a.Value, b.Value, c);   // orthogonalised + simplified
+        c.Waypoints = full.Skip(1).Take(full.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
     }
 
     // Expands the canvas when content nears its right/bottom edge, so there's always room to grow.
@@ -1799,6 +1815,28 @@ public class FlowChartWindow : Window
     {
         _connectFromId = null;
         RemoveRubberBand();
+    }
+
+    // While connecting, clicking an existing line drops a junction at that spot, splits the line through
+    // it (X→Y ⇒ X→J→Y) and wires the armed node into it — a quick way to merge flows onto a line.
+    void InsertJunctionOnLine(FlowConnection line, Point at)
+    {
+        if (_connectFromId is null) return;
+        var from = _connectFromId;
+        var jn = new FlowNode { Kind = FlowNodeKind.Junction, Text = "", Width = 9, Height = 9, X = Snap(at.X) - 4.5, Y = Snap(at.Y) - 4.5 };
+        _data.Nodes.Add(jn);
+        RenderNode(jn);
+
+        _data.Connections.Remove(line);
+        if (_connViews.TryGetValue(line.Id, out var vs)) { foreach (var v in vs) _canvas!.Children.Remove(v); _connViews.Remove(line.Id); }
+        _data.Connections.Add(new FlowConnection { FromId = line.FromId, ToId = jn.Id, LineColor = _style.LineColor, Label = line.Label });
+        _data.Connections.Add(new FlowConnection { FromId = jn.Id, ToId = line.ToId, LineColor = _style.LineColor });
+        _data.Connections.Add(new FlowConnection { FromId = from,        ToId = jn.Id, LineColor = _style.LineColor });
+
+        _connectFromId = null;
+        RemoveRubberBand();
+        Save();
+        RenderAllConnections();
     }
 
     // ── Small UI helpers ───────────────────────────────────────────────────
