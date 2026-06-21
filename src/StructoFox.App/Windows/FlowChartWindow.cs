@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
@@ -209,6 +210,7 @@ public class FlowChartWindow : Window
     {
         if (_zoomHost is not null)
             _zoomHost.LayoutTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+        UpdateZoomLabel();
     }
 
     // Keyboard / button zoom: anchor on the viewport centre.
@@ -430,7 +432,13 @@ public class FlowChartWindow : Window
         row.Children.Add(toNsBtn);
 
         row.Children.Add(new Border { Width = 12 });
-        // "View" gathers the set-once-and-forget surface settings: background, decoration, zoom reset and
+        // Quick zoom: shows the current level; click for presets + a manual entry.
+        _zoomBtn = TBtn("🔍 100%", Loc.S("Flow_ZoomTip"));
+        _zoomBtn.Flyout = BuildZoomFlyout();
+        row.Children.Add(_zoomBtn);
+        UpdateZoomLabel();
+
+        // "Options" gathers the set-once-and-forget surface settings: colours, decoration, zoom reset and
         // the grid (visibility / colour / style / opacity / snap) — rarely touched while actually drawing.
         var viewBtn = TBtn(Loc.S("Flow_View"), Loc.S("Flow_ViewTip"));
         viewBtn.Flyout = BuildViewFlyout();
@@ -439,10 +447,51 @@ public class FlowChartWindow : Window
         return bar;
     }
 
+    Button? _zoomBtn;
+
+    // The quick-zoom flyout: preset percentages plus a manual entry box.
+    Flyout BuildZoomFlyout()
+    {
+        var panel = new StackPanel { Spacing = 8, MinWidth = 232, Margin = new(4) };
+        Ui.Theme(panel, TextElement.ForegroundProperty, "ContentTextBrush");
+
+        var grid = new WrapPanel { MaxWidth = 232 };
+        foreach (var p in new[] { 25, 50, 75, 100, 125, 150, 175, 200 })
+        {
+            var bb = Ui.Btn(p + "%"); bb.Width = 52; bb.Margin = new(0, 0, 4, 4);
+            int pp = p; bb.Click += (_, _) => SetZoom(pp / 100.0);
+            grid.Children.Add(bb);
+        }
+        panel.Children.Add(grid);
+
+        var box = new TextBox { PlaceholderText = Loc.S("Flow_ZoomManual"), MinWidth = 120 };
+        Ui.Theme(box, TextBox.BackgroundProperty,  "InputBgBrush");
+        Ui.Theme(box, TextBox.ForegroundProperty,  "SidebarTextBrush");
+        Ui.Theme(box, TextBox.BorderBrushProperty, "ControlBorderBrush");
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            var s = (box.Text ?? "").Replace("%", "").Trim();
+            if (double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var pct)
+                || double.TryParse(s, out pct))
+                SetZoom(pct / 100.0);
+        };
+        panel.Children.Add(box);
+
+        return new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+    }
+
+    // Reflects the current zoom level on the toolbar button.
+    void UpdateZoomLabel()
+    {
+        if (_zoomBtn is not null) _zoomBtn.Content = "🔍 " + Math.Round(_zoom * 100) + "%";
+    }
+
     // The "View" flyout panel: background colour, decoration, zoom reset and grid controls.
     Flyout BuildViewFlyout()
     {
         var panel = new StackPanel { Spacing = 10, MinWidth = 230, Margin = new(4) };
+        Ui.Theme(panel, TextElement.ForegroundProperty, "ContentTextBrush");   // popup is its own root; theme labels
 
         // Colours — grouped: canvas background + arrow colour.
         panel.Children.Add(new TextBlock { Text = Loc.S("Flow_Colors"), FontWeight = FontWeight.Bold });
@@ -464,17 +513,19 @@ public class FlowChartWindow : Window
             var hex = await ColorPickDialog.Pick(this, Loc.S("Flow_ArrowColor"), _style.LineColor);
             if (hex is null) return;
             _style.LineColor = hex;
-            foreach (var c in _data.Connections) { c.LineColor = hex; RenderConnection(c); }   // recolour all arrows
+            foreach (var c in _data.Connections) RenderConnection(c);   // all arrows share this colour
             Save();
         };
         panel.Children.Add(arrow);
 
-        panel.Children.Add(new Separator());
-
+        // Decoration sits with the colours (it's about the diagram's look, not zoom).
         var decor = Ui.Btn(Loc.S("Decor_Open"));
         decor.Click += (_, _) => _ = OpenDecor();
         panel.Children.Add(decor);
 
+        panel.Children.Add(new Separator());
+
+        // Zoom reset alone between separators.
         var zoom = Ui.Btn(Loc.S("Common_ResetZoomTip"));
         zoom.Click += (_, _) => SetZoom(1.0);
         panel.Children.Add(zoom);
@@ -1020,7 +1071,8 @@ public class FlowChartWindow : Window
                 ? ManualRoute(a.Value, b.Value, conn)
                 : Simplify(OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
 
-        var brush   = new SolidColorBrush(ParseColor(conn.LineColor));
+        // All arrows share the diagram's arrow colour, so they stay uniform (and follow the Options picker).
+        var brush   = new SolidColorBrush(ParseColor(_style.LineColor));
         var visuals = new List<Control>();
 
         var line = new Polyline { Stroke = brush, StrokeThickness = conn.Thickness, IsHitTestVisible = false };

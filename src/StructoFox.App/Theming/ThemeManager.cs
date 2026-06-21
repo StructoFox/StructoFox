@@ -104,6 +104,10 @@ public static class ThemeManager
         Set(surface, "MenuFlyoutPresenterBackground");
         Set(border,  "MenuFlyoutPresenterBorderBrush");
 
+        // Plain flyouts (e.g. the Options panel) — same surface, else they show Fluent's dark default.
+        Set(surface, "FlyoutPresenterBackground");
+        Set(border,  "FlyoutBorderThemeBrush");
+
         // CheckBox label text (the "static" caption went white, also on hover)
         Set(text,
             "CheckBoxForegroundUnchecked", "CheckBoxForegroundUncheckedPointerOver", "CheckBoxForegroundUncheckedPressed",

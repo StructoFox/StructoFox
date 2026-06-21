@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
@@ -222,6 +223,7 @@ public class CodeBoardWindow : Window
     Flyout BuildViewFlyout()
     {
         var panel = new StackPanel { Spacing = 10, MinWidth = 230, Margin = new(4) };
+        Ui.Theme(panel, TextElement.ForegroundProperty, "ContentTextBrush");
 
         var zoom = Btn(Loc.S("Common_ResetZoomTip"));
         zoom.Click += (_, _) => SetZoom(1.0);
