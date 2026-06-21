@@ -1107,7 +1107,7 @@ public class FlowChartWindow : Window
                         if ((c.FromId == id || c.ToId == id) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
                     UpdateConnectionsFor(id);   // re-route attached arrows with full A* now the drag settled
                 }
-                GrowLeftTopFor(moved);   // make room if something was pushed to the left/top edge
+                FitCanvas();   // grow/shrink the surface to fit the content (all sides)
                 RenderCrossovers();
                 Save();
             }
@@ -1640,33 +1640,37 @@ public class FlowChartWindow : Window
         if (grew && _gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
     }
 
-    // Grows the canvas towards the LEFT/TOP: since a Canvas can't hold negative coordinates, shift every
-    // node + waypoint by (dx,dy), enlarge the surface, and scroll by the same amount so the view doesn't
-    // jump. Used when content is pushed against the left/top edge.
+    // Translates the whole world (nodes + waypoints) by (dx,dy) — used to make room on the left/top (a
+    // Canvas can't hold negative coordinates). Scrolls by the same amount so the view doesn't jump.
     void ShiftWorld(double dx, double dy)
     {
-        if (_canvas is null || (dx <= 0 && dy <= 0)) return;
-        dx = Math.Max(0, dx); dy = Math.Max(0, dy);
+        if (_canvas is null || (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5)) return;
         foreach (var n in _data.Nodes) { n.X += dx; n.Y += dy; }
         foreach (var c in _data.Connections) foreach (var w in c.Waypoints) { w.X += dx; w.Y += dy; }
-        _canvas.Width += dx; _canvas.Height += dy;
-        if (_gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
-        if (_scroll is not null) _scroll.Offset = new Vector(_scroll.Offset.X + dx * _zoom, _scroll.Offset.Y + dy * _zoom);
+        if (_scroll is not null) _scroll.Offset = new Vector(Math.Max(0, _scroll.Offset.X + dx * _zoom), Math.Max(0, _scroll.Offset.Y + dy * _zoom));
         foreach (var (id, v) in _nodeViews)
             if (_data.Nodes.FirstOrDefault(n => n.Id == id) is { } nd) { Canvas.SetLeft(v, nd.X); Canvas.SetTop(v, nd.Y); }
         foreach (var c in _data.Connections) RenderConnection(c);
     }
 
-    // After moving nodes, if any sits hard against the left/top edge, grow the canvas there (shift the
-    // world) so there's room to keep working in that direction.
-    void GrowLeftTopFor(IEnumerable<string> movedIds)
+    // Fits the canvas snugly around the content with a uniform margin — so it grows when you push to an
+    // edge and shrinks back when you move away (all four sides). Called when an edit settles.
+    void FitCanvas()
     {
-        const double pad = 40;
-        double minX = double.MaxValue, minY = double.MaxValue;
-        foreach (var id in movedIds)
-            if (_data.Nodes.FirstOrDefault(n => n.Id == id) is { } nd) { minX = Math.Min(minX, nd.X); minY = Math.Min(minY, nd.Y); }
-        if (minX == double.MaxValue) return;
-        ShiftWorld(minX < pad ? pad - minX : 0, minY < pad ? pad - minY : 0);
+        if (_canvas is null || _data.Nodes.Count == 0) return;
+        const double pad = 80;
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+        void Inc(double x, double y) { minX = Math.Min(minX, x); minY = Math.Min(minY, y); maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); }
+        foreach (var n in _data.Nodes) { Inc(n.X, n.Y); Inc(n.X + n.Width, n.Y + n.Height); }
+        foreach (var c in _data.Connections) foreach (var w in c.Waypoints) Inc(w.X, w.Y);
+
+        double dx = pad - minX, dy = pad - minY;
+        ShiftWorld(dx, dy);   // bring the top-left of the content to the margin (grow or shrink that side)
+
+        double cw = maxX + dx + pad, ch = maxY + dy + pad;
+        if (Math.Abs(_canvas.Width  - cw) > 0.5) _canvas.Width  = cw;
+        if (Math.Abs(_canvas.Height - ch) > 0.5) _canvas.Height = ch;
+        if (_gridRect is not null) { _gridRect.Width = _canvas.Width; _gridRect.Height = _canvas.Height; }
     }
 
     // ── Remove ─────────────────────────────────────────────────────────────
@@ -1677,6 +1681,7 @@ public class FlowChartWindow : Window
         bool anySub = _selected.Any(id => _data.Nodes.FirstOrDefault(n => n.Id == id) is { Kind: FlowNodeKind.Subroutine } s && !string.IsNullOrEmpty(s.RefId));
         foreach (var id in _selected.ToList()) DeleteNode(id, persist: false);
         _selected.Clear();
+        FitCanvas();   // shrink the surface back if the removed nodes freed up edge space
         Save();
         if (anySub) _ = InfoDialog.Show(this, "sub_remove", Loc.S("Sub_RemoveInfo"), Loc.S("Flow_Subroutine"));
     }
