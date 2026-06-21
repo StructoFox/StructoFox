@@ -428,21 +428,24 @@ public partial class MainWindow : Window
         row.Children.Add(filter);
         row.Children.Add(_sketchFilterBar);
 
-        // Always-visible type filter (Alle / PAP / Structogram / Board).
+        // Always-visible type filter as a dropdown (clearer at a glance than toggle buttons, and no
+        // accidental click that hides everything).
         row.Children.Add(new Border { Width = 8 });
-        void TypeBtn(string label, SketchType? t)
+        const string allId = "all";
+        var typeCombo = Ui.Combo(170);
+        typeCombo.Items.Add(new ComboItem(Loc.S("Sketch_TypeAll"), allId));
+        typeCombo.Items.Add(new ComboItem(Loc.S("Diag_Pap"),   nameof(SketchType.Pap)));
+        typeCombo.Items.Add(new ComboItem(Loc.S("Diag_Ns"),    nameof(SketchType.Structogram)));
+        typeCombo.Items.Add(new ComboItem(Loc.S("Diag_Board"), nameof(SketchType.Board)));
+        var curId = _sketchType?.ToString() ?? allId;
+        typeCombo.SelectedItem = typeCombo.Items.OfType<ComboItem>().FirstOrDefault(c => c.Id == curId) ?? typeCombo.Items[0];
+        typeCombo.SelectionChanged += (_, _) =>
         {
-            var b = Ui.Btn(label); b.Padding = new(8, 4);
-            bool active = _sketchType == t;
-            Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
-            Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
-            b.Click += (_, _) => { _sketchType = t; _body.Content = BuildHome(); };
-            row.Children.Add(b);
-        }
-        TypeBtn(Loc.S("Sketch_TypeAll"), null);
-        TypeBtn("🔁", SketchType.Pap);
-        TypeBtn("▦", SketchType.Structogram);
-        TypeBtn("🗺", SketchType.Board);
+            var id = (typeCombo.SelectedItem as ComboItem)?.Id;
+            _sketchType = id is null or allId ? null : Enum.Parse<SketchType>(id);
+            RefreshSketchList();
+        };
+        row.Children.Add(typeCombo);
 
         var bar = new ScrollViewer { Content = row, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetRow(bar, 1); grid.Children.Add(bar);
