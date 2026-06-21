@@ -62,8 +62,9 @@ public class DiagramStyle
 
     // ── Grid (snapping aid) ──────────────────────────────────────────────────
 
-    /// <summary>Show the alignment grid behind the diagram.</summary>
-    public bool GridVisible { get; set; } = true;
+    /// <summary>Show the alignment grid behind the diagram (off by default — snapping is on, the grid is
+    /// just an optional visual aid).</summary>
+    public bool GridVisible { get; set; } = false;
 
     /// <summary>Grid line colour (web hex).</summary>
     public string GridColor { get; set; } = "#B0BEC5";
