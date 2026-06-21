@@ -58,6 +58,8 @@ public class CodeBoardWindow : Window
     // Selection
     readonly HashSet<string> _selectedIds = new();
     string? _selectionAnchor;
+    Point?  _mousePos;                          // last pointer pos over the canvas (null when outside)
+    Dictionary<string, Point>? _dragStart;      // start positions of all selected cards during a multi-drag
 
     double _zoom = 1.0;
 
@@ -196,6 +198,7 @@ public class CodeBoardWindow : Window
         KeyDown += (_, e) => HandleKey(e);
         Focusable = true;
 
+        _canvas.PointerExited   += (_, _) => _mousePos = null;
         _canvas.PointerPressed  += Canvas_PointerPressed;
         _canvas.PointerMoved    += Canvas_PointerMoved;
         _canvas.PointerReleased += Canvas_PointerReleased;
@@ -372,7 +375,13 @@ public class CodeBoardWindow : Window
         try { p = System.Text.Json.JsonSerializer.Deserialize<BoardClip>(_boardClip, _undoJson); } catch { return; }
         if (p is null || p.Entities.Count == 0) return;
 
-        const double off = 24;
+        // Offset the group so its top-left lands at the cursor (if inside the canvas), else cascade.
+        var poss = p.Positions.Values.ToList();
+        double minX = poss.Count > 0 ? poss.Min(q => q.X) : 0, minY = poss.Count > 0 ? poss.Min(q => q.Y) : 0;
+        double offX, offY;
+        if (_mousePos is { } m) { offX = m.X - minX; offY = m.Y - minY; }
+        else                    { offX = 24; offY = 24; }
+
         string Nid() => Guid.NewGuid().ToString("N")[..8];
         var entMap = new Dictionary<string, string>();
         var portMap = new Dictionary<string, string>();
@@ -390,7 +399,7 @@ public class CodeBoardWindow : Window
             _entities[e.Id] = e;
 
             var pos = p.Positions.TryGetValue(oldE, out var pp) ? pp : new CodeCardPosition();
-            pos.X = Math.Max(0, pos.X + off); pos.Y = Math.Max(0, pos.Y + off);
+            pos.X = Math.Max(0, pos.X + offX); pos.Y = Math.Max(0, pos.Y + offY);
             _boardData.Positions[e.Id] = pos;
             RenderCard(e, pos);
             _selectedIds.Add(e.Id);
@@ -557,30 +566,39 @@ public class CodeBoardWindow : Window
                 _selectionAnchor = entity.Id; RefreshSelectionVisuals(); e.Handled = true; return;
             }
 
-            _selectedIds.Clear();
-            _selectedIds.Add(entity.Id);
+            // Pressing a card that's part of a multi-selection keeps it (drag the whole group);
+            // pressing an unselected card selects it exclusively.
+            if (!_selectedIds.Contains(entity.Id)) { _selectedIds.Clear(); _selectedIds.Add(entity.Id); }
             _selectionAnchor = entity.Id;
             RefreshSelectionVisuals();
 
             dragging = true;
             offset   = e.GetPosition(card);
+            // Snapshot start positions of every selected card, so the whole group moves together.
+            _dragStart = _selectedIds.Where(_boardData.Positions.ContainsKey)
+                .ToDictionary(id => id, id => new Point(_boardData.Positions[id].X, _boardData.Positions[id].Y));
             e.Pointer.Capture(card);
             e.Handled = true;
         };
 
         card.PointerMoved += (_, e) =>
         {
-            if (!dragging) return;
+            if (!dragging || _dragStart is null) return;
             var pt = e.GetPosition(_canvas);
-            // Corner-snap the card; the ports themselves are then snapped onto grid intersections
-            // (see PlacePortDots), so equally-placed ports on two cards line up for straight links.
+            // Corner-snap the dragged card; shift the rest of the selection by the same delta.
             var nx = Snap(Math.Max(0, pt.X - offset.X));
             var ny = Snap(Math.Max(0, pt.Y - offset.Y));
-            Canvas.SetLeft(card, nx);
-            Canvas.SetTop(card,  ny);
-            GrowCanvasFor(nx, ny, card.Bounds.Width, card.Bounds.Height);
-            UpdatePortPositions(entity.Id);
-            UpdateRelationsForEntity(entity.Id);
+            double dx = nx - (_dragStart.TryGetValue(entity.Id, out var s0) ? s0.X : nx);
+            double dy = ny - (_dragStart.TryGetValue(entity.Id, out s0) ? s0.Y : ny);
+            foreach (var (id, start) in _dragStart)
+            {
+                if (!_cards.TryGetValue(id, out var cc)) continue;
+                double x = Math.Max(0, start.X + dx), y = Math.Max(0, start.Y + dy);
+                Canvas.SetLeft(cc, x); Canvas.SetTop(cc, y);
+                GrowCanvasFor(x, y, cc.Bounds.Width, cc.Bounds.Height);
+                UpdatePortPositions(id);
+                UpdateRelationsForEntity(id);
+            }
             e.Handled = true;
         };
 
@@ -589,11 +607,10 @@ public class CodeBoardWindow : Window
             if (!dragging) return;
             dragging = false;
             e.Pointer.Capture(null);
-            if (_boardData.Positions.TryGetValue(entity.Id, out var p))
-            {
-                p.X = Canvas.GetLeft(card);
-                p.Y = Canvas.GetTop(card);
-            }
+            foreach (var id in _dragStart?.Keys ?? Enumerable.Empty<string>())
+                if (_cards.TryGetValue(id, out var cc) && _boardData.Positions.TryGetValue(id, out var p))
+                { p.X = Canvas.GetLeft(cc); p.Y = Canvas.GetTop(cc); }
+            _dragStart = null;
             Save();
             e.Handled = true;
         };
@@ -1125,6 +1142,7 @@ public class CodeBoardWindow : Window
 
     void Canvas_PointerMoved(object? sender, PointerEventArgs e)
     {
+        _mousePos = e.GetPosition(_canvas);   // remembered for paste-at-cursor
         if (_connectMode && _connectFromEntityId is not null && _rubberBand is not null)
         {
             if (GetPortCenter(_connectFromEntityId, _connectFromPortId!) is { } c) _rubberBand.StartPoint = c;

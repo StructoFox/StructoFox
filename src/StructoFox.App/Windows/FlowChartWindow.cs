@@ -41,6 +41,8 @@ public class FlowChartWindow : Window
     double   _zoom = 1.0;
     bool     _liveDrag;    // a node is being dragged → route attached arrows cheaply (no A*) until release
     bool     _culling;     // re-entrancy guard for viewport culling
+    Point?   _mousePos;    // last pointer position over the canvas (null when outside) — for paste-at-cursor
+    Dictionary<string, Point>? _dragStart;   // start positions of all selected nodes during a multi-drag
 
     Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
@@ -209,8 +211,10 @@ public class FlowChartWindow : Window
                 e.Pointer.Capture(_canvas); e.Handled = true;
             }
         };
+        _canvas.PointerExited += (_, _) => _mousePos = null;
         _canvas.PointerMoved += (_, e) =>
         {
+            _mousePos = e.GetPosition(_canvas);   // remembered for paste-at-cursor
             // While connecting, the rubber-band follows the pointer.
             if (ConnectMode && _connectFromId is not null && _rubberBand is not null)
             {
@@ -356,7 +360,12 @@ public class FlowChartWindow : Window
         try { p = System.Text.Json.JsonSerializer.Deserialize<ClipPayload>(_clip, _undoJson); } catch { return; }
         if (p is null || p.Nodes.Count == 0) return;
 
-        const double off = 24;
+        // Offset the whole group so its top-left lands at the cursor (if inside the canvas), else cascade.
+        double minX = p.Nodes.Min(n => n.X), minY = p.Nodes.Min(n => n.Y);
+        double offX, offY;
+        if (_mousePos is { } m) { offX = m.X - minX; offY = m.Y - minY; }
+        else                    { offX = 24; offY = 24; }
+
         var idMap = new Dictionary<string, string>();
         _selected.Clear();
         foreach (var n in p.Nodes)
@@ -366,7 +375,7 @@ public class FlowChartWindow : Window
             var old = n.Id;
             n.Id = Guid.NewGuid().ToString("N")[..8];
             idMap[old] = n.Id;
-            n.X = Snap(n.X + off); n.Y = Snap(n.Y + off);
+            n.X = Snap(n.X + offX); n.Y = Snap(n.Y + offY);
             _data.Nodes.Add(n);
             _selected.Add(n.Id);
             RenderNode(n);
@@ -376,7 +385,7 @@ public class FlowChartWindow : Window
             if (!idMap.TryGetValue(c.FromId, out var f) || !idMap.TryGetValue(c.ToId, out var t)) continue;
             c.Id = Guid.NewGuid().ToString("N")[..8];
             c.FromId = f; c.ToId = t;
-            foreach (var w in c.Waypoints) { w.X += off; w.Y += off; }
+            foreach (var w in c.Waypoints) { w.X += offX; w.Y += offY; }
             _data.Connections.Add(c);
             RenderConnection(c);
         }
@@ -969,7 +978,9 @@ public class FlowChartWindow : Window
             pressed = true; dragging = false;
             pressPos = e.GetPosition(_canvas);
             offset   = e.GetPosition(container);
-            if (!ConnectMode) { _selected.Clear(); _selected.Add(node.Id); RefreshSelection(); }
+            // Pressing a node that's part of a multi-selection keeps it (so the whole group can be dragged);
+            // pressing an unselected node selects it exclusively.
+            if (!ConnectMode) { if (!_selected.Contains(node.Id)) { _selected.Clear(); _selected.Add(node.Id); } RefreshSelection(); }
             e.Pointer.Capture(container);
             e.Handled = true;
         };
@@ -981,14 +992,26 @@ public class FlowChartWindow : Window
             {
                 if (Math.Abs(pt.X - pressPos.X) < 4 && Math.Abs(pt.Y - pressPos.Y) < 4) return;   // movement threshold
                 dragging = true; _liveDrag = true;   // route attached arrows cheaply until release
+                // Snapshot the start positions of every selected node, so the whole group moves together.
+                _dragStart = _selected
+                    .Select(id => _data.Nodes.FirstOrDefault(n => n.Id == id))
+                    .Where(n => n is not null)
+                    .ToDictionary(n => n!.Id, n => new Point(n!.X, n.Y));
             }
-            // Snap the node's CENTRE to the grid: centre-aligned nodes give straight orthogonal arrows.
+            // Snap the dragged node's CENTRE to the grid; shift the rest of the selection by the same delta.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
             var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), node.Height);
-            Canvas.SetLeft(container, nx); Canvas.SetTop(container, ny);
-            node.X = nx; node.Y = ny;
-            GrowCanvasFor(nx, ny, node.Width, node.Height);
-            UpdateConnectionsFor(node.Id);
+            double dx = nx - (_dragStart!.TryGetValue(node.Id, out var s0) ? s0.X : node.X);
+            double dy = ny - (_dragStart!.TryGetValue(node.Id, out s0) ? s0.Y : node.Y);
+            foreach (var (id, start) in _dragStart)
+            {
+                var nd = _data.Nodes.FirstOrDefault(n => n.Id == id);
+                if (nd is null) continue;
+                nd.X = start.X + dx; nd.Y = start.Y + dy;
+                if (_nodeViews.TryGetValue(id, out var v)) { Canvas.SetLeft(v, nd.X); Canvas.SetTop(v, nd.Y); }
+                GrowCanvasFor(nd.X, nd.Y, nd.Width, nd.Height);
+                UpdateConnectionsFor(id);
+            }
             e.Handled = true;
         };
         container.PointerReleased += (_, e) =>
@@ -998,10 +1021,15 @@ public class FlowChartWindow : Window
             if (dragging)
             {
                 dragging = false; _liveDrag = false;
+                var moved = _dragStart?.Keys.ToList() ?? new List<string> { node.Id };
+                _dragStart = null;
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
-                foreach (var c in _data.Connections)
-                    if ((c.FromId == node.Id || c.ToId == node.Id) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
-                UpdateConnectionsFor(node.Id);   // re-route attached arrows with full A* now the drag settled
+                foreach (var id in moved)
+                {
+                    foreach (var c in _data.Connections)
+                        if ((c.FromId == id || c.ToId == id) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
+                    UpdateConnectionsFor(id);   // re-route attached arrows with full A* now the drag settled
+                }
                 Save();
             }
             else if (ConnectMode) HandleConnectClick(node.Id);   // a click (no drag) wires the arrow
