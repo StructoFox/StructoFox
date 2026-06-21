@@ -125,6 +125,17 @@ public static class ThemeManager
         Set(onAccent,
             "CheckBoxCheckGlyphForegroundChecked", "CheckBoxCheckGlyphForegroundCheckedPointerOver",
             "CheckBoxCheckGlyphForegroundCheckedPressed");
+
+        // RadioButton — same problem as the CheckBox: label + ring went white. Theme the label, the
+        // unchecked ring outline (theme text), the checked ring (accent), and the inner dot (on-accent).
+        Set(text,
+            "RadioButtonForeground", "RadioButtonForegroundPointerOver", "RadioButtonForegroundPressed",
+            "RadioButtonOuterEllipseStroke", "RadioButtonOuterEllipseStrokePointerOver", "RadioButtonOuterEllipseStrokePressed");
+        Set(accent,
+            "RadioButtonOuterEllipseCheckedFill", "RadioButtonOuterEllipseCheckedFillPointerOver", "RadioButtonOuterEllipseCheckedFillPressed",
+            "RadioButtonOuterEllipseCheckedStroke", "RadioButtonOuterEllipseCheckedStrokePointerOver", "RadioButtonOuterEllipseCheckedStrokePressed");
+        Set(onAccent,
+            "RadioButtonCheckGlyphFill", "RadioButtonCheckGlyphFillPointerOver", "RadioButtonCheckGlyphFillPressed");
     }
 
     // The theme worn out of the box: a clean light "drawing board" surface for diagrams & code.
