@@ -512,6 +512,9 @@ public partial class MainWindow : Window
             if (res != DialogResult.Yes) return;
             SketchbookService.Delete(s.Id); _body.Content = BuildHome();
         };
+        var openFolder = new MenuItem { Header = Loc.S("Proj_OpenFolder") };
+        openFolder.Click += (_, _) => OpenInExplorer(SketchbookService.Root);
+        cm.Items.Add(openFolder);
         cm.Items.Add(rename); cm.Items.Add(new Separator()); cm.Items.Add(del);
         card.ContextMenu = cm;
         return card;
@@ -581,10 +584,14 @@ public partial class MainWindow : Window
         return grid;
     }
 
+    // True for the built-in sketchbook folder (a project-shaped folder that must not show among projects).
+    static bool IsSketchbook(string path) =>
+        string.Equals(path.TrimEnd('/', '\\'), SketchbookService.Root.TrimEnd('/', '\\'), StringComparison.OrdinalIgnoreCase);
+
     // Top third: the most-recent project as a centred hero card, or a placeholder tile if there is none.
     Control BuildHero()
     {
-        var last = RecentProjects.Load().FirstOrDefault();
+        var last = RecentProjects.Load().FirstOrDefault(e => !IsSketchbook(e.Path));
         Control card = last is null ? PlaceholderCard() : ProjectCard(last.Path, last.Opened, big: true);
         card.HorizontalAlignment = HorizontalAlignment.Center;
         card.VerticalAlignment   = VerticalAlignment.Center;
@@ -696,11 +703,13 @@ public partial class MainWindow : Window
     }
 
     // The project paths for the active source, each with a representative date (for sorting/display).
+    // The sketchbook folder is a project-shaped folder too, but it belongs under the Sketchbook tab — never
+    // list it among real projects.
     List<(string path, DateTime date)> HomeItems()
     {
         if (_homeSource is null)
-            return RecentProjects.Load().Select(e => (e.Path, e.Opened)).ToList();
-        return ProjectService.Scan(_homeSource).Select(p => (p, ProjectDate(p))).ToList();
+            return RecentProjects.Load().Where(e => !IsSketchbook(e.Path)).Select(e => (e.Path, e.Opened)).ToList();
+        return ProjectService.Scan(_homeSource).Where(p => !IsSketchbook(p)).Select(p => (p, ProjectDate(p))).ToList();
     }
 
     // A project's date: its recent-opened time if known, else its marker's created time, else folder mtime.
