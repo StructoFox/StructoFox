@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\Assets\Structofox.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <Version>0.5.1</Version>
     <AssemblyVersion>0.5.1.0</AssemblyVersion>
@@ -25,6 +26,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\StructoFox.Core\StructoFox.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Embed the app icon as an Avalonia resource, so windows/taskbar can show it at runtime. -->
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\Assets\Structofox.ico" Link="Assets\Structofox.ico" />
   </ItemGroup>
 
   <!-- Ship the OXSUIT themes next to the app so they can be loaded at runtime. -->

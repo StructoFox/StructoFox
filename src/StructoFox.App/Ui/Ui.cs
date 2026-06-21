@@ -67,6 +67,17 @@ public static class Ui
     {
         Theme(w, TemplatedControl.BackgroundProperty, "ContentBgBrush");
         Theme(w, TextElement.ForegroundProperty,      "ContentTextBrush");
+        if (AppIcon() is { } icon) w.Icon = icon;   // taskbar + title-bar icon, every window
+    }
+
+    // The embedded app icon, loaded once and shared across all windows.
+    static WindowIcon? _appIcon;
+    static WindowIcon? AppIcon()
+    {
+        if (_appIcon is not null) return _appIcon;
+        try { _appIcon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://StructoFox.App/Assets/Structofox.ico"))); }
+        catch { /* no icon is fine */ }
+        return _appIcon;
     }
 
     /// <summary>Binds a property to an OXSUIT theme brush via DynamicResource — present-theme or default,
