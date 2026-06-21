@@ -302,6 +302,10 @@ public class CodeBoardWindow : Window
         zoom.Click += (_, _) => SetZoom(1.0);
         panel.Children.Add(zoom);
 
+        var crop = Btn(Loc.S("View_Crop"), Loc.S("View_CropTip"));
+        crop.Click += (_, _) => { FitCanvas(trim: true); Save(); };
+        panel.Children.Add(crop);
+
         panel.Children.Add(new Separator());
         panel.Children.Add(new TextBlock { Text = Loc.S("Grid_Header"), FontWeight = FontWeight.Bold });
 
@@ -806,7 +810,9 @@ public class CodeBoardWindow : Window
 
     // Fits the canvas size to its content with an even margin, growing AND shrinking on every side, and
     // re-anchors the content's top-left near the margin. Called on drag-release / removal.
-    void FitCanvas()
+    // <param name="trim">When true (the "Crop" action), also pull content up/left to remove top/left
+    // whitespace. The automatic call (false) only grows that side, preserving a centered layout.</param>
+    void FitCanvas(bool trim = false)
     {
         if (_canvas is null || _cards.Count == 0) return;
         const double pad = 80;
@@ -834,7 +840,8 @@ public class CodeBoardWindow : Window
         // margin: a deliberately centered layout must keep its left/top whitespace. Right/bottom still
         // shrink, since that just resizes the surface.
         double g = _boardData.GridSize >= 1 ? _boardData.GridSize : 10;
-        double dx = Math.Max(0, Math.Round((pad - minX) / g) * g), dy = Math.Max(0, Math.Round((pad - minY) / g) * g);
+        double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
+        if (!trim) { dx = Math.Max(0, dx); dy = Math.Max(0, dy); }   // auto-fit grows only; Crop also trims
         ShiftWorld(dx, dy);
 
         // Never shrink below the visible viewport (so a near-empty board doesn't collapse to a tiny box).

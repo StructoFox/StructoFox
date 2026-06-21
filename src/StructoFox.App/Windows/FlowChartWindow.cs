@@ -764,6 +764,12 @@ public class FlowChartWindow : Window
         zoom.Click += (_, _) => SetZoom(1.0);
         panel.Children.Add(zoom);
 
+        // Crop: tighten the canvas to the content, also trimming top/left whitespace.
+        var crop = Ui.Btn(Loc.S("View_Crop"));
+        ToolTip.SetTip(crop, Loc.S("View_CropTip"));
+        crop.Click += (_, _) => { FitCanvas(trim: true); Save(); };
+        panel.Children.Add(crop);
+
         panel.Children.Add(new Separator());
         panel.Children.Add(new TextBlock { Text = Loc.S("Grid_Header"), FontWeight = FontWeight.Bold });
 
@@ -1655,7 +1661,9 @@ public class FlowChartWindow : Window
 
     // Fits the canvas snugly around the content with a uniform margin — so it grows when you push to an
     // edge and shrinks back when you move away (all four sides). Called when an edit settles.
-    void FitCanvas()
+    // <param name="trim">When true (the "Crop" action), also pull content up/left to remove top/left
+    // whitespace. The automatic call (false) only grows that side, preserving a centered layout.</param>
+    void FitCanvas(bool trim = false)
     {
         if (_canvas is null || _data.Nodes.Count == 0) return;
         const double pad = 80;
@@ -1670,8 +1678,9 @@ public class FlowChartWindow : Window
         // margin: a deliberately centered layout (e.g. a tree fanning down from a top-centre start) must
         // keep its left/top whitespace. Right/bottom still shrink, since that just resizes the surface.
         double g = _data.GridSize >= 1 ? _data.GridSize : 10;
-        double dx = Math.Max(0, Math.Round((pad - minX) / g) * g), dy = Math.Max(0, Math.Round((pad - minY) / g) * g);
-        ShiftWorld(dx, dy);   // bring the top-left of the content near the margin (grow that side only)
+        double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
+        if (!trim) { dx = Math.Max(0, dx); dy = Math.Max(0, dy); }   // auto-fit grows only; Crop also trims
+        ShiftWorld(dx, dy);   // bring the top-left of the content near the margin
 
         // Never shrink below the visible viewport (so a near-empty chart doesn't collapse to a tiny box).
         double minW = Math.Max(800, _scroll?.Viewport.Width  / (_zoom <= 0 ? 1 : _zoom) ?? 800);
