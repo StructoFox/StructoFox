@@ -768,31 +768,39 @@ public class FlowChartWindow : Window
         WireNode(container, node, label);
     }
 
-    // Wires a node container's pointer interactions: drag-move, mode actions, double-click + right-click.
+    // Wires a node's pointer interactions. Nodes are draggable in BOTH Select and Connect modes (place
+    // and move feel like one mode); in Connect mode a node that's clicked — not dragged — starts/finishes
+    // an arrow. Double-click (Select) edits / opens; right-click shows the menu or cancels a connection.
     void WireNode(Border container, FlowNode node, TextBlock label)
     {
-        var dragging = false;
-        var offset   = default(Point);
+        bool pressed = false, dragging = false;
+        Point pressPos = default, offset = default;
 
         container.PointerPressed += (_, e) =>
         {
             var props = e.GetCurrentPoint(container).Properties;
-            // While connecting, a right-click cancels rather than opening the node menu.
             if (props.IsRightButtonPressed) { if (ConnectMode) CancelConnect(); else ShowNodeMenu(node, label, container); e.Handled = true; return; }
-            if (_mode == EditMode.Remove)   { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); e.Handled = true; return; }
-            if (ConnectMode)                { HandleConnectClick(node.Id); e.Handled = true; return; }
-            // A subroutine opens its function's diagram; other nodes edit their text.
-            if (e.ClickCount >= 2)          { if (node.Kind == FlowNodeKind.Subroutine) ShowChartFlow(node); else _ = EditNodeText(node, label); e.Handled = true; return; }
+            if (!props.IsLeftButtonPressed) return;
+            if (_mode == EditMode.Remove) { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); e.Handled = true; return; }
+            // Double-click (outside connect mode): open a subroutine's diagram / edit the node text.
+            if (e.ClickCount >= 2 && !ConnectMode) { if (node.Kind == FlowNodeKind.Subroutine) ShowChartFlow(node); else _ = EditNodeText(node, label); e.Handled = true; return; }
 
-            _selected.Clear(); _selected.Add(node.Id); RefreshSelection();
-            dragging = true; offset = e.GetPosition(container);
+            pressed = true; dragging = false;
+            pressPos = e.GetPosition(_canvas);
+            offset   = e.GetPosition(container);
+            if (!ConnectMode) { _selected.Clear(); _selected.Add(node.Id); RefreshSelection(); }
             e.Pointer.Capture(container);
             e.Handled = true;
         };
         container.PointerMoved += (_, e) =>
         {
-            if (!dragging) return;
+            if (!pressed) return;
             var pt = e.GetPosition(_canvas);
+            if (!dragging)
+            {
+                if (Math.Abs(pt.X - pressPos.X) < 4 && Math.Abs(pt.Y - pressPos.Y) < 4) return;   // movement threshold
+                dragging = true;
+            }
             // Snap the node's CENTRE to the grid: centre-aligned nodes give straight orthogonal arrows.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
             var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), node.Height);
@@ -804,11 +812,15 @@ public class FlowChartWindow : Window
         };
         container.PointerReleased += (_, e) =>
         {
-            if (!dragging) return;
-            dragging = false; e.Pointer.Capture(null);
-            // A junction dropped onto an existing line splices itself into the flow (A→B ⇒ A→J→B).
-            if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
-            Save();
+            if (!pressed) return;
+            pressed = false; e.Pointer.Capture(null);
+            if (dragging)
+            {
+                dragging = false;
+                if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
+                Save();
+            }
+            else if (ConnectMode) HandleConnectClick(node.Id);   // a click (no drag) wires the arrow
             e.Handled = true;
         };
     }
@@ -1123,7 +1135,7 @@ public class FlowChartWindow : Window
             {
                 if (e.GetCurrentPoint(seg).Properties.IsRightButtonPressed) { ShowConnMenu(capConn, seg); e.Handled = true; return; }
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
-                if (_mode == EditMode.Select && draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }
+                if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
             _canvas.Children.Add(seg); visuals.Add(seg);
         }
@@ -1211,7 +1223,28 @@ public class FlowChartWindow : Window
     void UpdateConnectionsFor(string nodeId)
     {
         foreach (var c in _data.Connections)
-            if (c.FromId == nodeId || c.ToId == nodeId) RenderConnection(c);
+            if (c.FromId == nodeId || c.ToId == nodeId) { AlignManualEnds(c); RenderConnection(c); }
+    }
+
+    // Keeps a manually-routed connection's END segments straight when a node it touches moves: the first
+    // waypoint stays aligned with the (new) exit edge midpoint, the last with the entry — so the stub
+    // stretches/shifts orthogonally instead of drawing a diagonal to the old bend (and the next segment,
+    // sharing the other axis, stays straight too).
+    void AlignManualEnds(FlowConnection c)
+    {
+        if (c.Waypoints.Count == 0) return;
+        var a = NodeRect(c.FromId); var b = NodeRect(c.ToId);
+        if (a is null || b is null) return;
+
+        var w0 = c.Waypoints[0];
+        var exit = EdgeMid(a.Value, new Point(w0.X, w0.Y));
+        if (Math.Abs(exit.Y - w0.Y) >= Math.Abs(exit.X - w0.X)) w0.X = exit.X;   // vertical stub → align X
+        else                                                    w0.Y = exit.Y;   // horizontal stub → align Y
+
+        var wl = c.Waypoints[^1];
+        var entry = EdgeMid(b.Value, new Point(wl.X, wl.Y));
+        if (Math.Abs(entry.Y - wl.Y) >= Math.Abs(entry.X - wl.X)) wl.X = entry.X;
+        else                                                      wl.Y = entry.Y;
     }
 
     // Expands the canvas when content nears its right/bottom edge, so there's always room to grow.
