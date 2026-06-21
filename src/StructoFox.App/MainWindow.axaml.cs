@@ -306,24 +306,11 @@ public partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));  // library folders (middle)
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));  // Add library (bottom)
 
+        // Two mutually-exclusive tabs — Projects / Drafts. The active one is shown in the right pane,
+        // so no separate heading there is needed.
         var topStack = new StackPanel { Spacing = 6 };
-        var newBtn = Ui.Btn(Loc.S("Home_NewProject"), Loc.S("Home_NewProjectTip"));
-        newBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
-        newBtn.Click += async (_, _) => await NewProject();
-        topStack.Children.Add(newBtn);
-
-        // Sketchbook: standalone diagrams, no project needed.
-        var sketchBtn = new Button
-        {
-            Content = Loc.S("Sketch_Nav"), HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new(8, 6), CornerRadius = new(6),
-        };
-        Ui.Theme(sketchBtn, TemplatedControl.BackgroundProperty, _sketchMode ? "AccentBgBrush"  : "ControlBgBrush");
-        Ui.Theme(sketchBtn, TemplatedControl.ForegroundProperty, _sketchMode ? "AccentTextBrush" : "SidebarTextBrush");
-        ToolTip.SetTip(sketchBtn, Loc.S("Sketch_NavTip"));
-        sketchBtn.Click += (_, _) => { _sketchMode = !_sketchMode; _homeSource = null; _body.Content = BuildHome(); };
-        topStack.Children.Add(sketchBtn);
-
+        topStack.Children.Add(HomeTab(Loc.S("Home_TabProjects"), null,                 active: !_sketchMode, () => { if (_sketchMode) { _sketchMode = false; _body.Content = BuildHome(); } }));
+        topStack.Children.Add(HomeTab(Loc.S("Sketch_Nav"),       Loc.S("Sketch_NavTip"), active:  _sketchMode, () => { if (!_sketchMode) { _sketchMode = true; _homeSource = null; _body.Content = BuildHome(); } }));
         Grid.SetRow(topStack, 0); grid.Children.Add(topStack);
 
         // The library folders float in the middle, centred, scrolling if many.
@@ -342,6 +329,21 @@ public partial class MainWindow : Window
         Grid.SetRow(libBtn, 2); grid.Children.Add(libBtn);
 
         return grid;
+    }
+
+    // A left-rail tab (Projects / Drafts): accent-filled when active, otherwise neutral.
+    Button HomeTab(string label, string? tip, bool active, Action onClick)
+    {
+        var b = new Button
+        {
+            Content = label, HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new(8, 6), CornerRadius = new(6),
+        };
+        Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
+        Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
+        if (!string.IsNullOrEmpty(tip)) ToolTip.SetTip(b, tip);
+        b.Click += (_, _) => onClick();
+        return b;
     }
 
     // One library entry; left-click selects it as the list source (click the active one again to go back
@@ -372,13 +374,10 @@ public partial class MainWindow : Window
     Control BuildSketchView()
     {
         var grid = new Grid { Margin = new(20) };
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));   // create row (the left tab already names this view)
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star));
 
-        grid.Children.Add(Heading(Loc.S("Sketch_Title")));
-
-        var create = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 10, 0, 14) };
+        var create = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 0, 0, 14) };
         void NewBtn(string label, SketchType type) { var b = Ui.Btn(label); b.Click += async (_, _) => await NewSketch(type); create.Children.Add(b); }
         NewBtn(Loc.S("Sketch_NewPap"),    SketchType.Pap);
         NewBtn(Loc.S("Sketch_NewStruct"), SketchType.Structogram);
@@ -387,7 +386,7 @@ public partial class MainWindow : Window
         var browse = Ui.Btn(Loc.S("Sketch_Open"), Loc.S("Sketch_OpenTip"));
         browse.Click += (_, _) => OpenSketchbookWorkspace();
         create.Children.Add(browse);
-        Grid.SetRow(create, 1); grid.Children.Add(create);
+        Grid.SetRow(create, 0); grid.Children.Add(create);
 
         var sketches = SketchbookService.Load();
         Control body;
@@ -399,7 +398,7 @@ public partial class MainWindow : Window
             foreach (var s in sketches) wrap.Children.Add(SketchCard(s));
             body = new ScrollViewer { Content = wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         }
-        Grid.SetRow((Control)body, 2); grid.Children.Add((Control)body);
+        Grid.SetRow((Control)body, 1); grid.Children.Add((Control)body);
         return grid;
     }
 
@@ -481,10 +480,18 @@ public partial class MainWindow : Window
         if (_sketchMode) return BuildSketchView();
 
         var grid = new Grid { Margin = new(20) };
-        grid.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));  // top 1/3
-        grid.RowDefinitions.Add(new RowDefinition(new GridLength(2, GridUnitType.Star)));  // bottom 2/3
-        var hero = BuildHero(); Grid.SetRow(hero, 0); grid.Children.Add(hero);
-        var bottom = BuildHomeBottom(); Grid.SetRow(bottom, 1); grid.Children.Add(bottom);
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));                        // New project (top)
+        grid.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));  // hero
+        grid.RowDefinitions.Add(new RowDefinition(new GridLength(2, GridUnitType.Star)));  // list
+
+        var newBtn = Ui.Btn(Loc.S("Home_NewProject"), Loc.S("Home_NewProjectTip"));
+        newBtn.HorizontalAlignment = HorizontalAlignment.Left;
+        newBtn.Margin = new(0, 0, 0, 10);
+        newBtn.Click += async (_, _) => await NewProject();
+        Grid.SetRow(newBtn, 0); grid.Children.Add(newBtn);
+
+        var hero = BuildHero(); Grid.SetRow(hero, 1); grid.Children.Add(hero);
+        var bottom = BuildHomeBottom(); Grid.SetRow(bottom, 2); grid.Children.Add(bottom);
         return grid;
     }
 

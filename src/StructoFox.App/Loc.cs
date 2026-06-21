@@ -94,6 +94,7 @@ public static class Loc
         ["Home_RemoveLibrary"] = "✕  Remove library",
         ["Home_NoProjects"]    = "No projects",
         ["Home_NoProjectsHint"] = "No projects here yet — create one with ➕",
+        ["Home_TabProjects"]   = "📁  Projects",
 
         // Sketchbook (standalone diagrams)
         ["Sketch_Nav"]      = "✏  Sketchbook",
@@ -504,6 +505,7 @@ public static class Loc
         ["Home_RemoveLibrary"] = "✕  Bibliothek entfernen",
         ["Home_NoProjects"]    = "Keine Projekte",
         ["Home_NoProjectsHint"] = "Noch keine Projekte hier — leg eins mit ➕ an",
+        ["Home_TabProjects"]   = "📁  Projekte",
 
         // Cockpit / section chrome
         ["Sec_New"]         = "＋ Neu: {0}",
