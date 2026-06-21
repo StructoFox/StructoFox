@@ -5,6 +5,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Reactive;
@@ -66,6 +67,7 @@ public class CodeBoardWindow : Window
     Rectangle? _gridRect;                              // tiled alignment grid behind the cards
     bool   _panning;  Point _panStart;  Vector _panOrigin;   // right-drag canvas pan
     bool   _rightMaybeMenu;                            // a right press that opens the add-menu if it wasn't a drag
+    bool   _rightCancelConnect;                        // a right press (connect mode) that cancels if it wasn't a drag
 
     const double PortRadius  = 6;
     const double DefaultCardW = 180;
@@ -208,14 +210,14 @@ public class CodeBoardWindow : Window
         _canvas.AddHandler(DragDrop.DragOverEvent, OnDragOver);
         _canvas.AddHandler(DragDrop.DropEvent, OnDrop);
 
-        // Ctrl + wheel zooms toward the pointer (handled on the canvas, before the viewer scrolls, so
-        // while Ctrl is held the wheel always zooms and never scrolls).
-        _canvas.PointerWheelChanged += (_, e) =>
+        // Ctrl + wheel zooms toward the pointer. Tunnel handler on the scroll viewer so it fires before
+        // anything under the cursor and in every mode, and before the viewer's own scroll.
+        _scroll.AddHandler(InputElement.PointerWheelChangedEvent, (_, e) =>
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
             e.Handled = true;
             ZoomAt(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), e.GetPosition(_scroll));
-        };
+        }, RoutingStrategies.Tunnel);
 
         RenderGrid();
 
@@ -1122,9 +1124,9 @@ public class CodeBoardWindow : Window
 
         if (props.IsRightButtonPressed)
         {
-            if (_connectMode) { CancelConnect(); return; }
-            // Right press may start a pan (on drag) or open the add-menu (on a plain click).
-            _panning = true; _rightMaybeMenu = true;
+            // Right-drag pans (also while connecting). A plain right-click cancels the arrow (connect
+            // mode) or opens the add-menu (otherwise).
+            _panning = true; _rightMaybeMenu = !_connectMode; _rightCancelConnect = _connectMode;
             _panStart = e.GetPosition(_scroll); _panOrigin = _scroll!.Offset;
             e.Pointer.Capture(_canvas);
             e.Handled = true;
@@ -1155,7 +1157,8 @@ public class CodeBoardWindow : Window
         if (_panning)
         {
             var d = e.GetPosition(_scroll) - _panStart;
-            if (_rightMaybeMenu && (Math.Abs(d.X) > 4 || Math.Abs(d.Y) > 4)) { _rightMaybeMenu = false; if (_canvas is not null) _canvas.Cursor = new Cursor(StandardCursorType.SizeAll); }
+            if ((_rightMaybeMenu || _rightCancelConnect) && (Math.Abs(d.X) > 4 || Math.Abs(d.Y) > 4))
+            { _rightMaybeMenu = false; _rightCancelConnect = false; if (_canvas is not null) _canvas.Cursor = new Cursor(StandardCursorType.SizeAll); }
             _scroll!.Offset = new Vector(_panOrigin.X - d.X, _panOrigin.Y - d.Y);
             return;
         }
@@ -1187,7 +1190,8 @@ public class CodeBoardWindow : Window
             _panning = false;
             e.Pointer.Capture(null);
             if (_canvas is not null) _canvas.Cursor = new Cursor(StandardCursorType.Arrow);
-            if (_rightMaybeMenu) { _rightMaybeMenu = false; ShowCanvasAddMenu(e.GetPosition(_canvas)); }   // plain right-click → add menu
+            if (_rightMaybeMenu) { _rightMaybeMenu = false; ShowCanvasAddMenu(e.GetPosition(_canvas)); }       // plain right-click → add menu
+            else if (_rightCancelConnect) { _rightCancelConnect = false; CancelConnect(); }                   // plain right-click (connect) → cancel
             return;
         }
         if (!_rubberSelecting) return;

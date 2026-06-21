@@ -5,6 +5,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -48,6 +49,7 @@ public class FlowChartWindow : Window
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
     bool   _selecting;  Point _selStart;             // left-drag selection on empty canvas
     bool   _panning;    Point _panStart;  Vector _panOrigin;   // right-drag canvas pan
+    bool   _panMoved;   bool _rightCancelConnect;    // distinguish right-drag (pan) from right-click (cancel)
 
     FlowConnection? _segConn;  int _segIdx;  List<Point>? _segBasePts;  bool _segHoriz;  Point _segStart;  // segment drag
 
@@ -197,9 +199,9 @@ public class FlowChartWindow : Window
             var p = e.GetCurrentPoint(_canvas);
             if (p.Properties.IsRightButtonPressed)
             {
-                if (ConnectMode) { CancelConnect(); return; }
-                _panning = true; _panStart = e.GetPosition(_scroll); _panOrigin = _scroll!.Offset;
-                _canvas!.Cursor = new Cursor(StandardCursorType.SizeAll);
+                // Right-drag pans (also while connecting); a plain right-click in connect mode cancels.
+                _panning = true; _panMoved = false; _rightCancelConnect = ConnectMode;
+                _panStart = e.GetPosition(_scroll); _panOrigin = _scroll!.Offset;
                 e.Pointer.Capture(_canvas); e.Handled = true;
                 return;
             }
@@ -226,6 +228,7 @@ public class FlowChartWindow : Window
             if (_panning)
             {
                 var d = e.GetPosition(_scroll) - _panStart;
+                if (!_panMoved && (Math.Abs(d.X) > 4 || Math.Abs(d.Y) > 4)) { _panMoved = true; _canvas!.Cursor = new Cursor(StandardCursorType.SizeAll); }
                 _scroll!.Offset = new Vector(_panOrigin.X - d.X, _panOrigin.Y - d.Y);
                 return;
             }
@@ -234,7 +237,12 @@ public class FlowChartWindow : Window
         _canvas.PointerReleased += (_, e) =>
         {
             if (_segConn is not null) { NormalizeWaypoints(_segConn); RenderConnection(_segConn); Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
-            if (_panning) { _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null); return; }
+            if (_panning)
+            {
+                _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null);
+                if (!_panMoved && _rightCancelConnect) CancelConnect();   // plain right-click cancels the arrow
+                return;
+            }
             if (_selecting) { _selecting = false; CommitSelectRect(); e.Pointer.Capture(null); }
         };
 
@@ -246,15 +254,15 @@ public class FlowChartWindow : Window
         _canvas.AddHandler(DragDrop.DragOverEvent, OnDragOver);
         _canvas.AddHandler(DragDrop.DropEvent, OnDrop);
 
-        // Ctrl + wheel zooms toward the pointer. Handled on the canvas (a descendant of the scroll
-        // viewer) so it fires before the viewer's own scroll handler — while Ctrl is held the wheel
-        // always zooms and never scrolls.
-        _canvas.PointerWheelChanged += (_, e) =>
+        // Ctrl + wheel zooms toward the pointer. Handled on the scroll viewer in the TUNNEL phase so it
+        // fires before anything under the cursor (nodes, lines) and in every edit mode, and before the
+        // viewer's own scroll — while Ctrl is held the wheel always zooms toward the cursor, never scrolls.
+        _scroll.AddHandler(InputElement.PointerWheelChangedEvent, (_, e) =>
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
             e.Handled = true;
             ZoomAt(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), e.GetPosition(_scroll));
-        };
+        }, RoutingStrategies.Tunnel);
 
         RenderGrid();
         RefreshDecor();
