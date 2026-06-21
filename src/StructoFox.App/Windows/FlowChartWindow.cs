@@ -44,7 +44,7 @@ public class FlowChartWindow : Window
     bool   _selecting;  Point _selStart;             // left-drag selection on empty canvas
     bool   _panning;    Point _panStart;  Vector _panOrigin;   // right-drag canvas pan
 
-    FlowConnection? _segConn;  int _segIdx;  List<BoardWaypoint>? _segBase;  Point _segStart;  // segment drag
+    FlowConnection? _segConn;  int _segIdx;  List<Point>? _segBasePts;  bool _segHoriz;  Point _segStart;  // segment drag
 
     Button? _selectBtn, _removeBtn;
     MenuItem? _connMenu;   // the merged "Connect" menu; its header reflects the active line style + mode
@@ -150,7 +150,7 @@ public class FlowChartWindow : Window
                 _rubberBand.EndPoint = e.GetPosition(_canvas);
                 return;
             }
-            if (_segConn is not null && _segBase is not null) { DragSegment(e.GetPosition(_canvas)); return; }
+            if (_segConn is not null && _segBasePts is not null) { DragSegment(e.GetPosition(_canvas)); return; }
             if (_panning)
             {
                 var d = e.GetPosition(_scroll) - _panStart;
@@ -161,7 +161,7 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
-            if (_segConn is not null) { Save(); _segConn = null; _segBase = null; e.Pointer.Capture(null); return; }
+            if (_segConn is not null) { Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
             if (_panning) { _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null); return; }
             if (_selecting) { _selecting = false; CommitSelectRect(); e.Pointer.Capture(null); }
         };
@@ -952,46 +952,53 @@ public class FlowChartWindow : Window
             : new Point(dx >= 0 ? r.Right : r.Left, c.Y);
     }
 
-    // Starts dragging an interior segment of a connection. If the connection is still auto-routed, its
-    // current bends are frozen into waypoints first so they become editable.
+    // Starts dragging a segment. The full current polyline (incl. node-edge ends) is captured as the
+    // baseline; the move then rebuilds it (inserting corners next to fixed ends so even an end segment or
+    // a straight same-height line bends cleanly).
     void BeginSegmentDrag(FlowConnection conn, int segIdx, PointerPressedEventArgs e)
     {
-        if (conn.Waypoints.Count == 0)
-        {
-            var a = NodeRect(conn.FromId); var b = NodeRect(conn.ToId);
-            if (a is null || b is null) return;
-            var pts = OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId);
-            conn.Waypoints = pts.Skip(1).Take(pts.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
-        }
-        _segConn = conn;
-        _segIdx  = segIdx;
-        _segBase = conn.Waypoints.Select(w => new BoardWaypoint { X = w.X, Y = w.Y }).ToList();
-        _segStart = e.GetPosition(_canvas);
+        var a = NodeRect(conn.FromId); var b = NodeRect(conn.ToId);
+        if (a is null || b is null) return;
+        var pts = conn.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, conn)
+                                           : Simplify(OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
+        if (segIdx < 0 || segIdx >= pts.Count - 1) return;
+        _segConn   = conn;
+        _segIdx    = segIdx;
+        _segBasePts = pts;
+        _segHoriz  = Math.Abs(pts[segIdx + 1].Y - pts[segIdx].Y) < Math.Abs(pts[segIdx + 1].X - pts[segIdx].X);
+        _segStart  = e.GetPosition(_canvas);
         e.Pointer.Capture(_canvas);
     }
 
-    // Moves the dragged segment perpendicular to its orientation, shifting its two bend points (and so
-    // the whole segment) while the neighbouring segments stay attached.
+    // Moves the dragged segment perpendicular to its orientation; the result's interior points become the
+    // connection's waypoints (node-edge ends are re-derived by ManualRoute).
     void DragSegment(Point cur)
     {
-        if (_segConn is null || _segBase is null) return;
-        int ai = _segIdx - 1, bi = _segIdx;   // waypoint indices of the segment's two ends (both interior)
-        if (ai < 0 || bi >= _segBase.Count) return;
-
-        var wps = _segBase.Select(w => new BoardWaypoint { X = w.X, Y = w.Y }).ToList();
-        bool horiz = Math.Abs(_segBase[bi].Y - _segBase[ai].Y) < Math.Abs(_segBase[bi].X - _segBase[ai].X);
-        if (horiz)
-        {
-            double ny = Snap(_segBase[ai].Y + (cur.Y - _segStart.Y));
-            wps[ai].Y = ny; wps[bi].Y = ny;
-        }
-        else
-        {
-            double nx = Snap(_segBase[ai].X + (cur.X - _segStart.X));
-            wps[ai].X = nx; wps[bi].X = nx;
-        }
-        _segConn.Waypoints = wps;
+        if (_segConn is null || _segBasePts is null) return;
+        double v = _segHoriz ? Snap(_segBasePts[_segIdx].Y + (cur.Y - _segStart.Y))
+                             : Snap(_segBasePts[_segIdx].X + (cur.X - _segStart.X));
+        var full = BuildDragged(_segBasePts, _segIdx, _segHoriz, v);
+        _segConn.Waypoints = full.Skip(1).Take(full.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
         RenderConnection(_segConn);
+    }
+
+    // Rebuilds a polyline with segment k moved to the perpendicular coordinate v, keeping it orthogonal.
+    // Interior bend points just shift; a segment touching a fixed (node-edge) end grows a new corner.
+    static List<Point> BuildDragged(List<Point> pts, int k, bool horiz, double v)
+    {
+        int last = pts.Count - 1;
+        var P = pts[k]; var Q = pts[k + 1];
+        var P2 = horiz ? new Point(P.X, v) : new Point(v, P.Y);
+        var Q2 = horiz ? new Point(Q.X, v) : new Point(v, Q.Y);
+
+        var res = new List<Point>();
+        for (int i = 0; i < k; i++) res.Add(pts[i]);   // points before the segment
+        if (k == 0) res.Add(P);                         // fixed start (exit) stays as the pivot
+        res.Add(P2);
+        res.Add(Q2);
+        if (k + 1 == last) res.Add(Q);                  // fixed end (entry) stays as the pivot
+        for (int i = k + 2; i <= last; i++) res.Add(pts[i]);   // points after the segment
+        return res;
     }
 
     // Draws one connection: line, arrowhead, a transparent hit-zone for editing, and an optional label.
@@ -1011,7 +1018,7 @@ public class FlowChartWindow : Window
             ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
             : conn.Waypoints.Count > 0
                 ? ManualRoute(a.Value, b.Value, conn)
-                : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId);
+                : Simplify(OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
 
         var brush   = new SolidColorBrush(ParseColor(conn.LineColor));
         var visuals = new List<Control>();
@@ -1049,20 +1056,22 @@ public class FlowChartWindow : Window
         for (int i = 0; i < pts.Count - 1; i++)
         {
             var p0 = pts[i]; var p1 = pts[i + 1];
-            bool interior = !_data.DiagonalLines && i >= 1 && i <= pts.Count - 3;
+            // Any segment is draggable (not in diagonal mode): dragging perpendicular bends the line, even
+            // for a straight arrow at the same height as its target (it grows a fresh knick).
+            bool draggable = !_data.DiagonalLines;
             bool horiz = Math.Abs(p1.Y - p0.Y) < Math.Abs(p1.X - p0.X);
             var seg = new Line
             {
                 StartPoint = p0, EndPoint = p1, Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 3,
-                Cursor = new Cursor(interior ? (horiz ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast)
-                                             : StandardCursorType.Hand),
+                Cursor = new Cursor(draggable ? (horiz ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast)
+                                              : StandardCursorType.Hand),
             };
             int segIdx = i;
             seg.PointerPressed += (_, e) =>
             {
                 if (e.GetCurrentPoint(seg).Properties.IsRightButtonPressed) { ShowConnMenu(capConn, seg); e.Handled = true; return; }
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
-                if (_mode == EditMode.Select && interior) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }
+                if (_mode == EditMode.Select && draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }
             };
             _canvas.Children.Add(seg); visuals.Add(seg);
         }
