@@ -1738,11 +1738,29 @@ public class FlowChartWindow : Window
     // A DIN-style orthogonal route between two node rects: exit at an edge midpoint (bottom/top for a
     // mostly-vertical link, right/left for a horizontal one), straight H/V segments, enter the target's
     // opposite edge midpoint. Collinear points collapse to a straight line.
+    // Shortest distance from a point to a line segment (for finding which segment a click/junction is on).
+    static double DistToSegment(Point p, Point a, Point b)
+    {
+        double dx = b.X - a.X, dy = b.Y - a.Y;
+        double len2 = dx * dx + dy * dy;
+        double t = len2 < 1e-9 ? 0 : Math.Clamp(((p.X - a.X) * dx + (p.Y - a.Y) * dy) / len2, 0, 1);
+        double cx = a.X + t * dx, cy = a.Y + t * dy;
+        return Math.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy));
+    }
+
     static List<Point> OrthoRoute(Rect s, Rect t)
     {
         var sc = s.Center; var tc = t.Center;
         double dx = tc.X - sc.X, dy = tc.Y - sc.Y;
-        if (Math.Abs(dy) >= Math.Abs(dx))
+        // Departure bias: prefer leaving from the bottom/right (the "forward" edges). Only fall back to a
+        // top/left exit when the target is up and/or left with no forward option. So a target down-left
+        // exits at the BOTTOM (not the left, where an incoming arrow often sits), down-right by dominance.
+        bool down = dy > 0, right = dx > 0;
+        bool vertical = (down && right) ? Math.Abs(dy) >= Math.Abs(dx)
+                       : down  ? true
+                       : right ? false
+                       : Math.Abs(dy) >= Math.Abs(dx);   // up-left: by dominance
+        if (vertical)
         {
             var exit  = new Point(sc.X, dy >= 0 ? s.Bottom : s.Top);
             var entry = new Point(tc.X, dy >= 0 ? t.Top    : t.Bottom);
@@ -1969,14 +1987,36 @@ public class FlowChartWindow : Window
     {
         if (_connectFromId is null) return;
         var from = _connectFromId;
-        var jn = new FlowNode { Kind = FlowNodeKind.Junction, Text = "", Width = 9, Height = 9, X = Snap(at.X) - 4.5, Y = Snap(at.Y) - 4.5 };
+        double jx = Snap(at.X), jy = Snap(at.Y);
+        var jn = new FlowNode { Kind = FlowNodeKind.Junction, Text = "", Width = 9, Height = 9, X = jx - 4.5, Y = jy - 4.5 };
         _data.Nodes.Add(jn);
         RenderNode(jn);
 
+        // Preserve the line's existing shape: split its rendered route at the junction so A→J keeps the
+        // bends before it and J→B the bends after — otherwise a manually-routed line would snap back to auto.
+        var a = NodeRect(line.FromId); var b = NodeRect(line.ToId);
+        List<Point> pre = new(), post = new();
+        if (a is not null && b is not null)
+        {
+            var route = line.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, line)
+                                                 : Simplify(OrthoRouteAvoiding(a.Value, b.Value, line.FromId, line.ToId));
+            int k = 0; double best = double.MaxValue;
+            for (int i = 0; i < route.Count - 1; i++)
+            {
+                double d = DistToSegment(new Point(jx, jy), route[i], route[i + 1]);
+                if (d < best) { best = d; k = i; }
+            }
+            if (k > 0) pre = route.GetRange(1, k);
+            int postStart = k + 1, postCount = Math.Max(0, route.Count - 1 - postStart);
+            if (postCount > 0) post = route.GetRange(postStart, postCount);
+        }
+
         _data.Connections.Remove(line);
         if (_connViews.TryGetValue(line.Id, out var vs)) { foreach (var v in vs) _canvas!.Children.Remove(v); _connViews.Remove(line.Id); }
-        _data.Connections.Add(new FlowConnection { FromId = line.FromId, ToId = jn.Id, LineColor = _style.LineColor, Label = line.Label });
-        _data.Connections.Add(new FlowConnection { FromId = jn.Id, ToId = line.ToId, LineColor = _style.LineColor });
+        _data.Connections.Add(new FlowConnection { FromId = line.FromId, ToId = jn.Id, LineColor = _style.LineColor, Label = line.Label,
+            Waypoints = pre.Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList() });
+        _data.Connections.Add(new FlowConnection { FromId = jn.Id, ToId = line.ToId, LineColor = _style.LineColor,
+            Waypoints = post.Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList() });
         _data.Connections.Add(new FlowConnection { FromId = from,        ToId = jn.Id, LineColor = _style.LineColor });
 
         _connectFromId = null;
