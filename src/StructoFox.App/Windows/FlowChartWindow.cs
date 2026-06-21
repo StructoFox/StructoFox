@@ -1664,8 +1664,11 @@ public class FlowChartWindow : Window
         foreach (var n in _data.Nodes) { Inc(n.X, n.Y); Inc(n.X + n.Width, n.Y + n.Height); }
         foreach (var c in _data.Connections) foreach (var w in c.Waypoints) Inc(w.X, w.Y);
 
-        double dx = pad - minX, dy = pad - minY;
-        ShiftWorld(dx, dy);   // bring the top-left of the content to the margin (grow or shrink that side)
+        // Shift by a whole number of grid cells, so everything stays aligned to the grid (which tiles from
+        // 0,0) — a non-grid shift would knock all placements off the grid.
+        double g = _data.GridSize >= 1 ? _data.GridSize : 10;
+        double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
+        ShiftWorld(dx, dy);   // bring the top-left of the content near the margin (grow or shrink that side)
 
         double cw = maxX + dx + pad, ch = maxY + dy + pad;
         if (Math.Abs(_canvas.Width  - cw) > 0.5) _canvas.Width  = cw;
