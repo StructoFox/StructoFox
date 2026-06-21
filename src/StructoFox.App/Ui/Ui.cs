@@ -75,7 +75,7 @@ public static class Ui
     static WindowIcon? AppIcon()
     {
         if (_appIcon is not null) return _appIcon;
-        try { _appIcon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://StructoFox.App/Assets/Structofox_256.png"))); }
+        try { _appIcon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://StructoFox.App/Assets/appicon.png"))); }
         catch { /* no icon is fine */ }
         return _appIcon;
     }

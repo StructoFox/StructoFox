@@ -28,10 +28,12 @@
     <ProjectReference Include="..\StructoFox.Core\StructoFox.Core.csproj" />
   </ItemGroup>
 
-  <!-- Embed the app icon as an Avalonia resource, so windows/taskbar can show it at runtime.
-       Use the PNG: Avalonia's WindowIcon decodes PNG reliably, multi-size .ico can fail to load. -->
+  <!-- Embed the app icon as an Avalonia resource, so windows/taskbar can show it at runtime. Kept
+       INSIDE the project (Assets/appicon.png) so the avares path is unambiguous; a Link to a file
+       outside the project does not produce a usable avares:// path. PNG decodes reliably (the
+       multi-size .ico can fail to load via WindowIcon). -->
   <ItemGroup>
-    <AvaloniaResource Include="..\..\Assets\Structofox_256.png" Link="Assets\Structofox_256.png" />
+    <AvaloniaResource Include="Assets\appicon.png" />
   </ItemGroup>
 
   <!-- Ship the OXSUIT themes next to the app so they can be loaded at runtime. -->
