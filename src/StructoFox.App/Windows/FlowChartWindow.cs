@@ -1754,7 +1754,7 @@ public class FlowChartWindow : Window
             badge.Child = t;
 
             var (anchor, horizontal) = LabelAnchor(conn, pts);
-            PlaceLabel(badge, anchor, horizontal, conn.Label);
+            PlaceLabel(badge, anchor, horizontal, conn.Label, conn.LabelOff);
             badge.ZIndex = 4;
             WireLabelDrag(badge, conn);   // drag along the line to reposition
             _canvas.Children.Add(badge); visuals.Add(badge);
@@ -1777,12 +1777,17 @@ public class FlowChartWindow : Window
         return (new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2), Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y));
     }
 
-    // Positions the label badge near its anchor: above a horizontal run, to the right of a vertical one.
-    static void PlaceLabel(Border badge, Point anchor, bool horizontal, string label)
+    // Positions the label badge at its anchor, offset perpendicular to the line by off (0 = default side:
+    // above a horizontal run, right of a vertical one). A dragged label stores its own signed offset.
+    static void PlaceLabel(Border badge, Point anchor, bool horizontal, string label, double off)
     {
         double estW = Math.Max(16, label.Length * 6.5 + 8);
-        Canvas.SetLeft(badge, horizontal ? anchor.X - estW / 2 : anchor.X + 6);
-        Canvas.SetTop(badge,  horizontal ? anchor.Y - 20       : anchor.Y - 9);
+        const double h = 16;
+        double useOff = Math.Abs(off) < 0.001 ? (horizontal ? -(h / 2 + 4) : (estW / 2 + 6)) : off;
+        double cx = horizontal ? anchor.X : anchor.X + useOff;
+        double cy = horizontal ? anchor.Y + useOff : anchor.Y;
+        Canvas.SetLeft(badge, cx - estW / 2);
+        Canvas.SetTop(badge,  cy - h / 2);
     }
 
     static double Dist(Point a, Point b) { double dx = a.X - b.X, dy = a.Y - b.Y; return Math.Sqrt(dx * dx + dy * dy); }
@@ -1839,9 +1844,11 @@ public class FlowChartWindow : Window
         badge.PointerMoved += (_, e) =>
         {
             if (!drag || !_connPts.TryGetValue(conn.Id, out var pts) || pts.Count < 2) return;
-            conn.LabelPos = NearestFraction(pts, e.GetPosition(_canvas));
+            var q = e.GetPosition(_canvas);
+            conn.LabelPos = NearestFraction(pts, q);
             var (anchor, horizontal) = PointAlong(pts, conn.LabelPos);
-            PlaceLabel(badge, anchor, horizontal, conn.Label);
+            conn.LabelOff = horizontal ? q.Y - anchor.Y : q.X - anchor.X;   // perpendicular side + distance
+            PlaceLabel(badge, anchor, horizontal, conn.Label, conn.LabelOff);
             e.Handled = true;
         };
         badge.PointerReleased += (_, e) =>

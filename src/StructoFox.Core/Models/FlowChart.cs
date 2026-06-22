@@ -94,6 +94,9 @@ public class FlowConnection
     /// <summary>Where the label sits along the line, as a fraction (0..1) of the polyline length. A
     /// negative value means "auto": at the first segment for a decision branch, else the longest segment.</summary>
     public double              LabelPos  { get; set; } = -1;
+    /// <summary>Signed perpendicular offset of the label from the line (px): +below/right, -above/left.
+    /// 0 = the default side (above a horizontal run, right of a vertical one).</summary>
+    public double              LabelOff  { get; set; } = 0;
     public BoardLineStyle      LineStyle { get; set; } = BoardLineStyle.Solid;
     public string              LineColor { get; set; } = "#888888";
     public double              Thickness { get; set; } = 1.6;
