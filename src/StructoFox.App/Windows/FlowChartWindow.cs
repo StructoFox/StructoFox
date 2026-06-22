@@ -317,6 +317,7 @@ public class FlowChartWindow : Window
         _culling = true;
         try
         {
+            RecomputeJunctions();   // derive junction positions from their lines before realizing them
             var vis = VisibleRect().Inflate(400);
 
             foreach (var n in _data.Nodes)
@@ -1204,6 +1205,31 @@ public class FlowChartWindow : Window
     bool JunctionIsCrossing(FlowNode jn)
         => _data.Connections.Count(c => c.FromId == jn.Id || c.ToId == jn.Id) >= 4;
 
+    // A junction is a DERIVED point, not a thing you grab: it sits where its lines meet. Its X comes from
+    // the vertically-arriving line(s) (neighbour above/below), its Y from the horizontally-arriving one(s)
+    // (neighbour left/right). So moving the connected nodes/lines slides the junction along; it never has
+    // to be dragged itself.
+    void RecomputeJunctions()
+    {
+        foreach (var jn in _data.Nodes)
+        {
+            if (jn.Kind != FlowNodeKind.Junction) continue;
+            double cx = jn.X + jn.Width / 2, cy = jn.Y + jn.Height / 2;
+            double? nx = null, ny = null;
+            foreach (var c in _data.Connections)
+            {
+                if (c.FromId != jn.Id && c.ToId != jn.Id) continue;
+                var nr = NodeRect(c.FromId == jn.Id ? c.ToId : c.FromId);
+                if (nr is null) continue;
+                var oc = nr.Value.Center;
+                if (Math.Abs(oc.Y - cy) >= Math.Abs(oc.X - cx)) nx ??= oc.X;   // above/below → fixes X (vertical line)
+                else                                            ny ??= oc.Y;   // left/right → fixes Y (horizontal line)
+            }
+            jn.X = (nx ?? cx) - jn.Width / 2;
+            jn.Y = (ny ?? cy) - jn.Height / 2;
+        }
+    }
+
     // Updates every junction's look + interactivity from its current geometry: a crossing shows its dot
     // and stays grabbable; a T-junction hides its dot and (in Select mode) is click-through, so it moves
     // by dragging the line segments rather than by grabbing an invisible point. In Connect mode every
@@ -1217,7 +1243,9 @@ public class FlowChartWindow : Window
             bool cross = JunctionIsCrossing(jn);
             if (container.Child is Grid inner && inner.Children.Count > 0)
                 inner.Children[0].IsVisible = cross;   // the junction dot (first child = the Ellipse)
-            container.IsHitTestVisible = cross || ConnectMode;
+            // A junction is never grabbed (it's derived from its lines); only clickable in Connect mode,
+            // so a further line can be wired onto it.
+            container.IsHitTestVisible = ConnectMode;
         }
     }
 
@@ -1460,6 +1488,7 @@ public class FlowChartWindow : Window
     // Renders every saved connection (used once after nodes are laid out).
     void RenderAllConnections()
     {
+        RecomputeJunctions();   // position junctions from their lines before routing
         foreach (var c in _data.Connections) RenderConnection(c);
         RefreshJunctions();
         RenderCrossovers();
@@ -1563,13 +1592,8 @@ public class FlowChartWindow : Window
         _segHoriz  = Math.Abs(pts[segIdx + 1].Y - pts[segIdx].Y) < Math.Abs(pts[segIdx + 1].X - pts[segIdx].X);
         _segStart  = e.GetPosition(_canvas);
 
-        // If this is the end segment touching a junction, dragging it moves the junction (so a T-piece
-        // deforms as a whole instead of bending to a stationary centre).
+        // Junctions are derived from their lines (RecomputeJunctions), so no segment-drag "follow" hack.
         _segJunctionId = null;
-        bool fromJ = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Junction;
-        bool toJ   = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId)?.Kind   == FlowNodeKind.Junction;
-        if (toJ && segIdx == pts.Count - 2) _segJunctionId = conn.ToId;
-        else if (fromJ && segIdx == 0)      _segJunctionId = conn.FromId;
 
         e.Pointer.Capture(_canvas);
     }
@@ -1891,10 +1915,17 @@ public class FlowChartWindow : Window
     // Re-draws all arrows touching a node (called while it is being dragged).
     void UpdateConnectionsFor(string nodeId)
     {
+        RecomputeJunctions();   // a moved node slides any junction on its lines
         foreach (var c in _data.Connections)
             if (c.FromId == nodeId || c.ToId == nodeId) { AlignManualEnds(c); RenderConnection(c); }
+        // Junctions whose position changed need their own lines redrawn too, not just the moved node's.
+        foreach (var c in _data.Connections)
+            if (IsJunctionLine(c) && !(c.FromId == nodeId || c.ToId == nodeId)) RenderConnection(c);
         RefreshJunctions();
     }
+
+    bool IsJunctionLine(FlowConnection c) =>
+        _data.Nodes.Any(n => n.Kind == FlowNodeKind.Junction && (n.Id == c.FromId || n.Id == c.ToId));
 
     // Keeps a manually-routed connection's END segments straight when a node it touches moves: the first
     // waypoint stays aligned with the (new) exit edge midpoint, the last with the entry — so the stub
