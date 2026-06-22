@@ -346,7 +346,7 @@ public class FlowChartWindow : Window
                 else if (!show && realized) { foreach (var v in _connViews[c.Id]) _canvas.Children.Remove(v); _connViews.Remove(c.Id); }
             }
             if (_crossoverHops) RenderCrossovers();
-            RefreshJunctions();      // hide T-junction dots once the just-realized lines have points
+            RenderTapDots();         // dots where two T-pieces coincide
             RefreshScaleHandles();   // (re)attach grips to whatever nodes are now realized, in Scale mode
         }
         finally { _culling = false; }
@@ -1488,9 +1488,10 @@ public class FlowChartWindow : Window
     // Renders every saved connection (used once after nodes are laid out).
     void RenderAllConnections()
     {
-        RecomputeJunctions();   // position junctions from their lines before routing
-        foreach (var c in _data.Connections) RenderConnection(c);
-        RefreshJunctions();
+        // Render plain (node-ending) lines first so their points exist, then the taps that ride on them.
+        foreach (var c in _data.Connections) if (string.IsNullOrEmpty(c.ToTapConn)) RenderConnection(c);
+        foreach (var c in _data.Connections) if (!string.IsNullOrEmpty(c.ToTapConn)) RenderConnection(c);
+        RenderTapDots();
         RenderCrossovers();
     }
 
@@ -1646,6 +1647,97 @@ public class FlowChartWindow : Window
         return res;
     }
 
+    // The polyline for a connection: from its source node to either its target node, or — if it taps onto
+    // another line — to the point on that line. Diagonal / manual-waypoint / auto-orthogonal as usual.
+    List<Point>? RouteOf(FlowConnection conn)
+    {
+        var a = RouteRect(conn.FromId);
+        Rect? b;
+        bool toTap = !string.IsNullOrEmpty(conn.ToTapConn);
+        if (toTap)
+        {
+            var tp = TapPoint(conn);
+            if (tp is null) return null;
+            b = new Rect(tp.Value.X, tp.Value.Y, 0, 0);
+        }
+        else b = RouteRect(conn.ToId);
+        if (a is null || b is null) return null;
+
+        if (_data.DiagonalLines)
+            return new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) };
+        if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, b.Value, conn);
+        // A line that taps onto another runs ALONG it to reach the point, so skip overlap-avoidance there.
+        return Simplify(_liveDrag ? OrthoRoute(a.Value, b.Value)
+                                  : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId, conn.Id, endsOnLine: toTap));
+    }
+
+    // The point where a tapping connection meets its target line (at fraction ToTapT). Null if the target
+    // is gone or not yet routed. Only resolves one level (a tap onto a plain line), no nested taps.
+    Point? TapPoint(FlowConnection conn)
+    {
+        var target = _data.Connections.FirstOrDefault(c => c.Id == conn.ToTapConn);
+        if (target is null) return null;
+        List<Point>? pts = _connPts.TryGetValue(target.Id, out var tp) && tp.Count >= 2 ? tp : null;
+        if (pts is null && string.IsNullOrEmpty(target.ToTapConn)) pts = RouteOf(target);   // compute non-tap target
+        if (pts is null || pts.Count < 2) return null;
+        return PointAlong(pts, conn.ToTapT).pt;
+    }
+
+    // Connecting in connect mode and clicking a line: the new line ENDS on that line (a T-piece / tap) at
+    // the click position — no junction node, no splitting of the target.
+    async void TapOntoLine(FlowConnection target, Point at)
+    {
+        if (_connectFromId is null) return;
+        var from = _connectFromId;
+        _connectFromId = null;
+        RemoveRubberBand();
+
+        double t = _connPts.TryGetValue(target.Id, out var pts) && pts.Count >= 2 ? NearestFraction(pts, at) : 0.5;
+
+        string label = "";
+        if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
+            label = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
+
+        _data.Connections.Add(new FlowConnection { FromId = from, ToTapConn = target.Id, ToTapT = t, LineColor = _style.LineColor, Label = label });
+        Save();
+        RenderAllConnections();
+    }
+
+    // Removes any tap whose target line no longer exists (e.g. its node was deleted).
+    void CleanupTaps()
+    {
+        var ids = _data.Connections.Select(c => c.Id).ToHashSet();
+        foreach (var c in _data.Connections.Where(c => !string.IsNullOrEmpty(c.ToTapConn) && !ids.Contains(c.ToTapConn)).ToList())
+        {
+            _data.Connections.Remove(c);
+            if (_connViews.TryGetValue(c.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
+            _connViews.Remove(c.Id); _connPts.Remove(c.Id);
+        }
+    }
+
+    // Draws a dot wherever two lines tap the SAME target at (almost) the same point — i.e. two T-pieces
+    // coincide into a connected crossing. A lone tap stays a plain (dotless) T-piece.
+    readonly List<Control> _tapDots = new();
+    void RenderTapDots()
+    {
+        if (_canvas is null) return;
+        foreach (var d in _tapDots) _canvas.Children.Remove(d);
+        _tapDots.Clear();
+        var taps = _data.Connections.Where(c => !string.IsNullOrEmpty(c.ToTapConn)).ToList();
+        var brush = new SolidColorBrush(ParseColor(_style.LineColor));
+        for (int i = 0; i < taps.Count; i++)
+            for (int j = i + 1; j < taps.Count; j++)
+            {
+                if (taps[i].ToTapConn != taps[j].ToTapConn) continue;
+                var p1 = TapPoint(taps[i]); var p2 = TapPoint(taps[j]);
+                if (p1 is null || p2 is null || Dist(p1.Value, p2.Value) > 8) continue;
+                const double r = 4;
+                var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, IsHitTestVisible = false, ZIndex = 5 };
+                Canvas.SetLeft(dot, p1.Value.X - r); Canvas.SetTop(dot, p1.Value.Y - r);
+                _canvas.Children.Add(dot); _tapDots.Add(dot);
+            }
+    }
+
     // Draws one connection: line, arrowhead, a transparent hit-zone for editing, and an optional label.
     void RenderConnection(FlowConnection conn)
     {
@@ -1653,19 +1745,10 @@ public class FlowChartWindow : Window
             foreach (var v in old) _canvas!.Children.Remove(v);
         _connViews.Remove(conn.Id);
 
-        var a = RouteRect(conn.FromId);
-        var b = RouteRect(conn.ToId);
-        if (a is null || b is null) return;
+        var pts = RouteOf(conn);
+        if (pts is null || pts.Count < 2) return;
 
-        // Routing: diagonal (opt-in) · manual (user-dragged waypoints) · else auto orthogonal that steers
-        // ≥1 grid clear of other nodes.
-        var pts = _data.DiagonalLines
-            ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
-            : conn.Waypoints.Count > 0
-                ? ManualRoute(a.Value, b.Value, conn)
-                // During a live node drag, route cheaply (no A*); the full obstacle-avoiding route is
-                // recomputed once on release.
-                : Simplify(_liveDrag ? OrthoRoute(a.Value, b.Value) : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId, conn.Id));
+        bool toTap = !string.IsNullOrEmpty(conn.ToTapConn);   // this line ends ON another line (a T-piece)
 
         _connPts[conn.Id] = pts;   // remembered for the optional crossover-bridge overlay
 
@@ -1678,13 +1761,9 @@ public class FlowChartWindow : Window
         line.ZIndex = 1;
         _canvas!.Children.Add(line); visuals.Add(line);
 
-        // DIN: lines meeting a collector point (Sammelpunkt) carry no arrowhead, and lines leaving one
-        // carry no departure dot — the junction itself is the marker.
-        bool toJunction   = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId)?.Kind   == FlowNodeKind.Junction;
-        bool fromJunction = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Junction;
-
-        // Arrowhead: explicit per-connection override wins, else automatic (an arrow, except into a junction).
-        if (conn.Arrow ?? !toJunction)
+        // Arrowhead: explicit per-connection override wins, else automatic (an arrow, except onto a line —
+        // a T-piece carries no arrowhead, the meeting itself is the marker).
+        if (conn.Arrow ?? !toTap)
         {
             var arrow = BuildArrow(pts[^2], pts[^1], brush);
             arrow.ZIndex = 1;
@@ -1692,7 +1771,7 @@ public class FlowChartWindow : Window
         }
 
         // DIN departure marker: a small filled dot where the flow line leaves the source edge.
-        if (!_data.DiagonalLines && !fromJunction)
+        if (!_data.DiagonalLines)
         {
             const double r = 3.5;
             var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, IsHitTestVisible = false };
@@ -1722,8 +1801,8 @@ public class FlowChartWindow : Window
             {
                 if (e.GetCurrentPoint(seg).Properties.IsRightButtonPressed) { ShowConnMenu(capConn, seg); e.Handled = true; return; }
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
-                // Connecting and clicking a line: drop a junction there, split the line and wire into it.
-                if (ConnectMode && _connectFromId is not null) { InsertJunctionOnLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
+                // Connecting and clicking a line: the new line ENDS on this line (a T-piece / tap).
+                if (ConnectMode && _connectFromId is not null) { TapOntoLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
             _canvas.Children.Add(seg); visuals.Add(seg);
@@ -1915,17 +1994,14 @@ public class FlowChartWindow : Window
     // Re-draws all arrows touching a node (called while it is being dragged).
     void UpdateConnectionsFor(string nodeId)
     {
-        RecomputeJunctions();   // a moved node slides any junction on its lines
+        var affected = new HashSet<string>();
         foreach (var c in _data.Connections)
-            if (c.FromId == nodeId || c.ToId == nodeId) { AlignManualEnds(c); RenderConnection(c); }
-        // Junctions whose position changed need their own lines redrawn too, not just the moved node's.
+            if (c.FromId == nodeId || c.ToId == nodeId) { AlignManualEnds(c); RenderConnection(c); affected.Add(c.Id); }
+        // Any line tapping onto a re-routed line must follow its new path.
         foreach (var c in _data.Connections)
-            if (IsJunctionLine(c) && !(c.FromId == nodeId || c.ToId == nodeId)) RenderConnection(c);
-        RefreshJunctions();
+            if (!string.IsNullOrEmpty(c.ToTapConn) && affected.Contains(c.ToTapConn)) RenderConnection(c);
+        RenderTapDots();
     }
-
-    bool IsJunctionLine(FlowConnection c) =>
-        _data.Nodes.Any(n => n.Kind == FlowNodeKind.Junction && (n.Id == c.FromId || n.Id == c.ToId));
 
     // Keeps a manually-routed connection's END segments straight when a node it touches moves: the first
     // waypoint stays aligned with the (new) exit edge midpoint, the last with the entry — so the stub
@@ -2024,7 +2100,7 @@ public class FlowChartWindow : Window
         bool anySub = _selected.Any(id => _data.Nodes.FirstOrDefault(n => n.Id == id) is { Kind: FlowNodeKind.Subroutine } s && !string.IsNullOrEmpty(s.RefId));
         foreach (var id in _selected.ToList()) DeleteNode(id, persist: false);
         _selected.Clear();
-        CleanupJunctions();        // dissolve junctions orphaned by the deletion, rejoining split lines
+        CleanupTaps();             // drop taps whose target line was deleted with its node
         RenderAllConnections();
         FitCanvas();   // shrink the surface back if the removed nodes freed up edge space
         Save();
@@ -2100,12 +2176,16 @@ public class FlowChartWindow : Window
     // Removes a single connection and its visuals.
     void DeleteConnection(FlowConnection conn)
     {
-        _data.Connections.Remove(conn);
-        if (_connViews.TryGetValue(conn.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
-        _connViews.Remove(conn.Id);
-        _connPts.Remove(conn.Id);
-        CleanupJunctions();
-        RenderAllConnections();   // re-route any rejoined line cleanly
+        // Lines that tapped onto this one lose their anchor — remove them too.
+        var tappers = _data.Connections.Where(c => c.ToTapConn == conn.Id).ToList();
+        foreach (var c in tappers.Append(conn))
+        {
+            _data.Connections.Remove(c);
+            if (_connViews.TryGetValue(c.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
+            _connViews.Remove(c.Id);
+            _connPts.Remove(c.Id);
+        }
+        RenderAllConnections();
         Save();
     }
 
@@ -2402,7 +2482,7 @@ public class FlowChartWindow : Window
     // Orthogonal route that steers clear of other nodes. Starts from the simple Z-route; if that already
     // misses every node it's kept (cleanest). Otherwise a grid A* (one grid-unit clearance, turn-penalised
     // for straight runs) routes around them. Falls back to the simple route if the area is huge or blocked.
-    List<Point> OrthoRouteAvoiding(Rect s, Rect t, string fromId, string toId, string? selfId = null)
+    List<Point> OrthoRouteAvoiding(Rect s, Rect t, string fromId, string toId, string? selfId = null, bool endsOnLine = false)
     {
         var simple = OrthoRoute(s, t, OccupiedSides(fromId, selfId), OccupiedSides(toId, selfId));
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
@@ -2415,14 +2495,12 @@ public class FlowChartWindow : Window
             obstacles.Add(new Rect(n.X, n.Y, n.Width, n.Height).Inflate(g));   // ≥1 grid clearance
         }
 
-        // A line that ends at a junction must run ALONG the line the junction sits on to reach it, so the
-        // overlap-avoidance must not apply here (it would otherwise bow the line around its own target).
-        bool junctionEnd = _data.Nodes.Any(n => (n.Id == fromId || n.Id == toId) && n.Kind == FlowNodeKind.Junction);
-
+        // A line that taps onto another must run ALONG that line to reach the point, so overlap-avoidance
+        // must not apply (it would otherwise bow the line around its own target).
         // Other lines the route should avoid lying on top of (it may still cross them, just not overlap).
-        var otherSegs = junctionEnd ? new List<(Point a, Point b)>() : OtherConnectionSegments(selfId);
+        var otherSegs = endsOnLine ? new List<(Point a, Point b)>() : OtherConnectionSegments(selfId);
         bool hitsNodes = obstacles.Count > 0 && PolyHitsAny(simple, obstacles);
-        bool onLines   = !junctionEnd && OverlapsExisting(simple, otherSegs, g);
+        bool onLines   = !endsOnLine && OverlapsExisting(simple, otherSegs, g);
         if (!hitsNodes && !onLines) return simple;
 
         var start = simple[0];

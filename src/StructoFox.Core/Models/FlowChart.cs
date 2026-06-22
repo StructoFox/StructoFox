@@ -89,6 +89,10 @@ public class FlowConnection
     public string              Id        { get; set; } = Guid.NewGuid().ToString("N")[..8];
     public string              FromId    { get; set; } = "";
     public string              ToId      { get; set; } = "";
+    /// <summary>If set, this connection's TARGET end isn't a node but a "tap" onto another connection
+    /// (the id) at fraction <see cref="ToTapT"/> (0..1) along that line — i.e. a T-piece on a line.</summary>
+    public string              ToTapConn { get; set; } = "";
+    public double              ToTapT    { get; set; } = 0.5;
     /// <summary>Optional label, e.g. "yes" / "no" on a decision branch.</summary>
     public string              Label     { get; set; } = "";
     /// <summary>Where the label sits along the line, as a fraction (0..1) of the polyline length. A
