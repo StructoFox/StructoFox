@@ -33,7 +33,7 @@ public class FlowChartWindow : Window
     readonly Dictionary<string, Border>        _nodeViews = new(); // node id → container
     readonly Dictionary<string, List<Control>> _connViews = new(); // conn id → visuals
 
-    enum EditMode { Select, Connect, Remove }
+    enum EditMode { Select, Connect, Remove, Scale }
     EditMode _mode = EditMode.Select;
     bool     ConnectMode => _mode == EditMode.Connect;
     string?  _connectFromId;
@@ -56,7 +56,11 @@ public class FlowChartWindow : Window
 
     FlowConnection? _segConn;  int _segIdx;  List<Point>? _segBasePts;  bool _segHoriz;  Point _segStart;  // segment drag
 
-    Button? _selectBtn, _removeBtn;
+    Button? _selectBtn, _removeBtn, _scaleBtn;
+    readonly List<Control> _scaleHandles = new();   // resize grips shown on nodes while in Scale mode
+    // Identifies a resize grip: which node it belongs to and which edges it moves.
+    sealed record HandleInfo(string NodeId, bool Left, bool Right, bool Top, bool Bottom);
+    const double HandleSize = 9;
     MenuItem? _connMenu;   // the merged "Connect" menu; its header reflects the active line style + mode
     ContextMenu? _menu;       // the one open context menu, so a new one closes the old (no stacking)
 
@@ -334,6 +338,7 @@ public class FlowChartWindow : Window
                 else if (!show && realized) { foreach (var v in _connViews[c.Id]) _canvas.Children.Remove(v); _connViews.Remove(c.Id); }
             }
             if (_crossoverHops) RenderCrossovers();
+            RefreshScaleHandles();   // (re)attach grips to whatever nodes are now realized, in Scale mode
         }
         finally { _culling = false; }
     }
@@ -653,10 +658,13 @@ public class FlowChartWindow : Window
         row.Children.Add(new Border { Width = 12 });
 
         _selectBtn  = TBtn(Loc.S("Flow_Select"), Loc.S("Flow_SelectTip"));
+        _scaleBtn   = TBtn(Loc.S("Flow_Scale"),  Loc.S("Flow_ScaleTip"));
         _removeBtn  = TBtn(Loc.S("Flow_Remove"), Loc.S("Flow_RemoveTip"));
         _selectBtn.Click  += (_, _) => SetMode(EditMode.Select);
+        _scaleBtn.Click   += (_, _) => SetMode(EditMode.Scale);
         _removeBtn.Click  += (_, _) => SetMode(EditMode.Remove);
         row.Children.Add(_selectBtn);
+        row.Children.Add(_scaleBtn);
         row.Children.Add(_removeBtn);
         UpdateModeButtons();
 
@@ -889,6 +897,7 @@ public class FlowChartWindow : Window
         RemoveRubberBand();
         if (mode != EditMode.Select) { _selected.Clear(); RefreshSelection(); }
         RefreshJunctions();   // T-junctions are click-through in Select, clickable in Connect mode
+        RefreshScaleHandles();   // show resize grips only in Scale mode
         UpdateModeButtons();
     }
 
@@ -905,6 +914,7 @@ public class FlowChartWindow : Window
             Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
         }
         Style(_selectBtn,  _mode == EditMode.Select);
+        Style(_scaleBtn,   _mode == EditMode.Scale);
         Style(_removeBtn,  _mode == EditMode.Remove);
         RefreshConnHeader();   // connect mode is shown in the merged menu's header, not a button
         if (_canvas is not null)
@@ -924,8 +934,8 @@ public class FlowChartWindow : Window
     // Appends a new node of the given kind (with an optional DIN symbol variant) at a cascading offset.
     void AddNode(FlowNodeKind kind, FlowSymbol sym = FlowSymbol.Auto)
     {
-        bool offPage = sym == FlowSymbol.OffPageConnector;
         var at = SpawnPoint();
+        var (dw, dh) = DefaultNodeSize(kind, sym);
         var node = new FlowNode
         {
             Kind   = kind,
@@ -933,13 +943,23 @@ public class FlowChartWindow : Window
             Text   = DefaultText(kind),
             X      = at.X,
             Y      = at.Y,
-            Width  = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
-            Height = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind == FlowNodeKind.Connector ? 46 : 56,
+            Width  = dw,
+            Height = dh,
         };
         _data.Nodes.Add(node);
         Save();
         RenderNode(node);
         if (_mode != EditMode.Select) SetMode(EditMode.Select);   // a fresh node is ready to place, not delete
+    }
+
+    // The standard (and minimum) size per node kind/symbol — shared by AddNode and the resize clamp,
+    // so a symbol never scales below the dimensions it would be created at.
+    static (double w, double h) DefaultNodeSize(FlowNodeKind kind, FlowSymbol sym)
+    {
+        bool offPage = sym == FlowSymbol.OffPageConnector;
+        double w = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140;
+        double h = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind == FlowNodeKind.Connector ? 46 : 56;
+        return (w, h);
     }
 
     // A spawn position inside the currently visible viewport (accounts for scroll + zoom), with a small
@@ -1055,6 +1075,7 @@ public class FlowChartWindow : Window
             var props = e.GetCurrentPoint(container).Properties;
             if (props.IsRightButtonPressed) { if (ConnectMode) CancelConnect(); else ShowNodeMenu(node, label, container); e.Handled = true; return; }
             if (!props.IsLeftButtonPressed) return;
+            if (_mode == EditMode.Scale) { e.Handled = true; return; }   // resizing happens via the grips, not the body
             if (_mode == EditMode.Remove) { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); e.Handled = true; return; }
             // Double-click (outside connect mode): open a subroutine's diagram / edit the node text.
             if (e.ClickCount >= 2 && !ConnectMode) { if (node.Kind == FlowNodeKind.Subroutine) ShowChartFlow(node); else _ = EditNodeText(node, label); e.Handled = true; return; }
@@ -1205,6 +1226,120 @@ public class FlowChartWindow : Window
                 inner.Children[0].IsVisible = cross;   // the junction dot (first child = the Ellipse)
             container.IsHitTestVisible = cross || ConnectMode;
         }
+    }
+
+    // ── Resize (Scale mode) ──────────────────────────────────────────────────
+
+    // Rebuilds the resize grips: in Scale mode, eight grips around every realized node (except auto
+    // junctions); otherwise none. Safe to call any time EXCEPT during an active grip drag (it would drop
+    // the captured grip) — the drag reposition path moves grips in place instead of rebuilding.
+    void RefreshScaleHandles()
+    {
+        if (_canvas is null) return;
+        foreach (var h in _scaleHandles) _canvas.Children.Remove(h);
+        _scaleHandles.Clear();
+        if (_mode != EditMode.Scale) return;
+
+        foreach (var n in _data.Nodes)
+        {
+            if (n.Kind == FlowNodeKind.Junction) continue;       // auto points aren't resized
+            if (!_nodeViews.ContainsKey(n.Id)) continue;          // only realized (visible) nodes
+            for (int cx = 0; cx <= 2; cx++)
+                for (int cy = 0; cy <= 2; cy++)
+                {
+                    if (cx == 1 && cy == 1) continue;             // skip the centre
+                    var grip = MakeHandle(n, left: cx == 0, right: cx == 2, top: cy == 0, bottom: cy == 2);
+                    _scaleHandles.Add(grip);
+                    _canvas.Children.Add(grip);
+                }
+        }
+    }
+
+    // One resize grip for the given node + edges. Carries a HandleInfo so it can be repositioned.
+    Control MakeHandle(FlowNode n, bool left, bool right, bool top, bool bottom)
+    {
+        var corner = (left || right) && (top || bottom);
+        var cursor =
+            corner ? (left == top ? StandardCursorType.TopLeftCorner   // NW / SE share a diagonal
+                                  : StandardCursorType.TopRightCorner) // NE / SW share the other
+            : (left || right) ? StandardCursorType.SizeWestEast
+                              : StandardCursorType.SizeNorthSouth;
+        var grip = new Rectangle
+        {
+            Width = HandleSize, Height = HandleSize,
+            Fill = Brushes.White,
+            Stroke = new SolidColorBrush(Color.FromRgb(0x21, 0x96, 0xF3)), StrokeThickness = 1.5,
+            ZIndex = 40, Cursor = new Cursor(cursor),
+            Tag = new HandleInfo(n.Id, left, right, top, bottom),
+        };
+        PlaceHandle(grip);
+        WireHandle(grip);
+        return grip;
+    }
+
+    // Positions a grip at its edge/corner of the (current) node rectangle.
+    void PlaceHandle(Control grip)
+    {
+        if (grip.Tag is not HandleInfo hi) return;
+        var n = _data.Nodes.FirstOrDefault(x => x.Id == hi.NodeId);
+        if (n is null) return;
+        double hx = hi.Left ? n.X : hi.Right ? n.X + n.Width : n.X + n.Width / 2;
+        double hy = hi.Top ? n.Y : hi.Bottom ? n.Y + n.Height : n.Y + n.Height / 2;
+        Canvas.SetLeft(grip, hx - HandleSize / 2);
+        Canvas.SetTop(grip,  hy - HandleSize / 2);
+    }
+
+    // Dragging a grip moves the edge(s) it owns, clamped so the node never shrinks below its standard
+    // size; the node + its arrows re-render live, and the node's grips follow without being rebuilt.
+    void WireHandle(Control grip)
+    {
+        bool drag = false;
+        grip.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(grip).Properties.IsLeftButtonPressed) return;
+            drag = true; _liveDrag = true; e.Pointer.Capture(grip); e.Handled = true;
+        };
+        grip.PointerMoved += (_, e) =>
+        {
+            if (!drag || grip.Tag is not HandleInfo hi) return;
+            var n = _data.Nodes.FirstOrDefault(x => x.Id == hi.NodeId);
+            if (n is null) return;
+            var (minW, minH) = DefaultNodeSize(n.Kind, n.Symbol);
+            var p = e.GetPosition(_canvas);
+            double l = n.X, r = n.X + n.Width, t = n.Y, b = n.Y + n.Height;
+            if (hi.Right)  r = Math.Max(l + minW, Snap(p.X));
+            if (hi.Left)   l = Math.Min(r - minW, Snap(p.X));
+            if (hi.Bottom) b = Math.Max(t + minH, Snap(p.Y));
+            if (hi.Top)    t = Math.Min(b - minH, Snap(p.Y));
+            n.X = l; n.Y = t; n.Width = r - l; n.Height = b - t;
+            ReRenderNode(n.Id);
+            UpdateConnectionsFor(n.Id);
+            foreach (var g in _scaleHandles)
+                if (g.Tag is HandleInfo gi && gi.NodeId == n.Id) PlaceHandle(g);
+            e.Handled = true;
+        };
+        grip.PointerReleased += (_, e) =>
+        {
+            if (!drag) return;
+            drag = false; _liveDrag = false; e.Pointer.Capture(null);
+            if (grip.Tag is HandleInfo hi)
+            {
+                foreach (var c in _data.Connections)
+                    if ((c.FromId == hi.NodeId || c.ToId == hi.NodeId) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
+                UpdateConnectionsFor(hi.NodeId);
+            }
+            FitCanvas(); RenderCrossovers(); Save();
+            RefreshScaleHandles();
+            e.Handled = true;
+        };
+    }
+
+    // Re-renders a single node from the model (used during live resize).
+    void ReRenderNode(string id)
+    {
+        if (_nodeViews.TryGetValue(id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(id); }
+        var n = _data.Nodes.FirstOrDefault(x => x.Id == id);
+        if (n is not null) RenderNode(n);
     }
 
     // The node right-click menu: edit text or delete.
