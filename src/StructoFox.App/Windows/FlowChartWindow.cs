@@ -1585,11 +1585,8 @@ public class FlowChartWindow : Window
     // a straight same-height line bends cleanly).
     void BeginSegmentDrag(FlowConnection conn, int segIdx, PointerPressedEventArgs e)
     {
-        var a = RouteRect(conn.FromId); var b = RouteRect(conn.ToId);
-        if (a is null || b is null) return;
-        var pts = conn.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, conn)
-                                           : Simplify(OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId, conn.Id));
-        if (segIdx < 0 || segIdx >= pts.Count - 1) return;
+        var pts = RouteOf(conn);   // handles both node-ending and tap-ending lines
+        if (pts is null || pts.Count < 2 || segIdx < 0 || segIdx >= pts.Count - 1) return;
         _segConn   = conn;
         _segIdx    = segIdx;
         _segBasePts = pts;
@@ -1834,8 +1831,10 @@ public class FlowChartWindow : Window
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
                 // Connecting and clicking a line: the new line ENDS on this line (a T-piece / tap).
                 if (ConnectMode && _connectFromId is not null) { TapOntoLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
-                // Dragging a tap line (Select mode) slides its meeting point along the target, not bends it.
-                if (_mode == EditMode.Select && !string.IsNullOrEmpty(capConn.ToTapConn))
+                // Dragging the END segment of a tap line (the one touching the target) slides its meeting
+                // point along the target; other segments bend normally, so an L-shaped tap stays adjustable.
+                if (_mode == EditMode.Select && !string.IsNullOrEmpty(capConn.ToTapConn)
+                    && _connPts.TryGetValue(capConn.Id, out var tpts) && segIdx == tpts.Count - 2)
                 { _tapDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
