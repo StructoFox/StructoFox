@@ -1751,19 +1751,30 @@ public class FlowChartWindow : Window
         if (_canvas is null) return;
         foreach (var d in _tapDots) _canvas.Children.Remove(d);
         _tapDots.Clear();
-        var taps = _data.Connections.Where(c => !string.IsNullOrEmpty(c.ToTapConn)).ToList();
+
+        // Group taps by their meeting point (snapped to the grid). Two or more on the same spot of the same
+        // target = two T-pieces coinciding into a connected crossing → draw a dot there.
+        var groups = new Dictionary<(double x, double y), Point>();
+        var counts = new Dictionary<(double x, double y), int>();
+        foreach (var c in _data.Connections)
+        {
+            if (string.IsNullOrEmpty(c.ToTapConn)) continue;
+            if (TapPoint(c) is not { } p) continue;
+            var key = (Snap(p.X), Snap(p.Y));
+            counts[key] = counts.GetValueOrDefault(key) + 1;
+            groups[key] = p;
+        }
+
         var brush = new SolidColorBrush(ParseColor(_style.LineColor));
-        for (int i = 0; i < taps.Count; i++)
-            for (int j = i + 1; j < taps.Count; j++)
-            {
-                if (taps[i].ToTapConn != taps[j].ToTapConn) continue;
-                var p1 = TapPoint(taps[i]); var p2 = TapPoint(taps[j]);
-                if (p1 is null || p2 is null || Dist(p1.Value, p2.Value) > 8) continue;
-                const double r = 4;
-                var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, IsHitTestVisible = false, ZIndex = 5 };
-                Canvas.SetLeft(dot, p1.Value.X - r); Canvas.SetTop(dot, p1.Value.Y - r);
-                _canvas.Children.Add(dot); _tapDots.Add(dot);
-            }
+        const double r = 4;
+        foreach (var (key, n) in counts)
+        {
+            if (n < 2) continue;
+            var p = groups[key];
+            var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, IsHitTestVisible = false, ZIndex = 5 };
+            Canvas.SetLeft(dot, p.X - r); Canvas.SetTop(dot, p.Y - r);
+            _canvas.Children.Add(dot); _tapDots.Add(dot);
+        }
     }
 
     // Draws one connection: line, arrowhead, a transparent hit-zone for editing, and an optional label.
