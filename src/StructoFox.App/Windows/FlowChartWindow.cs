@@ -246,7 +246,7 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
-            if (_segConn is not null) { NormalizeWaypoints(_segConn); RenderConnection(_segConn); RenderCrossovers(); Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
+            if (_segConn is not null) { NormalizeWaypoints(_segConn); RenderConnection(_segConn); RefreshJunctions(); RenderCrossovers(); Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
             if (_panning)
             {
                 _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null);
@@ -888,6 +888,7 @@ public class FlowChartWindow : Window
         _connectFromId = null;
         RemoveRubberBand();
         if (mode != EditMode.Select) { _selected.Clear(); RefreshSelection(); }
+        RefreshJunctions();   // T-junctions are click-through in Select, clickable in Connect mode
         UpdateModeButtons();
     }
 
@@ -933,7 +934,7 @@ public class FlowChartWindow : Window
             X      = at.X,
             Y      = at.Y,
             Width  = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140,
-            Height = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind is FlowNodeKind.Start or FlowNodeKind.End or FlowNodeKind.Connector ? 46 : 56,
+            Height = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind == FlowNodeKind.Connector ? 46 : 56,
         };
         _data.Nodes.Add(node);
         Save();
@@ -1164,6 +1165,48 @@ public class FlowChartWindow : Window
         RenderAllConnections();
     }
 
+    // A junction shows its dot only when it's a genuine connected CROSSING — lines pass straight through
+    // on BOTH axes (a "+"). A T-junction (one line ending on another: a horizontal through-line plus a
+    // stub, or similar 3-way meet) needs no dot. Computed from the realized geometry, so dragging a
+    // segment into / out of a cross hides / shows the dot live.
+    bool JunctionIsCrossing(FlowNode jn)
+    {
+        double cx = jn.X + jn.Width / 2, cy = jn.Y + jn.Height / 2;
+        bool left = false, right = false, up = false, down = false;
+        foreach (var c in _data.Connections)
+        {
+            if (c.FromId != jn.Id && c.ToId != jn.Id) continue;
+            if (!_connPts.TryGetValue(c.Id, out var pts) || pts.Count < 2) continue;
+            // Whichever end sits at the junction; its neighbour gives the outgoing direction.
+            double d0 = (pts[0].X - cx) * (pts[0].X - cx) + (pts[0].Y - cy) * (pts[0].Y - cy);
+            double dN = (pts[^1].X - cx) * (pts[^1].X - cx) + (pts[^1].Y - cy) * (pts[^1].Y - cy);
+            bool startAtJ = d0 <= dN;
+            var atJ = startAtJ ? pts[0] : pts[^1];
+            var nb  = startAtJ ? pts[1] : pts[^2];
+            double dx = nb.X - atJ.X, dy = nb.Y - atJ.Y;
+            if (Math.Abs(dx) >= Math.Abs(dy)) { if (dx >= 0) right = true; else left = true; }
+            else                              { if (dy >= 0) down = true;  else up = true; }
+        }
+        return left && right && up && down;
+    }
+
+    // Updates every junction's look + interactivity from its current geometry: a crossing shows its dot
+    // and stays grabbable; a T-junction hides its dot and (in Select mode) is click-through, so it moves
+    // by dragging the line segments rather than by grabbing an invisible point. In Connect mode every
+    // junction stays clickable, so a fourth line can be wired onto / from it.
+    void RefreshJunctions()
+    {
+        foreach (var jn in _data.Nodes)
+        {
+            if (jn.Kind != FlowNodeKind.Junction) continue;
+            if (!_nodeViews.TryGetValue(jn.Id, out var container)) continue;
+            bool cross = JunctionIsCrossing(jn);
+            if (container.Child is Grid inner && inner.Children.Count > 0)
+                inner.Children[0].IsVisible = cross;   // the junction dot (first child = the Ellipse)
+            container.IsHitTestVisible = cross || ConnectMode;
+        }
+    }
+
     // The node right-click menu: edit text or delete.
     void ShowNodeMenu(FlowNode node, TextBlock label, Control anchor)
     {
@@ -1289,6 +1332,7 @@ public class FlowChartWindow : Window
     void RenderAllConnections()
     {
         foreach (var c in _data.Connections) RenderConnection(c);
+        RefreshJunctions();
         RenderCrossovers();
     }
 
@@ -1402,6 +1446,7 @@ public class FlowChartWindow : Window
         var full = BuildDragged(_segBasePts, _segIdx, _segHoriz, v);
         _segConn.Waypoints = full.Skip(1).Take(full.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
         RenderConnection(_segConn);
+        RefreshJunctions();   // live show/hide the junction dot as the segment moves into / out of a cross
     }
 
     // Rebuilds a polyline with segment k moved to the perpendicular coordinate v, keeping it orthogonal.
@@ -1600,6 +1645,7 @@ public class FlowChartWindow : Window
     {
         foreach (var c in _data.Connections)
             if (c.FromId == nodeId || c.ToId == nodeId) { AlignManualEnds(c); RenderConnection(c); }
+        RefreshJunctions();
     }
 
     // Keeps a manually-routed connection's END segments straight when a node it touches moves: the first
