@@ -1980,6 +1980,7 @@ public class FlowChartWindow : Window
             _data.Connections.Remove(c);
             if (_connViews.TryGetValue(c.Id, out var vs)) foreach (var vv in vs) _canvas!.Children.Remove(vv);
             _connViews.Remove(c.Id);
+            _connPts.Remove(c.Id);
         }
         if (persist) Save();
     }
@@ -2385,10 +2386,11 @@ public class FlowChartWindow : Window
     // The realized segments of every OTHER connection (for line-avoidance), excluding the one being routed.
     List<(Point a, Point b)> OtherConnectionSegments(string? selfId)
     {
+        var live = _data.Connections.Select(c => c.Id).ToHashSet();
         var segs = new List<(Point, Point)>();
         foreach (var (id, pts) in _connPts)
         {
-            if (id == selfId) continue;
+            if (id == selfId || !live.Contains(id)) continue;   // skip self and any stale (deleted) entries
             for (int i = 0; i < pts.Count - 1; i++) segs.Add((pts[i], pts[i + 1]));
         }
         return segs;
