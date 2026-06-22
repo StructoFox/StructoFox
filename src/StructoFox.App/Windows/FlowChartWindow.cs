@@ -56,6 +56,7 @@ public class FlowChartWindow : Window
 
     FlowConnection? _segConn;  int _segIdx;  List<Point>? _segBasePts;  bool _segHoriz;  Point _segStart;  // segment drag
     string? _segJunctionId;   // if the dragged segment ends at a junction, the junction moves with it
+    FlowConnection? _tapDrag;  // a tap line being slid along its target
 
     Button? _selectBtn, _removeBtn, _scaleBtn;
     readonly List<Control> _scaleHandles = new();   // resize grips shown on nodes while in Scale mode
@@ -240,6 +241,7 @@ public class FlowChartWindow : Window
                 return;
             }
             if (_segConn is not null && _segBasePts is not null) { DragSegment(e.GetPosition(_canvas)); return; }
+            if (_tapDrag is not null) { SlideTap(e.GetPosition(_canvas)); return; }
             if (_panning)
             {
                 var d = e.GetPosition(_scroll) - _panStart;
@@ -251,6 +253,7 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
+            if (_tapDrag is not null) { Save(); _tapDrag = null; e.Pointer.Capture(null); return; }
             if (_segConn is not null)
             {
                 NormalizeWaypoints(_segConn); RenderConnection(_segConn);
@@ -1725,6 +1728,19 @@ public class FlowChartWindow : Window
     // Draws a dot wherever two lines tap the SAME target at (almost) the same point — i.e. two T-pieces
     // coincide into a connected crossing. A lone tap stays a plain (dotless) T-piece.
     readonly List<Control> _tapDots = new();
+    // Slides a tap's meeting point along its target line to follow the cursor (grid-snapped).
+    void SlideTap(Point cur)
+    {
+        if (_tapDrag is null) return;
+        var target = _data.Connections.FirstOrDefault(c => c.Id == _tapDrag.ToTapConn);
+        if (target is null || !_connPts.TryGetValue(target.Id, out var pts) || pts.Count < 2) return;
+        var foot = PointAlong(pts, NearestFraction(pts, cur)).pt;
+        _tapDrag.ToTapT = NearestFraction(pts, new Point(Snap(foot.X), Snap(foot.Y)));
+        _tapDrag.Waypoints.Clear();   // slide gives a clean straight stub to the new point
+        RenderConnection(_tapDrag);
+        RenderTapDots();
+    }
+
     // Re-renders every tap that ends on the given line (after it moved), plus the coincidence dots.
     void RenderTapsOnto(string targetId)
     {
@@ -1818,6 +1834,9 @@ public class FlowChartWindow : Window
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
                 // Connecting and clicking a line: the new line ENDS on this line (a T-piece / tap).
                 if (ConnectMode && _connectFromId is not null) { TapOntoLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
+                // Dragging a tap line (Select mode) slides its meeting point along the target, not bends it.
+                if (_mode == EditMode.Select && !string.IsNullOrEmpty(capConn.ToTapConn))
+                { _tapDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
             _canvas.Children.Add(seg); visuals.Add(seg);
