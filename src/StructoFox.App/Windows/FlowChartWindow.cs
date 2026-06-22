@@ -331,8 +331,10 @@ public class FlowChartWindow : Window
                 else if (!show && realized) { _canvas.Children.Remove(_nodeViews[n.Id]); _nodeViews.Remove(n.Id); }
             }
 
+            // Plain (node→node) lines first, so their points exist for any tap that rides on them.
             foreach (var c in _data.Connections)
             {
+                if (!string.IsNullOrEmpty(c.ToTapConn)) continue;
                 var a = NodeRect(c.FromId); var b = NodeRect(c.ToId);
                 bool realized = _connViews.ContainsKey(c.Id);
                 bool show = false;
@@ -342,6 +344,24 @@ public class FlowChartWindow : Window
                         Math.Min(a.Value.X, b.Value.X), Math.Min(a.Value.Y, b.Value.Y),
                         Math.Abs(a.Value.X - b.Value.X) + Math.Max(a.Value.Width, b.Value.Width),
                         Math.Abs(a.Value.Y - b.Value.Y) + Math.Max(a.Value.Height, b.Value.Height));
+                    foreach (var w in c.Waypoints) bbox = bbox.Union(new Rect(w.X - 1, w.Y - 1, 2, 2));
+                    show = vis.Intersects(bbox);
+                }
+                if (show && !realized) RenderConnection(c);
+                else if (!show && realized) { foreach (var v in _connViews[c.Id]) _canvas.Children.Remove(v); _connViews.Remove(c.Id); }
+            }
+            // Taps: visibility from the source node + the meeting point (ToId is empty, so the node-pair
+            // test above would never show them — that left them invisible until something moved).
+            foreach (var c in _data.Connections)
+            {
+                if (string.IsNullOrEmpty(c.ToTapConn)) continue;
+                var a = NodeRect(c.FromId); var tp = TapInfo(c)?.pt;
+                bool realized = _connViews.ContainsKey(c.Id);
+                bool show = false;
+                if (a is not null && tp is not null)
+                {
+                    var bbox = new Rect(Math.Min(a.Value.X, tp.Value.X), Math.Min(a.Value.Y, tp.Value.Y),
+                        Math.Abs(a.Value.X - tp.Value.X) + a.Value.Width, Math.Abs(a.Value.Y - tp.Value.Y) + a.Value.Height);
                     foreach (var w in c.Waypoints) bbox = bbox.Union(new Rect(w.X - 1, w.Y - 1, 2, 2));
                     show = vis.Intersects(bbox);
                 }
