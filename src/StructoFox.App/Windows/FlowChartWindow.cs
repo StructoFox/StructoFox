@@ -1731,6 +1731,16 @@ public class FlowChartWindow : Window
         _connectFromId = null;
         RemoveRubberBand();
 
+        // If the click landed on a tap line (its hit-zone overlaps the base at the meeting point), tap onto
+        // the BASE line it sits on instead — so all T-pieces share one target (they can coincide into the
+        // indicator dot) and no tap nests on another (which also wrongly cascade-deleted them together).
+        for (int guard = 0; !string.IsNullOrEmpty(target.ToTapConn) && guard < 10; guard++)
+        {
+            var baseConn = _data.Connections.FirstOrDefault(c => c.Id == target.ToTapConn);
+            if (baseConn is null) break;
+            target = baseConn;
+        }
+
         // Anchor = the click projected onto the line, snapped to the grid.
         Point anchor = new(Snap(at.X), Snap(at.Y));
         if (_connPts.TryGetValue(target.Id, out var pts) && pts.Count >= 2)
