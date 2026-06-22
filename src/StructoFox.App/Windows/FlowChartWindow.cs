@@ -1156,7 +1156,7 @@ public class FlowChartWindow : Window
             if (a is null || b is null) continue;
             var pts = _data.DiagonalLines
                 ? new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) }
-                : c.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, c) : Simplify(OrthoRouteAvoiding(a.Value, b.Value, c.FromId, c.ToId));
+                : c.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, c) : Simplify(OrthoRouteAvoiding(a.Value, b.Value, c.FromId, c.ToId, c.Id));
             if (!PolyHitsAny(pts, new List<Rect> { jr })) continue;
 
             // Splice: A→J keeps the label/style; J→B continues. Drop manual waypoints (route is now in two).
@@ -1558,10 +1558,10 @@ public class FlowChartWindow : Window
     // a straight same-height line bends cleanly).
     void BeginSegmentDrag(FlowConnection conn, int segIdx, PointerPressedEventArgs e)
     {
-        var a = NodeRect(conn.FromId); var b = NodeRect(conn.ToId);
+        var a = RouteRect(conn.FromId); var b = RouteRect(conn.ToId);
         if (a is null || b is null) return;
         var pts = conn.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, conn)
-                                           : Simplify(OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
+                                           : Simplify(OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId, conn.Id));
         if (segIdx < 0 || segIdx >= pts.Count - 1) return;
         _segConn   = conn;
         _segIdx    = segIdx;
@@ -1610,8 +1610,8 @@ public class FlowChartWindow : Window
             foreach (var v in old) _canvas!.Children.Remove(v);
         _connViews.Remove(conn.Id);
 
-        var a = NodeRect(conn.FromId);
-        var b = NodeRect(conn.ToId);
+        var a = RouteRect(conn.FromId);
+        var b = RouteRect(conn.ToId);
         if (a is null || b is null) return;
 
         // Routing: diagonal (opt-in) · manual (user-dragged waypoints) · else auto orthogonal that steers
@@ -1622,7 +1622,7 @@ public class FlowChartWindow : Window
                 ? ManualRoute(a.Value, b.Value, conn)
                 // During a live node drag, route cheaply (no A*); the full obstacle-avoiding route is
                 // recomputed once on release.
-                : Simplify(_liveDrag ? OrthoRoute(a.Value, b.Value) : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId));
+                : Simplify(_liveDrag ? OrthoRoute(a.Value, b.Value) : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId, conn.Id));
 
         _connPts[conn.Id] = pts;   // remembered for the optional crossover-bridge overlay
 
@@ -1790,7 +1790,7 @@ public class FlowChartWindow : Window
     void AlignManualEnds(FlowConnection c)
     {
         if (c.Waypoints.Count == 0) return;
-        var a = NodeRect(c.FromId); var b = NodeRect(c.ToId);
+        var a = RouteRect(c.FromId); var b = RouteRect(c.ToId);
         if (a is null || b is null) return;
 
         var w0 = c.Waypoints[0];
@@ -2122,6 +2122,18 @@ public class FlowChartWindow : Window
         return n is null ? null : new Rect(n.X, n.Y, n.Width, n.Height);
     }
 
+    // The rect used for ROUTING a connection to/from a node. A junction collapses to a zero-size point at
+    // its grid-snapped centre, so every line incident to it begins/ends on the exact same coordinate (no
+    // gap where the old 9px edge point sat, and the meeting point lands on the grid).
+    Rect? RouteRect(string id)
+    {
+        var n = _data.Nodes.FirstOrDefault(x => x.Id == id);
+        if (n is null) return null;
+        if (n.Kind == FlowNodeKind.Junction)
+            return new Rect(Snap(n.X + n.Width / 2), Snap(n.Y + n.Height / 2), 0, 0);
+        return new Rect(n.X, n.Y, n.Width, n.Height);
+    }
+
     // The centre point of a node, or null if it's gone.
     Point? NodeCenter(string id)
     {
@@ -2184,7 +2196,7 @@ public class FlowChartWindow : Window
     // Orthogonal route that steers clear of other nodes. Starts from the simple Z-route; if that already
     // misses every node it's kept (cleanest). Otherwise a grid A* (one grid-unit clearance, turn-penalised
     // for straight runs) routes around them. Falls back to the simple route if the area is huge or blocked.
-    List<Point> OrthoRouteAvoiding(Rect s, Rect t, string fromId, string toId)
+    List<Point> OrthoRouteAvoiding(Rect s, Rect t, string fromId, string toId, string? selfId = null)
     {
         var simple = OrthoRoute(s, t);
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
@@ -2195,7 +2207,12 @@ public class FlowChartWindow : Window
             if (n.Id == fromId || n.Id == toId) continue;
             obstacles.Add(new Rect(n.X, n.Y, n.Width, n.Height).Inflate(g));   // ≥1 grid clearance
         }
-        if (obstacles.Count == 0 || !PolyHitsAny(simple, obstacles)) return simple;
+
+        // Other lines the route should avoid lying on top of (it may still cross them, just not overlap).
+        var otherSegs = OtherConnectionSegments(selfId);
+        bool hitsNodes = obstacles.Count > 0 && PolyHitsAny(simple, obstacles);
+        bool onLines   = OverlapsExisting(simple, otherSegs, g);
+        if (!hitsNodes && !onLines) return simple;
 
         var start = simple[0];
         var goal  = simple[^1];
@@ -2217,12 +2234,18 @@ public class FlowChartWindow : Window
                 foreach (var o in obstacles) if (o.Contains(p)) { blk[c, r] = true; break; }
             }
 
+        // Soft penalty on cells lying on another line, so A* prefers a clear corridor but never fails.
+        var pen = new double[cols, rows];
+        const double linePenalty = 4.0;
+        foreach (var seg in otherSegs) MarkSegment(pen, seg, minX, minY, g, cols, rows, linePenalty);
+
         int Cc(double v, int max) => Math.Clamp((int)Math.Round(v), 0, max);
         int sc = Cc((start.X - minX) / g, cols - 1), sr = Cc((start.Y - minY) / g, rows - 1);
         int gc = Cc((goal.X  - minX) / g, cols - 1), gr = Cc((goal.Y  - minY) / g, rows - 1);
         blk[sc, sr] = false; blk[gc, gr] = false;   // endpoints must be enterable
+        pen[sc, sr] = 0; pen[gc, gr] = 0;            // don't punish entering/leaving at the endpoints
 
-        var cells = AStar(blk, cols, rows, sc, sr, gc, gr);
+        var cells = AStar(blk, cols, rows, sc, sr, gc, gr, pen);
         if (cells is null) return simple;
 
         // Cells → points, with the exact node-edge endpoints, then drop redundant collinear points.
@@ -2232,8 +2255,72 @@ public class FlowChartWindow : Window
         return Simplify(pts);
     }
 
+    // The realized segments of every OTHER connection (for line-avoidance), excluding the one being routed.
+    List<(Point a, Point b)> OtherConnectionSegments(string? selfId)
+    {
+        var segs = new List<(Point, Point)>();
+        foreach (var (id, pts) in _connPts)
+        {
+            if (id == selfId) continue;
+            for (int i = 0; i < pts.Count - 1; i++) segs.Add((pts[i], pts[i + 1]));
+        }
+        return segs;
+    }
+
+    // True if a route segment runs collinear with, and overlaps (for more than one grid cell), an existing
+    // segment — i.e. the new line would lie on top of another line rather than merely crossing it.
+    static bool OverlapsExisting(List<Point> route, List<(Point a, Point b)> others, double g)
+    {
+        for (int i = 0; i < route.Count - 1; i++)
+        {
+            Point p = route[i], q = route[i + 1];
+            bool horiz = Math.Abs(p.Y - q.Y) < 0.5, vert = Math.Abs(p.X - q.X) < 0.5;
+            if (!horiz && !vert) continue;
+            foreach (var (oa, ob) in others)
+            {
+                if (horiz)
+                {
+                    if (Math.Abs(oa.Y - ob.Y) > 0.5 || Math.Abs(oa.Y - p.Y) > 0.5) continue;
+                    double lo = Math.Max(Math.Min(p.X, q.X), Math.Min(oa.X, ob.X));
+                    double hi = Math.Min(Math.Max(p.X, q.X), Math.Max(oa.X, ob.X));
+                    if (hi - lo > g) return true;
+                }
+                else
+                {
+                    if (Math.Abs(oa.X - ob.X) > 0.5 || Math.Abs(oa.X - p.X) > 0.5) continue;
+                    double lo = Math.Max(Math.Min(p.Y, q.Y), Math.Min(oa.Y, ob.Y));
+                    double hi = Math.Min(Math.Max(p.Y, q.Y), Math.Max(oa.Y, ob.Y));
+                    if (hi - lo > g) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Adds a penalty to every grid cell along an axis-aligned segment (used to keep routes off other lines).
+    static void MarkSegment(double[,] pen, (Point a, Point b) seg, double minX, double minY, double g, int cols, int rows, double val)
+    {
+        var (a, b) = seg;
+        if (Math.Abs(a.Y - b.Y) < 0.5)        // horizontal
+        {
+            int r = (int)Math.Round((a.Y - minY) / g);
+            if (r < 0 || r >= rows) return;
+            int c0 = (int)Math.Round((Math.Min(a.X, b.X) - minX) / g);
+            int c1 = (int)Math.Round((Math.Max(a.X, b.X) - minX) / g);
+            for (int c = Math.Max(0, c0); c <= Math.Min(cols - 1, c1); c++) pen[c, r] += val;
+        }
+        else if (Math.Abs(a.X - b.X) < 0.5)   // vertical
+        {
+            int c = (int)Math.Round((a.X - minX) / g);
+            if (c < 0 || c >= cols) return;
+            int r0 = (int)Math.Round((Math.Min(a.Y, b.Y) - minY) / g);
+            int r1 = (int)Math.Round((Math.Max(a.Y, b.Y) - minY) / g);
+            for (int r = Math.Max(0, r0); r <= Math.Min(rows - 1, r1); r++) pen[c, r] += val;
+        }
+    }
+
     // 4-direction A* with a turn penalty (prefers long straight runs). Returns cell path or null.
-    static List<(int c, int r)>? AStar(bool[,] blk, int cols, int rows, int sc, int sr, int gc, int gr)
+    static List<(int c, int r)>? AStar(bool[,] blk, int cols, int rows, int sc, int sr, int gc, int gr, double[,]? pen = null)
     {
         const double turn = 2.0;
         int Key(int c, int r, int d) => (r * cols + c) * 5 + (d + 1);   // d: -1 start, 0..3 dirs
@@ -2265,7 +2352,7 @@ public class FlowChartWindow : Window
             {
                 int nc = cur.c + dx[d], nr = cur.r + dy[d];
                 if (nc < 0 || nr < 0 || nc >= cols || nr >= rows || blk[nc, nr]) continue;
-                double ng = cg + 1 + (cur.d != -1 && d != cur.d ? turn : 0);
+                double ng = cg + 1 + (cur.d != -1 && d != cur.d ? turn : 0) + (pen?[nc, nr] ?? 0);
                 int nk = Key(nc, nr, d);
                 if (gScore.TryGetValue(nk, out var old) && old <= ng) continue;
                 gScore[nk] = ng;
@@ -2402,7 +2489,7 @@ public class FlowChartWindow : Window
         if (a is not null && b is not null)
         {
             var route = line.Waypoints.Count > 0 ? ManualRoute(a.Value, b.Value, line)
-                                                 : Simplify(OrthoRouteAvoiding(a.Value, b.Value, line.FromId, line.ToId));
+                                                 : Simplify(OrthoRouteAvoiding(a.Value, b.Value, line.FromId, line.ToId, line.Id));
             int k = 0; double best = double.MaxValue;
             for (int i = 0; i < route.Count - 1; i++)
             {
