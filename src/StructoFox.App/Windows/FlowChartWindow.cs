@@ -1652,36 +1652,58 @@ public class FlowChartWindow : Window
     List<Point>? RouteOf(FlowConnection conn)
     {
         var a = RouteRect(conn.FromId);
-        Rect? b;
+        if (a is null) return null;
         bool toTap = !string.IsNullOrEmpty(conn.ToTapConn);
+
         if (toTap)
         {
-            var tp = TapPoint(conn);
-            if (tp is null) return null;
-            b = new Rect(tp.Value.X, tp.Value.Y, 0, 0);
+            if (TapInfo(conn) is not { } info) return null;
+            var b = new Rect(info.pt.X, info.pt.Y, 0, 0);
+            if (_data.DiagonalLines)
+                return new List<Point> { RectBorderPoint(a.Value, info.pt), info.pt };
+            if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, b, conn);
+            return TapRoute(a.Value, info.pt, info.targetHoriz, conn);
         }
-        else b = RouteRect(conn.ToId);
-        if (a is null || b is null) return null;
 
+        var bn = RouteRect(conn.ToId);
+        if (bn is null) return null;
         if (_data.DiagonalLines)
-            return new List<Point> { RectBorderPoint(a.Value, b.Value.Center), RectBorderPoint(b.Value, a.Value.Center) };
-        if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, b.Value, conn);
-        // A line that taps onto another runs ALONG it to reach the point, so skip overlap-avoidance there.
-        return Simplify(_liveDrag ? OrthoRoute(a.Value, b.Value)
-                                  : OrthoRouteAvoiding(a.Value, b.Value, conn.FromId, conn.ToId, conn.Id, endsOnLine: toTap));
+            return new List<Point> { RectBorderPoint(a.Value, bn.Value.Center), RectBorderPoint(bn.Value, a.Value.Center) };
+        if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, bn.Value, conn);
+        return Simplify(_liveDrag ? OrthoRoute(a.Value, bn.Value)
+                                  : OrthoRouteAvoiding(a.Value, bn.Value, conn.FromId, conn.ToId, conn.Id));
     }
 
-    // The point where a tapping connection meets its target line (at fraction ToTapT). Null if the target
-    // is gone or not yet routed. Only resolves one level (a tap onto a plain line), no nested taps.
-    Point? TapPoint(FlowConnection conn)
+    // Routes a tap so its FINAL approach is perpendicular to the target line (a clean T), regardless of
+    // where the source sits: head to a point one grid out from the tap on the perpendicular axis, then a
+    // straight stub into the tap point.
+    List<Point> TapRoute(Rect s, Point tp, bool targetHoriz, FlowConnection conn)
+    {
+        double g = _data.GridSize >= 4 ? _data.GridSize : 10;
+        var sc = s.Center;
+        Point approach = targetHoriz
+            ? new Point(tp.X, tp.Y + (sc.Y <= tp.Y ? -g : g))   // target horizontal → come from above/below
+            : new Point(tp.X + (sc.X <= tp.X ? -g : g), tp.Y);  // target vertical → come from left/right
+        var head = _liveDrag ? OrthoRoute(s, new Rect(approach.X, approach.Y, 0, 0))
+                             : OrthoRouteAvoiding(s, new Rect(approach.X, approach.Y, 0, 0), conn.FromId, "", conn.Id, endsOnLine: true);
+        var res = new List<Point>(head) { tp };
+        return Simplify(Orthogonalize(res));
+    }
+
+    // The tap's meeting point and whether the target line runs horizontally there (so a stub can approach
+    // it perpendicularly). Null if the target is gone or not yet routed. Resolves one level only.
+    (Point pt, bool targetHoriz)? TapInfo(FlowConnection conn)
     {
         var target = _data.Connections.FirstOrDefault(c => c.Id == conn.ToTapConn);
         if (target is null) return null;
         List<Point>? pts = _connPts.TryGetValue(target.Id, out var tp) && tp.Count >= 2 ? tp : null;
         if (pts is null && string.IsNullOrEmpty(target.ToTapConn)) pts = RouteOf(target);   // compute non-tap target
         if (pts is null || pts.Count < 2) return null;
-        return PointAlong(pts, conn.ToTapT).pt;
+        var (p, h) = PointAlong(pts, conn.ToTapT);
+        return (p, h);
     }
+
+    Point? TapPoint(FlowConnection conn) => TapInfo(conn)?.pt;
 
     // Connecting in connect mode and clicking a line: the new line ENDS on that line (a T-piece / tap) at
     // the click position — no junction node, no splitting of the target.
