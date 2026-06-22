@@ -1699,8 +1699,25 @@ public class FlowChartWindow : Window
         List<Point>? pts = _connPts.TryGetValue(target.Id, out var tp) && tp.Count >= 2 ? tp : null;
         if (pts is null && string.IsNullOrEmpty(target.ToTapConn)) pts = RouteOf(target);   // compute non-tap target
         if (pts is null || pts.Count < 2) return null;
-        var (p, h) = PointAlong(pts, conn.ToTapT);
-        return (p, h);
+        // Project the stored anchor onto the target: a sideways move of the target keeps the anchor's other
+        // coordinate, so the stub grows/shrinks instead of dragging the meeting point along.
+        return NearestPointOn(pts, new Point(conn.ToTapX, conn.ToTapY));
+    }
+
+    // The closest point on a polyline to q, plus whether that segment runs horizontally.
+    static (Point pt, bool horiz) NearestPointOn(List<Point> pts, Point q)
+    {
+        double best = double.MaxValue; Point bestPt = q; bool bestH = true;
+        for (int i = 0; i < pts.Count - 1; i++)
+        {
+            Point a = pts[i], b = pts[i + 1];
+            double dx = b.X - a.X, dy = b.Y - a.Y, len2 = dx * dx + dy * dy;
+            double f = len2 < 1e-9 ? 0 : Math.Clamp(((q.X - a.X) * dx + (q.Y - a.Y) * dy) / len2, 0, 1);
+            Point c = new(a.X + f * dx, a.Y + f * dy);
+            double d = (q.X - c.X) * (q.X - c.X) + (q.Y - c.Y) * (q.Y - c.Y);
+            if (d < best) { best = d; bestPt = c; bestH = Math.Abs(dx) >= Math.Abs(dy); }
+        }
+        return (bestPt, bestH);
     }
 
     Point? TapPoint(FlowConnection conn) => TapInfo(conn)?.pt;
@@ -1714,20 +1731,19 @@ public class FlowChartWindow : Window
         _connectFromId = null;
         RemoveRubberBand();
 
-        double t = 0.5;
+        // Anchor = the click projected onto the line, snapped to the grid.
+        Point anchor = new(Snap(at.X), Snap(at.Y));
         if (_connPts.TryGetValue(target.Id, out var pts) && pts.Count >= 2)
         {
-            // Project the click onto the line, snap that foot to the grid, then store it as a fraction —
-            // so the T-piece sits on a grid line along the target.
-            var foot = PointAlong(pts, NearestFraction(pts, at)).pt;
-            t = NearestFraction(pts, new Point(Snap(foot.X), Snap(foot.Y)));
+            var foot = NearestPointOn(pts, at).pt;
+            anchor = new Point(Snap(foot.X), Snap(foot.Y));
         }
 
         string label = "";
         if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
             label = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
 
-        _data.Connections.Add(new FlowConnection { FromId = from, ToTapConn = target.Id, ToTapT = t, LineColor = _style.LineColor, Label = label });
+        _data.Connections.Add(new FlowConnection { FromId = from, ToTapConn = target.Id, ToTapX = anchor.X, ToTapY = anchor.Y, LineColor = _style.LineColor, Label = label });
         Save();
         RenderAllConnections();
     }
@@ -1753,8 +1769,8 @@ public class FlowChartWindow : Window
         if (_tapDrag is null) return;
         var target = _data.Connections.FirstOrDefault(c => c.Id == _tapDrag.ToTapConn);
         if (target is null || !_connPts.TryGetValue(target.Id, out var pts) || pts.Count < 2) return;
-        var foot = PointAlong(pts, NearestFraction(pts, cur)).pt;
-        _tapDrag.ToTapT = NearestFraction(pts, new Point(Snap(foot.X), Snap(foot.Y)));
+        var foot = NearestPointOn(pts, cur).pt;
+        _tapDrag.ToTapX = Snap(foot.X); _tapDrag.ToTapY = Snap(foot.Y);
         _tapDrag.Waypoints.Clear();   // slide gives a clean straight stub to the new point
         RenderConnection(_tapDrag);
         RenderTapDots();
