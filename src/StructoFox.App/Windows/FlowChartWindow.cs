@@ -2604,10 +2604,15 @@ public class FlowChartWindow : Window
 
     // While connecting, clicking an existing line drops a junction at that spot, splits the line through
     // it (X→Y ⇒ X→J→Y) and wires the armed node into it — a quick way to merge flows onto a line.
-    void InsertJunctionOnLine(FlowConnection line, Point at)
+    async void InsertJunctionOnLine(FlowConnection line, Point at)
     {
         if (_connectFromId is null) return;
         var from = _connectFromId;
+
+        // A branch leaving a decision gets a label here too (same as a node-to-node connection).
+        string fromLabel = "";
+        if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
+            fromLabel = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
 
         // Find which segment of the line was clicked and project the click exactly ONTO it, so the
         // junction sits on the line — both halves stay straight (no spurious left-right jog). The along-edge
@@ -2646,7 +2651,7 @@ public class FlowChartWindow : Window
             Waypoints = pre.Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList() });
         _data.Connections.Add(new FlowConnection { FromId = jn.Id, ToId = line.ToId, LineColor = _style.LineColor,
             Waypoints = post.Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList() });
-        _data.Connections.Add(new FlowConnection { FromId = from,        ToId = jn.Id, LineColor = _style.LineColor });
+        _data.Connections.Add(new FlowConnection { FromId = from,        ToId = jn.Id, LineColor = _style.LineColor, Label = fromLabel });
 
         _connectFromId = null;
         RemoveRubberBand();
