@@ -2302,10 +2302,14 @@ public class FlowChartWindow : Window
             obstacles.Add(new Rect(n.X, n.Y, n.Width, n.Height).Inflate(g));   // ≥1 grid clearance
         }
 
+        // A line that ends at a junction must run ALONG the line the junction sits on to reach it, so the
+        // overlap-avoidance must not apply here (it would otherwise bow the line around its own target).
+        bool junctionEnd = _data.Nodes.Any(n => (n.Id == fromId || n.Id == toId) && n.Kind == FlowNodeKind.Junction);
+
         // Other lines the route should avoid lying on top of (it may still cross them, just not overlap).
-        var otherSegs = OtherConnectionSegments(selfId);
+        var otherSegs = junctionEnd ? new List<(Point a, Point b)>() : OtherConnectionSegments(selfId);
         bool hitsNodes = obstacles.Count > 0 && PolyHitsAny(simple, obstacles);
-        bool onLines   = OverlapsExisting(simple, otherSegs, g);
+        bool onLines   = !junctionEnd && OverlapsExisting(simple, otherSegs, g);
         if (!hitsNodes && !onLines) return simple;
 
         var start = simple[0];
@@ -2355,7 +2359,7 @@ public class FlowChartWindow : Window
     {
         var set = new HashSet<char>();
         var n = _data.Nodes.FirstOrDefault(x => x.Id == nodeId);
-        if (n is null) return set;
+        if (n is null || n.Kind == FlowNodeKind.Junction) return set;   // a junction is a point, not a box with sides
         var r = new Rect(n.X, n.Y, n.Width, n.Height);
         foreach (var (id, pts) in _connPts)
         {
