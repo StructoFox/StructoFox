@@ -1996,10 +1996,11 @@ public class FlowChartWindow : Window
         Save();
     }
 
-    // Tidies up junctions after a deletion: an orphaned point (no lines) is removed; a pass-through left
-    // with one line in and one out is dissolved back into a single direct line; a lone dangling stub is
-    // dropped. So deleting the line that fed a T-piece rejoins the original line, and no invisible point
-    // is left behind (which would also act as a phantom routing obstacle).
+    // Tidies up junctions after a deletion: a junction is only meaningful with 3+ lines. With two, it is
+    // merged into a single line running through its point (waypoints concatenated, so the course is kept
+    // exactly); with one, the dangling stub is dropped; with none, the orphan point is removed. So deleting
+    // the line that fed a T-piece rejoins the original line, and no invisible point is left behind (which
+    // would also act as a phantom routing obstacle).
     void CleanupJunctions()
     {
         bool changed = true;
@@ -2008,16 +2009,29 @@ public class FlowChartWindow : Window
             changed = false;
             foreach (var jn in _data.Nodes.Where(n => n.Kind == FlowNodeKind.Junction).ToList())
             {
-                var ins  = _data.Connections.Where(c => c.ToId   == jn.Id).ToList();
-                var outs = _data.Connections.Where(c => c.FromId == jn.Id).ToList();
-                int deg = ins.Count + outs.Count;
-                if (deg >= 3) continue;                                  // still a real junction (T or +)
-                if (deg == 2 && !(ins.Count == 1 && outs.Count == 1)) continue;   // odd 2-in/2-out: leave it
+                var touching = _data.Connections.Where(c => c.FromId == jn.Id || c.ToId == jn.Id).ToList();
+                if (touching.Count >= 3) continue;   // still a real junction (T or +)
 
-                // Rejoin a pass-through (1 in + 1 out) into one direct line before dropping the junction.
-                if (ins.Count == 1 && outs.Count == 1)
-                    _data.Connections.Add(new FlowConnection { FromId = ins[0].FromId, ToId = outs[0].ToId, LineColor = ins[0].LineColor, Label = ins[0].Label });
-                foreach (var c in ins.Concat(outs))
+                // A junction carrying just two lines isn't a junction — merge the two into one line that
+                // runs through the junction's point (concatenate their waypoints), so the course is kept
+                // exactly, then drop the junction.
+                if (touching.Count == 2)
+                {
+                    var c1 = touching[0]; var c2 = touching[1];
+                    string e1 = c1.FromId == jn.Id ? c1.ToId : c1.FromId;
+                    string e2 = c2.FromId == jn.Id ? c2.ToId : c2.FromId;
+                    var jc = new BoardWaypoint { X = jn.X + jn.Width / 2, Y = jn.Y + jn.Height / 2 };
+                    // c1 oriented e1→J, c2 oriented J→e2 (reverse whichever is stored the other way round).
+                    var wp1 = c1.ToId   == jn.Id ? c1.Waypoints.ToList() : Enumerable.Reverse(c1.Waypoints).ToList();
+                    var wp2 = c2.FromId == jn.Id ? c2.Waypoints.ToList() : Enumerable.Reverse(c2.Waypoints).ToList();
+                    _data.Connections.Add(new FlowConnection
+                    {
+                        FromId = e1, ToId = e2, LineColor = c1.LineColor, Label = c1.Label,
+                        Waypoints = wp1.Append(jc).Concat(wp2).ToList(),
+                    });
+                }
+
+                foreach (var c in touching)
                 {
                     _data.Connections.Remove(c);
                     if (_connViews.TryGetValue(c.Id, out var cvs)) { foreach (var v in cvs) _canvas!.Children.Remove(v); _connViews.Remove(c.Id); }
