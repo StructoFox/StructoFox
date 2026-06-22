@@ -345,6 +345,7 @@ public class FlowChartWindow : Window
                 else if (!show && realized) { foreach (var v in _connViews[c.Id]) _canvas.Children.Remove(v); _connViews.Remove(c.Id); }
             }
             if (_crossoverHops) RenderCrossovers();
+            RefreshJunctions();      // hide T-junction dots once the just-realized lines have points
             RefreshScaleHandles();   // (re)attach grips to whatever nodes are now realized, in Scale mode
         }
         finally { _culling = false; }
