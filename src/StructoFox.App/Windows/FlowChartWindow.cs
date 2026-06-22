@@ -1198,26 +1198,11 @@ public class FlowChartWindow : Window
     // on BOTH axes (a "+"). A T-junction (one line ending on another: a horizontal through-line plus a
     // stub, or similar 3-way meet) needs no dot. Computed from the realized geometry, so dragging a
     // segment into / out of a cross hides / shows the dot live.
+    // A junction shows its dot once four or more lines meet at it (a connected crossing / merge); with
+    // three it's a plain T-piece (no dot). Degree-based: simple and robust — no fragile direction guessing
+    // that broke when the fourth line happened to approach from an already-used side.
     bool JunctionIsCrossing(FlowNode jn)
-    {
-        double cx = jn.X + jn.Width / 2, cy = jn.Y + jn.Height / 2;
-        bool left = false, right = false, up = false, down = false;
-        foreach (var c in _data.Connections)
-        {
-            if (c.FromId != jn.Id && c.ToId != jn.Id) continue;
-            if (!_connPts.TryGetValue(c.Id, out var pts) || pts.Count < 2) continue;
-            // Whichever end sits at the junction; its neighbour gives the outgoing direction.
-            double d0 = (pts[0].X - cx) * (pts[0].X - cx) + (pts[0].Y - cy) * (pts[0].Y - cy);
-            double dN = (pts[^1].X - cx) * (pts[^1].X - cx) + (pts[^1].Y - cy) * (pts[^1].Y - cy);
-            bool startAtJ = d0 <= dN;
-            var atJ = startAtJ ? pts[0] : pts[^1];
-            var nb  = startAtJ ? pts[1] : pts[^2];
-            double dx = nb.X - atJ.X, dy = nb.Y - atJ.Y;
-            if (Math.Abs(dx) >= Math.Abs(dy)) { if (dx >= 0) right = true; else left = true; }
-            else                              { if (dy >= 0) down = true;  else up = true; }
-        }
-        return left && right && up && down;
-    }
+        => _data.Connections.Count(c => c.FromId == jn.Id || c.ToId == jn.Id) >= 4;
 
     // Updates every junction's look + interactivity from its current geometry: a crossing shows its dot
     // and stays grabbable; a T-junction hides its dot and (in Select mode) is click-through, so it moves
