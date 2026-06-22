@@ -55,6 +55,7 @@ public class FlowChartWindow : Window
     bool   _panMoved;   bool _rightCancelConnect;    // distinguish right-drag (pan) from right-click (cancel)
 
     FlowConnection? _segConn;  int _segIdx;  List<Point>? _segBasePts;  bool _segHoriz;  Point _segStart;  // segment drag
+    string? _segJunctionId;   // if the dragged segment ends at a junction, the junction moves with it
 
     Button? _selectBtn, _removeBtn, _scaleBtn;
     readonly List<Control> _scaleHandles = new();   // resize grips shown on nodes while in Scale mode
@@ -250,7 +251,13 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
-            if (_segConn is not null) { NormalizeWaypoints(_segConn); RenderConnection(_segConn); RefreshJunctions(); RenderCrossovers(); Save(); _segConn = null; _segBasePts = null; e.Pointer.Capture(null); return; }
+            if (_segConn is not null)
+            {
+                if (_segJunctionId is not null) { UpdateConnectionsFor(_segJunctionId); FitCanvas(); }   // settle the moved junction
+                else { NormalizeWaypoints(_segConn); RenderConnection(_segConn); }
+                RefreshJunctions(); RenderCrossovers(); Save();
+                _segConn = null; _segBasePts = null; _segJunctionId = null; e.Pointer.Capture(null); return;
+            }
             if (_panning)
             {
                 _panning = false; _canvas!.Cursor = new Cursor(StandardCursorType.Arrow); e.Pointer.Capture(null);
@@ -1568,6 +1575,15 @@ public class FlowChartWindow : Window
         _segBasePts = pts;
         _segHoriz  = Math.Abs(pts[segIdx + 1].Y - pts[segIdx].Y) < Math.Abs(pts[segIdx + 1].X - pts[segIdx].X);
         _segStart  = e.GetPosition(_canvas);
+
+        // If this is the end segment touching a junction, dragging it moves the junction (so a T-piece
+        // deforms as a whole instead of bending to a stationary centre).
+        _segJunctionId = null;
+        bool fromJ = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Junction;
+        bool toJ   = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId)?.Kind   == FlowNodeKind.Junction;
+        if (toJ && segIdx == pts.Count - 2) _segJunctionId = conn.ToId;
+        else if (fromJ && segIdx == 0)      _segJunctionId = conn.FromId;
+
         e.Pointer.Capture(_canvas);
     }
 
@@ -1578,6 +1594,22 @@ public class FlowChartWindow : Window
         if (_segConn is null || _segBasePts is null) return;
         double v = _segHoriz ? Snap(_segBasePts[_segIdx].Y + (cur.Y - _segStart.Y))
                              : Snap(_segBasePts[_segIdx].X + (cur.X - _segStart.X));
+
+        // Dragging the end segment of a junction-incident line moves the junction itself along the
+        // perpendicular axis, so the whole T/cross relocates instead of bending to its old centre.
+        if (_segJunctionId is not null)
+        {
+            var jn = _data.Nodes.FirstOrDefault(n => n.Id == _segJunctionId);
+            if (jn is not null)
+            {
+                if (_segHoriz) jn.Y = v - jn.Height / 2; else jn.X = v - jn.Width / 2;
+                if (_nodeViews.TryGetValue(jn.Id, out var jv)) { Canvas.SetLeft(jv, jn.X); Canvas.SetTop(jv, jn.Y); }
+                _liveDrag = true; UpdateConnectionsFor(jn.Id); _liveDrag = false;
+                RefreshJunctions();
+            }
+            return;
+        }
+
         var full = BuildDragged(_segBasePts, _segIdx, _segHoriz, v);
         _segConn.Waypoints = full.Skip(1).Take(full.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
         RenderConnection(_segConn);
