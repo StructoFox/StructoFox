@@ -1469,6 +1469,7 @@ public class FlowChartWindow : Window
         _data.Connections.Add(conn);
         Save();
         RenderConnection(conn);
+        RefreshJunctions();   // a new line onto a junction may turn it into a crossing → show its dot
     }
 
     // Renders every saved connection (used once after nodes are laid out).
