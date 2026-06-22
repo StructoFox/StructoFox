@@ -1879,10 +1879,10 @@ public class FlowChartWindow : Window
             case FlowSymbol.Preparation:   // elongated hexagon (setup / loop init)
                 return P($"M{F(w * 0.18)},0 L{F(w * 0.82)},0 L{F(w)},{F(h * 0.5)} L{F(w * 0.82)},{F(h)} L{F(w * 0.18)},{F(h)} L0,{F(h * 0.5)} Z");
             case FlowSymbol.Delay:         // rectangle with a rounded right end (D shape)
-                // Push the curve's control points past w (to 1.1333·w) so the rounding bulges out to
-                // exactly x=w at its midpoint — making the symbol as wide as the others, so centred text
-                // isn't cramped by a cap that fell short of the right edge.
-                return P($"M0,0 L{F(w * 0.6)},0 C{F(w * 1.1333)},0 {F(w * 1.1333)},{F(h)} {F(w * 0.6)},{F(h)} L0,{F(h)} Z");
+                // Same cap curvature as before (control points sit 0.4·w past where the rounding starts),
+                // just shifted right: start at 0.7·w with controls at 1.1·w, so the bulge reaches exactly
+                // x=w — as wide as the other symbols, without stretching the rounding into an egg shape.
+                return P($"M0,0 L{F(w * 0.7)},0 C{F(w * 1.1)},0 {F(w * 1.1)},{F(h)} {F(w * 0.7)},{F(h)} L0,{F(h)} Z");
             case FlowSymbol.ManualOperation: // trapezoid, wider at the top
                 return P($"M0,0 L{F(w)},0 L{F(w * 0.82)},{F(h)} L{F(w * 0.18)},{F(h)} Z");
             case FlowSymbol.LoopLimit:     // rectangle with the two top corners cut off
