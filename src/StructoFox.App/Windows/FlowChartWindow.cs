@@ -1754,6 +1754,12 @@ public class FlowChartWindow : Window
             anchor = new Point(Snap(foot.X), Snap(foot.Y));
         }
 
+        // Guard against a duplicate (a stray second press): same source tapping the same line at ~the same
+        // point shouldn't make a parallel twin.
+        if (_data.Connections.Any(c => c.FromId == from && c.ToTapConn == target.Id
+                                       && Math.Abs(c.ToTapX - anchor.X) < 1 && Math.Abs(c.ToTapY - anchor.Y) < 1))
+        { RenderAllConnections(); return; }
+
         string label = "";
         if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
             label = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
