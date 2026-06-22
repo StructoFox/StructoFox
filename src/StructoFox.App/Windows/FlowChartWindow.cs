@@ -1912,6 +1912,8 @@ public class FlowChartWindow : Window
         bool anySub = _selected.Any(id => _data.Nodes.FirstOrDefault(n => n.Id == id) is { Kind: FlowNodeKind.Subroutine } s && !string.IsNullOrEmpty(s.RefId));
         foreach (var id in _selected.ToList()) DeleteNode(id, persist: false);
         _selected.Clear();
+        CleanupJunctions();        // dissolve junctions orphaned by the deletion, rejoining split lines
+        RenderAllConnections();
         FitCanvas();   // shrink the surface back if the removed nodes freed up edge space
         Save();
         if (anySub) _ = InfoDialog.Show(this, "sub_remove", Loc.S("Sub_RemoveInfo"), Loc.S("Flow_Subroutine"));
@@ -1988,7 +1990,44 @@ public class FlowChartWindow : Window
         _data.Connections.Remove(conn);
         if (_connViews.TryGetValue(conn.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
         _connViews.Remove(conn.Id);
+        _connPts.Remove(conn.Id);
+        CleanupJunctions();
+        RenderAllConnections();   // re-route any rejoined line cleanly
         Save();
+    }
+
+    // Tidies up junctions after a deletion: an orphaned point (no lines) is removed; a pass-through left
+    // with one line in and one out is dissolved back into a single direct line; a lone dangling stub is
+    // dropped. So deleting the line that fed a T-piece rejoins the original line, and no invisible point
+    // is left behind (which would also act as a phantom routing obstacle).
+    void CleanupJunctions()
+    {
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var jn in _data.Nodes.Where(n => n.Kind == FlowNodeKind.Junction).ToList())
+            {
+                var ins  = _data.Connections.Where(c => c.ToId   == jn.Id).ToList();
+                var outs = _data.Connections.Where(c => c.FromId == jn.Id).ToList();
+                int deg = ins.Count + outs.Count;
+                if (deg >= 3) continue;                                  // still a real junction (T or +)
+                if (deg == 2 && !(ins.Count == 1 && outs.Count == 1)) continue;   // odd 2-in/2-out: leave it
+
+                // Rejoin a pass-through (1 in + 1 out) into one direct line before dropping the junction.
+                if (ins.Count == 1 && outs.Count == 1)
+                    _data.Connections.Add(new FlowConnection { FromId = ins[0].FromId, ToId = outs[0].ToId, LineColor = ins[0].LineColor, Label = ins[0].Label });
+                foreach (var c in ins.Concat(outs))
+                {
+                    _data.Connections.Remove(c);
+                    if (_connViews.TryGetValue(c.Id, out var cvs)) { foreach (var v in cvs) _canvas!.Children.Remove(v); _connViews.Remove(c.Id); }
+                    _connPts.Remove(c.Id);
+                }
+                _data.Nodes.Remove(jn);
+                if (_nodeViews.TryGetValue(jn.Id, out var nv)) { _canvas!.Children.Remove(nv); _nodeViews.Remove(jn.Id); }
+                changed = true;
+            }
+        }
     }
 
     // Adds a glow to selected nodes and clears it from the rest.
@@ -2245,6 +2284,7 @@ public class FlowChartWindow : Window
         foreach (var n in _data.Nodes)
         {
             if (n.Id == fromId || n.Id == toId) continue;
+            if (n.Kind == FlowNodeKind.Junction) continue;   // junctions are points lines pass THROUGH, not around
             obstacles.Add(new Rect(n.X, n.Y, n.Width, n.Height).Inflate(g));   // ≥1 grid clearance
         }
 
