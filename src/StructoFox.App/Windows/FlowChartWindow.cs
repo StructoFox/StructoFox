@@ -1658,9 +1658,10 @@ public class FlowChartWindow : Window
         if (toTap)
         {
             if (TapInfo(conn) is not { } info) return null;
-            // A tap is always a clean auto-routed L (no manual waypoints) so it can't snap-back or loop.
+            var b = new Rect(info.pt.X, info.pt.Y, 0, 0);
             if (_data.DiagonalLines)
                 return new List<Point> { RectBorderPoint(a.Value, info.pt), info.pt };
+            if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, b, conn);
             return TapRoute(a.Value, info.pt, info.targetHoriz, conn);
         }
 
@@ -1900,10 +1901,11 @@ public class FlowChartWindow : Window
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
                 // Connecting and clicking a line: the new line ENDS on this line (a T-piece / tap).
                 if (ConnectMode && _connectFromId is not null) { TapOntoLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
-                // A tap line is an auto-routed L stub: dragging ANY of its segments just slides the meeting
-                // point along the target (no manual bending). Works in any non-Remove mode (an in-progress
-                // connection was handled just before).
-                if (_mode != EditMode.Remove && !string.IsNullOrEmpty(capConn.ToTapConn))
+                // Dragging the END segment of a tap (the one touching the target) slides its meeting point
+                // along the target; other segments bend normally so an L-shaped tap stays adjustable. Works
+                // in any non-Remove mode (an in-progress connection was handled just before).
+                if (_mode != EditMode.Remove && !string.IsNullOrEmpty(capConn.ToTapConn)
+                    && _connPts.TryGetValue(capConn.Id, out var tpts) && segIdx == tpts.Count - 2)
                 { _tapDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
