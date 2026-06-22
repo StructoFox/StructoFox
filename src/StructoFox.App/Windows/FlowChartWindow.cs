@@ -1792,7 +1792,8 @@ public class FlowChartWindow : Window
         if (target is null || !_connPts.TryGetValue(target.Id, out var pts) || pts.Count < 2) return;
         var foot = NearestPointOn(pts, cur).pt;
         _tapDrag.ToTapX = Snap(foot.X); _tapDrag.ToTapY = Snap(foot.Y);
-        _tapDrag.Waypoints.Clear();   // slide gives a clean straight stub to the new point
+        // Keep any manual bend (don't auto-clear) — sliding moves the meeting, the bend stays. Use the
+        // right-click "reset route" to go back to the clean auto-L.
         RenderConnection(_tapDrag);
         RenderTapDots();
     }
