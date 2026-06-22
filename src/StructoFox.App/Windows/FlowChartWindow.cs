@@ -1891,9 +1891,9 @@ public class FlowChartWindow : Window
                 // Connecting and clicking a line: the new line ENDS on this line (a T-piece / tap).
                 if (ConnectMode && _connectFromId is not null) { TapOntoLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
                 // Dragging a tap line (a stub) slides its meeting point along the target; the L to the
-                // source node re-routes automatically. So pulling it up/down moves the T-piece along the
-                // line (splitting a coincident pair, which clears the indicator dot).
-                if (_mode == EditMode.Select && !string.IsNullOrEmpty(capConn.ToTapConn))
+                // source node re-routes automatically. Works in Select AND Connect mode (Remove handled
+                // above; an in-progress connection was handled just before).
+                if (_mode != EditMode.Remove && !string.IsNullOrEmpty(capConn.ToTapConn))
                 { _tapDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
