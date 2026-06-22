@@ -2155,14 +2155,15 @@ public class FlowChartWindow : Window
     }
 
     // The rect used for ROUTING a connection to/from a node. A junction collapses to a zero-size point at
-    // its grid-snapped centre, so every line incident to it begins/ends on the exact same coordinate (no
-    // gap where the old 9px edge point sat, and the meeting point lands on the grid).
+    // its EXACT centre, so every line incident to it begins/ends on the same coordinate — the junction
+    // itself (which sits on the line it splits). Don't re-snap here: snapping the centre to the grid can
+    // move the meeting point off a line that runs on a non-grid coordinate, leaving a gap.
     Rect? RouteRect(string id)
     {
         var n = _data.Nodes.FirstOrDefault(x => x.Id == id);
         if (n is null) return null;
         if (n.Kind == FlowNodeKind.Junction)
-            return new Rect(Snap(n.X + n.Width / 2), Snap(n.Y + n.Height / 2), 0, 0);
+            return new Rect(n.X + n.Width / 2, n.Y + n.Height / 2, 0, 0);
         return new Rect(n.X, n.Y, n.Width, n.Height);
     }
 
@@ -2197,7 +2198,7 @@ public class FlowChartWindow : Window
         return Math.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy));
     }
 
-    static List<Point> OrthoRoute(Rect s, Rect t)
+    static List<Point> OrthoRoute(Rect s, Rect t, ISet<char>? srcBusy = null, ISet<char>? dstBusy = null)
     {
         var sc = s.Center; var tc = t.Center;
         double dx = tc.X - sc.X, dy = tc.Y - sc.Y;
@@ -2209,6 +2210,13 @@ public class FlowChartWindow : Window
                        : down  ? true
                        : right ? false
                        : Math.Abs(dy) >= Math.Abs(dx);   // up-left: by dominance
+
+        // If the chosen exit edge already carries another connection but the alternative axis' edge is
+        // free, switch axes — so a new line doesn't depart from a side that already has an arrow.
+        char SrcSide(bool vert) => vert ? (down ? 'B' : 'T') : (right ? 'R' : 'L');
+        if (srcBusy is { Count: > 0 } && srcBusy.Contains(SrcSide(vertical)) && !srcBusy.Contains(SrcSide(!vertical)))
+            vertical = !vertical;
+
         if (vertical)
         {
             var exit  = new Point(sc.X, dy >= 0 ? s.Bottom : s.Top);
@@ -2230,7 +2238,7 @@ public class FlowChartWindow : Window
     // for straight runs) routes around them. Falls back to the simple route if the area is huge or blocked.
     List<Point> OrthoRouteAvoiding(Rect s, Rect t, string fromId, string toId, string? selfId = null)
     {
-        var simple = OrthoRoute(s, t);
+        var simple = OrthoRoute(s, t, OccupiedSides(fromId, selfId), OccupiedSides(toId, selfId));
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
 
         var obstacles = new List<Rect>();
@@ -2285,6 +2293,35 @@ public class FlowChartWindow : Window
         foreach (var (c, r) in cells) pts.Add(new Point(minX + c * g, minY + r * g));
         pts.Add(goal);
         return Simplify(pts);
+    }
+
+    // The edges (L/R/T/B) of a node already used by other connections' endpoints — so a new line can
+    // avoid departing/arriving on a side that already has an arrow.
+    HashSet<char> OccupiedSides(string nodeId, string? exceptId)
+    {
+        var set = new HashSet<char>();
+        var n = _data.Nodes.FirstOrDefault(x => x.Id == nodeId);
+        if (n is null) return set;
+        var r = new Rect(n.X, n.Y, n.Width, n.Height);
+        foreach (var (id, pts) in _connPts)
+        {
+            if (id == exceptId || pts.Count == 0) continue;
+            var conn = _data.Connections.FirstOrDefault(c => c.Id == id);
+            if (conn is null) continue;
+            Point ep;
+            if (conn.FromId == nodeId)    ep = pts[0];
+            else if (conn.ToId == nodeId) ep = pts[^1];
+            else continue;
+            set.Add(NearestSide(r, ep));
+        }
+        return set;
+    }
+
+    static char NearestSide(Rect r, Point p)
+    {
+        double dl = Math.Abs(p.X - r.Left), dr = Math.Abs(p.X - r.Right), dt = Math.Abs(p.Y - r.Top), db = Math.Abs(p.Y - r.Bottom);
+        double m = Math.Min(Math.Min(dl, dr), Math.Min(dt, db));
+        return m == dl ? 'L' : m == dr ? 'R' : m == dt ? 'T' : 'B';
     }
 
     // The realized segments of every OTHER connection (for line-avoidance), excluding the one being routed.
