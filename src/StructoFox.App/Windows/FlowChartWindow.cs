@@ -635,7 +635,7 @@ public class FlowChartWindow : Window
             _connMenu.Items.Add(new Separator());
             _connMenu.Items.Add(MI(Loc.S("Flow_Connector"),  () => AddNode(FlowNodeKind.Connector)));
             _connMenu.Items.Add(MI(Loc.S("Flow_SymOffPage"), () => AddNode(FlowNodeKind.Connector, FlowSymbol.OffPageConnector)));
-            _connMenu.Items.Add(MI(Loc.S("Flow_Junction"),   () => AddNode(FlowNodeKind.Junction)));
+            // (No standalone "Junction" item: junctions now form automatically where a line meets another.)
             _connMenu.Items.Add(new Separator());
             // Flow-line routing style (global): DIN orthogonal vs. free diagonal arrows.
             _connMenu.Items.Add(MI((_data.DiagonalLines ? "" : "✓ ") + Loc.S("Flow_ArrowDin"),  () => SetDiagonal(false)));
