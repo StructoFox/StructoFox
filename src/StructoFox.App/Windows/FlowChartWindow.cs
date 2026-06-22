@@ -1747,25 +1747,108 @@ public class FlowChartWindow : Window
 
         if (!string.IsNullOrWhiteSpace(conn.Label))
         {
-            var badge = new Border { CornerRadius = new(3), Padding = new(4, 1, 4, 1) };
+            var badge = new Border { CornerRadius = new(3), Padding = new(4, 1, 4, 1), Cursor = new Cursor(StandardCursorType.Hand) };
             Ui.Theme(badge, Border.BackgroundProperty, "SidebarBgBrush");
             var t = new TextBlock { Text = conn.Label, FontSize = 10 };
             Ui.Theme(t, TextBlock.ForegroundProperty, "SidebarTextBrush");
             badge.Child = t;
 
-            // Label the longest segment; horizontal text always. DIN: a horizontal line gets the label
-            // centred just ABOVE it; a vertical line gets it (still horizontal) just to the RIGHT.
-            var (sa, sb) = LongestSegment(pts);
-            var smid = new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2);
-            double estW = Math.Max(16, conn.Label.Length * 6.5 + 8);
-            bool horizontal = Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y);
-            Canvas.SetLeft(badge, horizontal ? smid.X - estW / 2 : smid.X + 6);
-            Canvas.SetTop(badge,  horizontal ? smid.Y - 20      : smid.Y - 9);
+            var (anchor, horizontal) = LabelAnchor(conn, pts);
+            PlaceLabel(badge, anchor, horizontal, conn.Label);
             badge.ZIndex = 4;
+            WireLabelDrag(badge, conn);   // drag along the line to reposition
             _canvas.Children.Add(badge); visuals.Add(badge);
         }
 
         _connViews[conn.Id] = visuals;
+    }
+
+    // Where the label sits: an explicit LabelPos fraction along the line, else auto — the first segment
+    // for a decision branch (so it reads right next to the diamond), otherwise the longest segment.
+    (Point anchor, bool horizontal) LabelAnchor(FlowConnection conn, List<Point> pts)
+    {
+        if (pts.Count < 2) return (pts.Count == 1 ? pts[0] : default, true);
+        if (conn.LabelPos >= 0) return PointAlong(pts, conn.LabelPos);
+
+        Point sa, sb;
+        bool fromDecision = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Decision;
+        if (fromDecision) { sa = pts[0]; sb = pts[1]; }
+        else (sa, sb) = LongestSegment(pts);
+        return (new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2), Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y));
+    }
+
+    // Positions the label badge near its anchor: above a horizontal run, to the right of a vertical one.
+    static void PlaceLabel(Border badge, Point anchor, bool horizontal, string label)
+    {
+        double estW = Math.Max(16, label.Length * 6.5 + 8);
+        Canvas.SetLeft(badge, horizontal ? anchor.X - estW / 2 : anchor.X + 6);
+        Canvas.SetTop(badge,  horizontal ? anchor.Y - 20       : anchor.Y - 9);
+    }
+
+    static double Dist(Point a, Point b) { double dx = a.X - b.X, dy = a.Y - b.Y; return Math.Sqrt(dx * dx + dy * dy); }
+
+    // The point at fraction t (0..1) of the polyline's length, plus whether the local segment is horizontal.
+    static (Point pt, bool horizontal) PointAlong(List<Point> pts, double t)
+    {
+        double total = 0;
+        for (int i = 0; i < pts.Count - 1; i++) total += Dist(pts[i], pts[i + 1]);
+        double target = Math.Clamp(t, 0, 1) * total, acc = 0;
+        for (int i = 0; i < pts.Count - 1; i++)
+        {
+            double seg = Dist(pts[i], pts[i + 1]);
+            if (acc + seg >= target || i == pts.Count - 2)
+            {
+                double f = seg < 1e-6 ? 0 : (target - acc) / seg;
+                var p = new Point(pts[i].X + (pts[i + 1].X - pts[i].X) * f, pts[i].Y + (pts[i + 1].Y - pts[i].Y) * f);
+                return (p, Math.Abs(pts[i + 1].X - pts[i].X) >= Math.Abs(pts[i + 1].Y - pts[i].Y));
+            }
+            acc += seg;
+        }
+        return (pts[^1], true);
+    }
+
+    // The fraction (0..1) along the polyline closest to q — used to map a label drag onto the line.
+    static double NearestFraction(List<Point> pts, Point q)
+    {
+        double total = 0;
+        for (int i = 0; i < pts.Count - 1; i++) total += Dist(pts[i], pts[i + 1]);
+        if (total < 1e-6) return 0;
+        double best = double.MaxValue, bestPos = 0, acc = 0;
+        for (int i = 0; i < pts.Count - 1; i++)
+        {
+            Point a = pts[i], b = pts[i + 1];
+            double dx = b.X - a.X, dy = b.Y - a.Y, len2 = dx * dx + dy * dy;
+            double f = len2 < 1e-9 ? 0 : Math.Clamp(((q.X - a.X) * dx + (q.Y - a.Y) * dy) / len2, 0, 1);
+            double cx = a.X + f * dx, cy = a.Y + f * dy;
+            double d = (q.X - cx) * (q.X - cx) + (q.Y - cy) * (q.Y - cy);
+            if (d < best) { best = d; bestPos = (acc + f * Math.Sqrt(len2)) / total; }
+            acc += Math.Sqrt(len2);
+        }
+        return bestPos;
+    }
+
+    // Lets the user drag a label badge along its line; the chosen position is stored as LabelPos.
+    void WireLabelDrag(Border badge, FlowConnection conn)
+    {
+        bool drag = false;
+        badge.PointerPressed += (_, e) =>
+        {
+            if (_mode != EditMode.Select || !e.GetCurrentPoint(badge).Properties.IsLeftButtonPressed) return;
+            drag = true; e.Pointer.Capture(badge); e.Handled = true;
+        };
+        badge.PointerMoved += (_, e) =>
+        {
+            if (!drag || !_connPts.TryGetValue(conn.Id, out var pts) || pts.Count < 2) return;
+            conn.LabelPos = NearestFraction(pts, e.GetPosition(_canvas));
+            var (anchor, horizontal) = PointAlong(pts, conn.LabelPos);
+            PlaceLabel(badge, anchor, horizontal, conn.Label);
+            e.Handled = true;
+        };
+        badge.PointerReleased += (_, e) =>
+        {
+            if (!drag) return;
+            drag = false; e.Pointer.Capture(null); Save(); e.Handled = true;
+        };
     }
 
     // The arrow right-click menu: relabel or delete.

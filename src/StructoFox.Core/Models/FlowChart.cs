@@ -91,6 +91,9 @@ public class FlowConnection
     public string              ToId      { get; set; } = "";
     /// <summary>Optional label, e.g. "yes" / "no" on a decision branch.</summary>
     public string              Label     { get; set; } = "";
+    /// <summary>Where the label sits along the line, as a fraction (0..1) of the polyline length. A
+    /// negative value means "auto": at the first segment for a decision branch, else the longest segment.</summary>
+    public double              LabelPos  { get; set; } = -1;
     public BoardLineStyle      LineStyle { get; set; } = BoardLineStyle.Solid;
     public string              LineColor { get; set; } = "#888888";
     public double              Thickness { get; set; } = 1.6;
