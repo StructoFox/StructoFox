@@ -75,6 +75,13 @@ public class CodeBoardWindow : Window
     Button? _connectBtn;
     ContextMenu? _menu;   // the single open context menu, so opening a new one closes the old
 
+    bool    _scaleMode;                                    // resize cards via grips
+    Button? _scaleBtn;
+    readonly List<Control> _scaleHandles = new();          // resize grips shown on cards in Scale mode
+    readonly Dictionary<string, Size> _naturalCard = new();// entity id → auto content size = min size
+    sealed record HandleInfo(string EntityId, bool Left, bool Right, bool Top, bool Bottom);
+    const double HandleSize = 9;
+
     static readonly FontFamily Mono = new("Consolas, Cascadia Mono, monospace");
     static readonly BoxShadows SelGlow   = BoxShadows.Parse("0 0 12 0 #CC2196F3");
     static readonly BoxShadows HoverGlow = BoxShadows.Parse("0 0 8 0 #66FFFFFF");
@@ -253,6 +260,10 @@ public class CodeBoardWindow : Window
         _connectBtn = Btn(Loc.S("Code_ConnectPorts"), Loc.S("Code_ConnectPortsTip"));
         _connectBtn.Click += (_, _) => ToggleConnectMode();
         row.Children.Add(_connectBtn);
+
+        _scaleBtn = Btn(Loc.S("Code_ScaleCards"), Loc.S("Code_ScaleCardsTip"));
+        _scaleBtn.Click += (_, _) => ToggleScaleMode();
+        row.Children.Add(_scaleBtn);
 
         var delBtn = Btn(Loc.S("Code_RemoveCards"), Loc.S("Code_RemoveCardsTip"));
         delBtn.Click += (_, _) => RemoveSelectedFromBoard();
@@ -524,6 +535,7 @@ public class CodeBoardWindow : Window
         _connectFromPortId   = null;
         RemoveRubberBand();
         ClearDragHighlights();
+        if (_connectMode && _scaleMode) { _scaleMode = false; StyleModeBtn(_scaleBtn, false); RefreshScaleHandles(); }   // mutually exclusive
         if (_connectBtn is not null)
         {
             _connectBtn.FontWeight = _connectMode ? FontWeight.Bold : FontWeight.Normal;
@@ -534,6 +546,130 @@ public class CodeBoardWindow : Window
             _canvas.Cursor = new Cursor(_connectMode ? StandardCursorType.Cross : StandardCursorType.Arrow);
     }
 
+    // Scale mode: cards show resize grips and stop being draggable, so a drag resizes (via a grip) rather
+    // than moves. Mutually exclusive with connect mode.
+    void ToggleScaleMode()
+    {
+        _scaleMode = !_scaleMode;
+        if (_scaleMode && _connectMode) ToggleConnectMode();   // turn connect off first
+        StyleModeBtn(_scaleBtn, _scaleMode);
+        RefreshScaleHandles();
+        if (_canvas is not null)
+            _canvas.Cursor = new Cursor(StandardCursorType.Arrow);
+    }
+
+    static void StyleModeBtn(Button? b, bool active)
+    {
+        if (b is null) return;
+        b.FontWeight = active ? FontWeight.Bold : FontWeight.Normal;
+        Ui.Theme(b, TemplatedControl.BackgroundProperty, active ? "AccentBgBrush"  : "ControlBgBrush");
+        Ui.Theme(b, TemplatedControl.ForegroundProperty, active ? "AccentTextBrush" : "SidebarTextBrush");
+    }
+
+    // ── Resize (Scale mode) ──────────────────────────────────────────────────
+
+    // Rebuilds the resize grips: eight per card in Scale mode, none otherwise. Don't call during an
+    // active grip drag (it drops the captured grip) — the drag path repositions grips in place.
+    void RefreshScaleHandles()
+    {
+        if (_canvas is null) return;
+        foreach (var h in _scaleHandles) _canvas.Children.Remove(h);
+        _scaleHandles.Clear();
+        if (!_scaleMode) return;
+
+        foreach (var id in _cards.Keys)
+            for (int cx = 0; cx <= 2; cx++)
+                for (int cy = 0; cy <= 2; cy++)
+                {
+                    if (cx == 1 && cy == 1) continue;
+                    var grip = MakeHandle(id, left: cx == 0, right: cx == 2, top: cy == 0, bottom: cy == 2);
+                    _scaleHandles.Add(grip);
+                    _canvas.Children.Add(grip);
+                }
+    }
+
+    // The card's current rectangle from the model (custom size if set, else its natural content size).
+    Rect CardRect(string id)
+    {
+        var pos = _boardData.Positions.TryGetValue(id, out var p) ? p : new CodeCardPosition();
+        var nat = _naturalCard.TryGetValue(id, out var n) ? n : new Size(DefaultCardW, 80);
+        double w = pos.CardWidth  > 0 ? pos.CardWidth  : nat.Width;
+        double h = pos.CardHeight > 0 ? pos.CardHeight : nat.Height;
+        return new Rect(pos.X, pos.Y, w, h);
+    }
+
+    Control MakeHandle(string id, bool left, bool right, bool top, bool bottom)
+    {
+        var corner = (left || right) && (top || bottom);
+        var cursor =
+            corner ? (left == top ? StandardCursorType.TopLeftCorner : StandardCursorType.TopRightCorner)
+            : (left || right) ? StandardCursorType.SizeWestEast
+                              : StandardCursorType.SizeNorthSouth;
+        var grip = new Rectangle
+        {
+            Width = HandleSize, Height = HandleSize,
+            Fill = Brushes.White,
+            Stroke = new SolidColorBrush(Color.FromRgb(0x21, 0x96, 0xF3)), StrokeThickness = 1.5,
+            ZIndex = 40, Cursor = new Cursor(cursor),
+            Tag = new HandleInfo(id, left, right, top, bottom),
+        };
+        PlaceHandle(grip);
+        WireHandle(grip);
+        return grip;
+    }
+
+    void PlaceHandle(Control grip)
+    {
+        if (grip.Tag is not HandleInfo hi) return;
+        var r = CardRect(hi.EntityId);
+        double hx = hi.Left ? r.X : hi.Right ? r.Right : r.X + r.Width / 2;
+        double hy = hi.Top ? r.Y : hi.Bottom ? r.Bottom : r.Y + r.Height / 2;
+        Canvas.SetLeft(grip, hx - HandleSize / 2);
+        Canvas.SetTop(grip,  hy - HandleSize / 2);
+    }
+
+    // Dragging a grip moves the edge(s) it owns, clamped so the card never shrinks below its natural
+    // content size (so nothing clips). Ports + relations follow; the card's grips move without a rebuild.
+    void WireHandle(Control grip)
+    {
+        bool drag = false;
+        grip.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(grip).Properties.IsLeftButtonPressed) return;
+            drag = true; e.Pointer.Capture(grip); e.Handled = true;
+        };
+        grip.PointerMoved += (_, e) =>
+        {
+            if (!drag || grip.Tag is not HandleInfo hi) return;
+            if (!_cards.TryGetValue(hi.EntityId, out var card)) return;
+            if (!_boardData.Positions.TryGetValue(hi.EntityId, out var pos)) return;
+            var nat = _naturalCard.TryGetValue(hi.EntityId, out var n) ? n : new Size(DefaultCardW, 80);
+            var r = CardRect(hi.EntityId);
+            var p = e.GetPosition(_canvas);
+            double l = r.X, rg = r.Right, t = r.Y, b = r.Bottom;
+            if (hi.Right)  rg = Math.Max(l + nat.Width,  Snap(p.X));
+            if (hi.Left)   l  = Math.Min(rg - nat.Width, Snap(p.X));
+            if (hi.Bottom) b  = Math.Max(t + nat.Height, Snap(p.Y));
+            if (hi.Top)    t  = Math.Min(b - nat.Height, Snap(p.Y));
+            pos.X = l; pos.Y = t; pos.CardWidth = rg - l; pos.CardHeight = b - t;
+            Canvas.SetLeft(card, l); Canvas.SetTop(card, t);
+            card.Width = pos.CardWidth; card.Height = pos.CardHeight;
+            UpdatePortPositions(hi.EntityId);
+            UpdateRelationsForEntity(hi.EntityId);
+            foreach (var g in _scaleHandles)
+                if (g.Tag is HandleInfo gi && gi.EntityId == hi.EntityId) PlaceHandle(g);
+            e.Handled = true;
+        };
+        grip.PointerReleased += (_, e) =>
+        {
+            if (!drag) return;
+            drag = false; e.Pointer.Capture(null);
+            Save();
+            RefreshScaleHandles();
+            e.Handled = true;
+        };
+    }
+
     // ── Card rendering ─────────────────────────────────────────────────────
 
     void RenderCard(CodeEntity entity, CodeCardPosition pos)
@@ -541,6 +677,12 @@ public class CodeBoardWindow : Window
         if (_cards.ContainsKey(entity.Id)) return;
 
         var card = BuildCard(entity);
+        // Natural (auto) size = the minimum the card can be scaled to, so content never clips. Apply a
+        // saved custom size on top (never below natural).
+        card.Measure(Size.Infinity);
+        _naturalCard[entity.Id] = card.DesiredSize;
+        if (pos.CardWidth  > 0) card.Width  = Math.Max(pos.CardWidth,  card.DesiredSize.Width);
+        if (pos.CardHeight > 0) card.Height = Math.Max(pos.CardHeight, card.DesiredSize.Height);
         Canvas.SetLeft(card, pos.X);
         Canvas.SetTop(card,  pos.Y);
         card.ZIndex = 2;
@@ -548,6 +690,7 @@ public class CodeBoardWindow : Window
         _cards[entity.Id] = card;
 
         WireCard(card, entity);
+        if (_scaleMode) RefreshScaleHandles();   // a card added while resizing gets grips too
 
         // Re-place ports (and any touching relations) whenever the card's measured size changes.
         card.GetObservable(Visual.BoundsProperty).Subscribe(new AnonymousObserver<Rect>(_ =>
@@ -566,6 +709,7 @@ public class CodeBoardWindow : Window
         {
             var props = e.GetCurrentPoint(card).Properties;
             if (props.IsRightButtonPressed) { ShowCardContextMenu(entity, card); e.Handled = true; return; }
+            if (_scaleMode) { e.Handled = true; return; }     // resizing happens via the grips, not the body
             if (_connectMode) { e.Handled = true; return; }   // port dots handle connecting
             if (e.ClickCount >= 2) { _ = ShowEntityEditor(entity); e.Handled = true; return; }
 
@@ -1653,6 +1797,7 @@ public class CodeBoardWindow : Window
         _selectedIds.Clear();
         if (any) FitCanvas();   // shrink the canvas back when edge cards were removed
         Save();
+        if (_scaleMode) RefreshScaleHandles();   // drop grips of removed cards
         RefreshSelectionVisuals();
         if (any) _ = InfoDialog.Show(this, "board_remove", Loc.S("Board_RemoveInfo"), Loc.S("Code_RemoveFromBoard"));
     }
