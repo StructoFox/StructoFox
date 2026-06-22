@@ -253,9 +253,9 @@ public class FlowChartWindow : Window
         {
             if (_segConn is not null)
             {
-                if (_segJunctionId is not null) { UpdateConnectionsFor(_segJunctionId); FitCanvas(); }   // settle the moved junction
-                else { NormalizeWaypoints(_segConn); RenderConnection(_segConn); }
-                RefreshJunctions(); RenderCrossovers(); Save();
+                NormalizeWaypoints(_segConn); RenderConnection(_segConn);
+                RenderTapsOnto(_segConn.Id);   // T-pieces on this line settle with it
+                RenderCrossovers(); Save();
                 _segConn = null; _segBasePts = null; _segJunctionId = null; e.Pointer.Capture(null); return;
             }
             if (_panning)
@@ -1625,7 +1625,7 @@ public class FlowChartWindow : Window
         var full = BuildDragged(_segBasePts, _segIdx, _segHoriz, v);
         _segConn.Waypoints = full.Skip(1).Take(full.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
         RenderConnection(_segConn);
-        RefreshJunctions();   // live show/hide the junction dot as the segment moves into / out of a cross
+        RenderTapsOnto(_segConn.Id);   // any T-piece on this line follows it (and its dot)
     }
 
     // Rebuilds a polyline with segment k moved to the perpendicular coordinate v, keeping it orthogonal.
@@ -1692,7 +1692,14 @@ public class FlowChartWindow : Window
         _connectFromId = null;
         RemoveRubberBand();
 
-        double t = _connPts.TryGetValue(target.Id, out var pts) && pts.Count >= 2 ? NearestFraction(pts, at) : 0.5;
+        double t = 0.5;
+        if (_connPts.TryGetValue(target.Id, out var pts) && pts.Count >= 2)
+        {
+            // Project the click onto the line, snap that foot to the grid, then store it as a fraction —
+            // so the T-piece sits on a grid line along the target.
+            var foot = PointAlong(pts, NearestFraction(pts, at)).pt;
+            t = NearestFraction(pts, new Point(Snap(foot.X), Snap(foot.Y)));
+        }
 
         string label = "";
         if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
@@ -1718,6 +1725,14 @@ public class FlowChartWindow : Window
     // Draws a dot wherever two lines tap the SAME target at (almost) the same point — i.e. two T-pieces
     // coincide into a connected crossing. A lone tap stays a plain (dotless) T-piece.
     readonly List<Control> _tapDots = new();
+    // Re-renders every tap that ends on the given line (after it moved), plus the coincidence dots.
+    void RenderTapsOnto(string targetId)
+    {
+        foreach (var c in _data.Connections)
+            if (c.ToTapConn == targetId) RenderConnection(c);
+        RenderTapDots();
+    }
+
     void RenderTapDots()
     {
         if (_canvas is null) return;
