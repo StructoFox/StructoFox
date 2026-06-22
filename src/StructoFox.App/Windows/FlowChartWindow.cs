@@ -1777,13 +1777,16 @@ public class FlowChartWindow : Window
         return (new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2), Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y));
     }
 
-    // Positions the label badge at its anchor, offset perpendicular to the line by off (0 = default side:
-    // above a horizontal run, right of a vertical one). A dragged label stores its own signed offset.
+    // Positions the label badge a FIXED small distance from the line; only the SIDE is chosen by off
+    // (its sign): +below/right, -above/left, 0 = default (above a horizontal run, right of a vertical one).
+    // The label always hugs the line — the side can be flipped, but it can't be dragged away from it.
     static void PlaceLabel(Border badge, Point anchor, bool horizontal, string label, double off)
     {
         double estW = Math.Max(16, label.Length * 6.5 + 8);
         const double h = 16;
-        double useOff = Math.Abs(off) < 0.001 ? (horizontal ? -(h / 2 + 4) : (estW / 2 + 6)) : off;
+        double mag  = horizontal ? h / 2 + 4 : estW / 2 + 6;
+        double sign = off > 0 ? 1 : off < 0 ? -1 : (horizontal ? -1 : 1);   // default: above (horiz) / right (vert)
+        double useOff = sign * mag;
         double cx = horizontal ? anchor.X : anchor.X + useOff;
         double cy = horizontal ? anchor.Y + useOff : anchor.Y;
         Canvas.SetLeft(badge, cx - estW / 2);
@@ -1847,7 +1850,8 @@ public class FlowChartWindow : Window
             var q = e.GetPosition(_canvas);
             conn.LabelPos = NearestFraction(pts, q);
             var (anchor, horizontal) = PointAlong(pts, conn.LabelPos);
-            conn.LabelOff = horizontal ? q.Y - anchor.Y : q.X - anchor.X;   // perpendicular side + distance
+            double perp = horizontal ? q.Y - anchor.Y : q.X - anchor.X;
+            conn.LabelOff = Math.Sign(perp);   // store the SIDE only; distance stays fixed
             PlaceLabel(badge, anchor, horizontal, conn.Label, conn.LabelOff);
             e.Handled = true;
         };
