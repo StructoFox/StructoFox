@@ -1790,15 +1790,15 @@ public class FlowChartWindow : Window
         foreach (var d in _tapDots) _canvas.Children.Remove(d);
         _tapDots.Clear();
 
-        // Group taps by their meeting point (snapped to the grid). Two or more on the same spot of the same
-        // target = two T-pieces coinciding into a connected crossing → draw a dot there.
-        var groups = new Dictionary<(double x, double y), Point>();
-        var counts = new Dictionary<(double x, double y), int>();
+        // Pure visual indicator: two (or more) T-pieces on the SAME line meeting at the same point. Keyed
+        // by (target line, grid-snapped meeting point); a group of 2+ gets a dot. Not interactive.
+        var groups = new Dictionary<(string conn, double x, double y), Point>();
+        var counts = new Dictionary<(string conn, double x, double y), int>();
         foreach (var c in _data.Connections)
         {
             if (string.IsNullOrEmpty(c.ToTapConn)) continue;
             if (TapPoint(c) is not { } p) continue;
-            var key = (Snap(p.X), Snap(p.Y));
+            var key = (c.ToTapConn, Snap(p.X), Snap(p.Y));
             counts[key] = counts.GetValueOrDefault(key) + 1;
             groups[key] = p;
         }
