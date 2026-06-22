@@ -1674,20 +1674,25 @@ public class FlowChartWindow : Window
                                   : OrthoRouteAvoiding(a.Value, bn.Value, conn.FromId, conn.ToId, conn.Id));
     }
 
-    // Routes a tap so its FINAL approach is perpendicular to the target line (a clean T), regardless of
-    // where the source sits: head to a point one grid out from the tap on the perpendicular axis, then a
-    // straight stub into the tap point.
+    // Routes a tap as a clean L whose FINAL segment is perpendicular to the target line (a proper T): the
+    // source exits toward the target, runs to the tap's level, then a straight stub into the tap point.
     List<Point> TapRoute(Rect s, Point tp, bool targetHoriz, FlowConnection conn)
     {
-        double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var sc = s.Center;
-        Point approach = targetHoriz
-            ? new Point(tp.X, tp.Y + (sc.Y <= tp.Y ? -g : g))   // target horizontal → come from above/below
-            : new Point(tp.X + (sc.X <= tp.X ? -g : g), tp.Y);  // target vertical → come from left/right
-        var head = _liveDrag ? OrthoRoute(s, new Rect(approach.X, approach.Y, 0, 0))
-                             : OrthoRouteAvoiding(s, new Rect(approach.X, approach.Y, 0, 0), conn.FromId, "", conn.Id, endsOnLine: true);
-        var res = new List<Point>(head) { tp };
-        return Simplify(Orthogonalize(res));
+        List<Point> pts;
+        if (targetHoriz)
+        {
+            // target horizontal → final approach must be VERTICAL: exit top/bottom, across to tp.X, then in.
+            var exit = new Point(sc.X, sc.Y <= tp.Y ? s.Bottom : s.Top);
+            pts = new() { exit, new Point(tp.X, exit.Y), tp };
+        }
+        else
+        {
+            // target vertical → final approach must be HORIZONTAL: exit left/right, up/down to tp.Y, then in.
+            var exit = new Point(sc.X <= tp.X ? s.Right : s.Left, sc.Y);
+            pts = new() { exit, new Point(exit.X, tp.Y), tp };
+        }
+        return Simplify(Orthogonalize(pts));
     }
 
     // The tap's meeting point and whether the target line runs horizontally there (so a stub can approach
@@ -1890,10 +1895,11 @@ public class FlowChartWindow : Window
                 if (_mode == EditMode.Remove) { DeleteConnection(capConn); e.Handled = true; return; }
                 // Connecting and clicking a line: the new line ENDS on this line (a T-piece / tap).
                 if (ConnectMode && _connectFromId is not null) { TapOntoLine(capConn, e.GetPosition(_canvas)); e.Handled = true; return; }
-                // Dragging a tap line (a stub) slides its meeting point along the target; the L to the
-                // source node re-routes automatically. Works in Select AND Connect mode (Remove handled
-                // above; an in-progress connection was handled just before).
-                if (_mode != EditMode.Remove && !string.IsNullOrEmpty(capConn.ToTapConn))
+                // Dragging the END segment of a tap (the one touching the target) slides its meeting point
+                // along the target; other segments bend normally so an L-shaped tap stays adjustable. Works
+                // in any non-Remove mode (an in-progress connection was handled just before).
+                if (_mode != EditMode.Remove && !string.IsNullOrEmpty(capConn.ToTapConn)
+                    && _connPts.TryGetValue(capConn.Id, out var tpts) && segIdx == tpts.Count - 2)
                 { _tapDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
