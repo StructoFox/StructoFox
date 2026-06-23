@@ -52,15 +52,15 @@ public static class ProjectService
     /// Used for the at-a-glance hover stats on the home screen.</summary>
     public static (int classes, int functions, int boards) QuickStats(string folder)
     {
-        var code = Path.Combine(folder, "code");
+        var structure = CodeEntityService.StructureFolder(folder);
         int Count(string sub, string pattern)
         {
-            var d = Path.Combine(code, sub);
+            var d = Path.Combine(structure, sub);
             try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, pattern).Count(f => !Path.GetFileName(f).StartsWith('_')) : 0; }
             catch { return 0; }
         }
         int boards = 0;
-        try { if (Directory.Exists(code)) boards = Directory.EnumerateFiles(code, "_board_*.json").Count(); }
+        try { if (Directory.Exists(structure)) boards = Directory.EnumerateFiles(structure, "_board_*.json").Count(); }
         catch { /* ignore */ }
         return (Count("Class", "*.json"), Count("Function", "*.json"), boards);
     }
@@ -69,17 +69,17 @@ public static class ProjectService
     /// Keyed by the entity-type name (Namespace, Class, Struct, …); the boards count rides alongside.</summary>
     public static (Dictionary<string, int> byType, int boards) ContentCounts(string folder)
     {
-        var code = Path.Combine(folder, "code");
+        var structure = CodeEntityService.StructureFolder(folder);
         int Count(string sub)
         {
-            var d = Path.Combine(code, sub);
+            var d = Path.Combine(structure, sub);
             try { return Directory.Exists(d) ? Directory.EnumerateFiles(d, "*.json").Count(f => !Path.GetFileName(f).StartsWith('_')) : 0; }
             catch { return 0; }
         }
         var byType = CodeEntityService.EntityTypes.ToDictionary(t => t, Count);
 
         int boards = 0;
-        try { if (Directory.Exists(code)) boards = Directory.EnumerateFiles(code, "_board_*.json").Count(); }
+        try { if (Directory.Exists(structure)) boards = Directory.EnumerateFiles(structure, "_board_*.json").Count(); }
         catch { /* ignore */ }
         return (byType, boards);
     }
