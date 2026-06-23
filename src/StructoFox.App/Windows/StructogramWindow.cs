@@ -385,8 +385,10 @@ public class StructogramWindow : Window
         var labelRow = new Grid();
         labelRow.ColumnDefinitions.Add(new ColumnDefinition());
         labelRow.ColumnDefinitions.Add(new ColumnDefinition());
-        var tl = LabelText(Loc.S("Struct_True"));  tl.FontSize = 10; tl.Opacity = 0.7; tl.HorizontalAlignment = HorizontalAlignment.Center;
-        var fl = LabelText(Loc.S("Struct_False")); fl.FontSize = 10; fl.Opacity = 0.7; fl.HorizontalAlignment = HorizontalAlignment.Center; Grid.SetColumn(fl, 1);
+        var trueCap  = string.IsNullOrWhiteSpace(b.TrueLabel)  ? Loc.S("Struct_True")  : b.TrueLabel;
+        var falseCap = string.IsNullOrWhiteSpace(b.FalseLabel) ? Loc.S("Struct_False") : b.FalseLabel;
+        var tl = LabelText(trueCap);  tl.FontSize = 10; tl.Opacity = 0.7; tl.HorizontalAlignment = HorizontalAlignment.Center;
+        var fl = LabelText(falseCap); fl.FontSize = 10; fl.Opacity = 0.7; fl.HorizontalAlignment = HorizontalAlignment.Center; Grid.SetColumn(fl, 1);
         labelRow.Children.Add(tl); labelRow.Children.Add(fl);
         var labelWrap = TopBorder(labelRow); Grid.SetRow(labelWrap, 1);
         grid.Children.Add(labelWrap);

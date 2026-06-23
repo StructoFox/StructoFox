@@ -138,6 +138,8 @@ public static class StructogramConverter
                     {
                         Kind = NsBlockKind.If,
                         Text = node.Text,
+                        TrueLabel  = tConn.Label,
+                        FalseLabel = fConn.Label,
                         Body = ParseRegion(tConn.ToId, ifJoin, depth + 1),
                         Else = ParseRegion(fConn.ToId, ifJoin, depth + 1)
                     };

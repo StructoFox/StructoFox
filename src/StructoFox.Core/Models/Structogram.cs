@@ -39,6 +39,11 @@ public class NsBlock
     public List<NsBlock> Else  { get; set; } = [];
     public List<NsArm>   Arms  { get; set; } = [];
 
+    /// <summary>For an If block: the labels of the then / else branches (e.g. "ja" / "nein"), shown in the
+    /// two header corners. Empty falls back to the default true/false captions.</summary>
+    public string        TrueLabel  { get; set; } = "";
+    public string        FalseLabel { get; set; } = "";
+
     /// <summary>For a Subroutine block: the id of the Function entity it calls (lives in the Functions
     /// library; its diagram is keyed by this id). Empty until linked/created via "show chart".</summary>
     public string        RefId { get; set; } = "";
