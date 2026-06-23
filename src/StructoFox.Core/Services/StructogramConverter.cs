@@ -34,21 +34,42 @@ public static class StructogramConverter
 
     private sealed class Ctx
     {
+        private readonly record struct Edge(string ToId, string Label);
+
         private readonly Dictionary<string, FlowNode> _nodes;
-        private readonly Dictionary<string, List<FlowConnection>> _succ;
+        private readonly Dictionary<string, List<Edge>> _succ;
+        private static readonly List<Edge> _noEdges = new();
         private int _budget = 2000;   // overall block budget (guards against pathological graphs)
 
         public Ctx(FlowChartData fc)
         {
             _nodes = fc.Nodes.ToDictionary(n => n.Id);
-            _succ  = fc.Nodes.ToDictionary(n => n.Id, _ => new List<FlowConnection>());
+            _succ  = fc.Nodes.ToDictionary(n => n.Id, _ => new List<Edge>());
+
+            // A "tap" connection ends on another LINE, not a node (ToId is empty). Resolve it to the node
+            // that the tapped line eventually leads to, so the flow can be followed — and so a stray empty
+            // id never reaches the graph helpers (which would throw on _succ[""]).
+            string? Resolve(FlowConnection c, int d)
+            {
+                if (d > 64) return null;
+                if (string.IsNullOrEmpty(c.ToTapConn)) return string.IsNullOrEmpty(c.ToId) ? null : c.ToId;
+                var tapped = fc.Connections.FirstOrDefault(x => x.Id == c.ToTapConn);
+                return tapped is null ? null : Resolve(tapped, d + 1);
+            }
+
             foreach (var c in fc.Connections)
-                if (_succ.TryGetValue(c.FromId, out var list)) list.Add(c);
+            {
+                if (!_succ.TryGetValue(c.FromId, out var list)) continue;
+                var to = Resolve(c, 0);
+                if (to is not null && _nodes.ContainsKey(to)) list.Add(new Edge(to, c.Label ?? ""));
+            }
         }
 
+        // Successors of a node id — never throws on an unknown id.
+        private List<Edge> Succ(string id) => _succ.TryGetValue(id, out var l) ? l : _noEdges;
+
         /// <summary>The single successor of a node (or null).</summary>
-        public string? One(string id) =>
-            _succ.TryGetValue(id, out var l) && l.Count > 0 ? l[0].ToId : null;
+        public string? One(string id) { var l = Succ(id); return l.Count > 0 ? l[0].ToId : null; }
 
         public List<NsBlock> ParseRegion(string? startId, string? stopId, int depth)
         {
@@ -67,7 +88,7 @@ public static class StructogramConverter
                 if (node.Kind == FlowNodeKind.End) break;
                 if (node.Kind == FlowNodeKind.Start) { cur = One(cur); continue; }
 
-                var outs = _succ[cur];
+                var outs = Succ(cur);
 
                 if (outs.Count == 0) { blocks.Add(Stmt(node)); break; }
                 if (outs.Count == 1) { blocks.Add(Stmt(node)); cur = outs[0].ToId; continue; }
@@ -147,7 +168,7 @@ public static class StructogramConverter
                 var id = stack.Pop();
                 if (id == boundary || !seen.Add(id)) continue;
                 if (_nodes.TryGetValue(id, out var n) && n.Kind == FlowNodeKind.End) continue;
-                foreach (var c in _succ[id]) stack.Push(c.ToId);
+                foreach (var c in Succ(id)) stack.Push(c.ToId);
             }
             return seen;
         }
@@ -166,7 +187,7 @@ public static class StructogramConverter
                 if (id == boundary || !seen.Add(id)) continue;
                 if (reachA.Contains(id)) return id;
                 if (_nodes.TryGetValue(id, out var n) && n.Kind == FlowNodeKind.End) continue;
-                foreach (var c in _succ[id]) queue.Enqueue(c.ToId);
+                foreach (var c in Succ(id)) queue.Enqueue(c.ToId);
             }
             return null;
         }
@@ -187,7 +208,7 @@ public static class StructogramConverter
                 var id = queue.Dequeue();
                 if (!seen.Add(id)) continue;
                 if (common.Contains(id)) return id;
-                foreach (var c in _succ[id]) queue.Enqueue(c.ToId);
+                foreach (var c in Succ(id)) queue.Enqueue(c.ToId);
             }
             return null;
         }
@@ -204,20 +225,17 @@ public static class StructogramConverter
                 if (id == target) return true;
                 if (!seen.Add(id)) continue;
                 if (_nodes.TryGetValue(id, out var n) && n.Kind == FlowNodeKind.End) continue;
-                foreach (var c in _succ[id]) stack.Push(c.ToId);
+                foreach (var c in Succ(id)) stack.Push(c.ToId);
             }
             return false;
         }
 
-        private static (FlowConnection t, FlowConnection f) OrderTrueFalse(List<FlowConnection> outs)
+        private static (Edge t, Edge f) OrderTrueFalse(List<Edge> outs)
         {
             var affirmative = new[] { "yes", "true", "ja", "y", "1", "wahr" };
-            var t = outs.FirstOrDefault(o => affirmative.Contains((o.Label ?? "").Trim().ToLowerInvariant()));
-            if (t is not null)
-            {
-                var f = outs.First(o => !ReferenceEquals(o, t));
-                return (t, f);
-            }
+            int ti = outs.FindIndex(o => affirmative.Contains((o.Label ?? "").Trim().ToLowerInvariant()));
+            if (ti >= 0)
+                return (outs[ti], outs[ti == 0 ? 1 : 0]);
             return (outs[0], outs[1]);
         }
 
