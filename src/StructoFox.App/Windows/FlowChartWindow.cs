@@ -1175,13 +1175,11 @@ public class FlowChartWindow : Window
                     .Select(id => _data.Nodes.FirstOrDefault(n => n.Id == id))
                     .Where(n => n is not null)
                     .ToDictionary(n => n!.Id, n => new Point(n!.X, n.Y));
-                // A tap's anchor rides on its TARGET line — shift it whenever the target moves rigidly
-                // (recursive, so nested-tap targets count), regardless of whether the tap's own source moves.
+                // A tap whose target line moves AS A WHOLE (both its nodes are in the group) should travel
+                // with it — snapshot those anchors so they shift by the same delta.
                 var movedSet = _dragStart.Keys.ToHashSet();
                 _dragTapStart = _data.Connections
-                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn)
-                                && _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
-                                && MovesRigidly(tgt, movedSet))
+                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn) && MovesRigidly(c, movedSet))
                     .ToDictionary(c => c.Id, c => new Point(c.ToTapX, c.ToTapY));
                 // Manual waypoints are absolute coords — a line that moves AS A WHOLE must carry them along,
                 // else its bends stay put while the ends move (the line distorts). Snapshot those too.
