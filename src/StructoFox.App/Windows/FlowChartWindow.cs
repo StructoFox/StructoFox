@@ -2616,8 +2616,18 @@ public class FlowChartWindow : Window
         return Math.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy));
     }
 
-    static List<Point> OrthoRoute(Rect s, Rect t, ISet<char>? srcBusy = null, ISet<char>? dstBusy = null)
+    // The outward unit normal of the rectangle edge a border point sits on (for the straight exit stub).
+    static Point Outward(Rect r, Point p)
     {
+        if (Math.Abs(p.X - r.Left)  < 0.5) return new(-1, 0);
+        if (Math.Abs(p.X - r.Right) < 0.5) return new(1, 0);
+        if (Math.Abs(p.Y - r.Top)   < 0.5) return new(0, -1);
+        return new(0, 1);   // bottom
+    }
+
+    List<Point> OrthoRoute(Rect s, Rect t, ISet<char>? srcBusy = null, ISet<char>? dstBusy = null)
+    {
+        double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var sc = s.Center; var tc = t.Center;
         double dx = tc.X - sc.X, dy = tc.Y - sc.Y, adx = Math.Abs(dx), ady = Math.Abs(dy);
         bool down = dy > 0, right = dx > 0;
@@ -2642,18 +2652,19 @@ public class FlowChartWindow : Window
             'R' => new Point(s.Right, sc.Y),
             _   => new Point(s.Left, sc.Y),
         };
-        if (vertical)
-        {
-            var entry = new Point(tc.X, dy >= 0 ? t.Top : t.Bottom);
-            double midY = (exit.Y + entry.Y) / 2;
-            return new() { exit, new(exit.X, midY), new(entry.X, midY), entry };
-        }
-        else
-        {
-            var entry = new Point(dx >= 0 ? t.Left : t.Right, tc.Y);
-            double midX = (exit.X + entry.X) / 2;
-            return new() { exit, new(midX, exit.Y), new(midX, entry.Y), entry };
-        }
+        // Entry edge of the target: the side facing the source, so the line meets it head-on.
+        var entry = vertical ? new Point(tc.X, dy >= 0 ? t.Top : t.Bottom)
+                             : new Point(dx >= 0 ? t.Left : t.Right, tc.Y);
+
+        // One grid-step straight stub out of each symbol, then turn — so lines always leave (and enter)
+        // perpendicular before bending toward the target.
+        var exitStub  = ex switch { 'B' => new Point(exit.X, exit.Y + g), 'T' => new Point(exit.X, exit.Y - g),
+                                    'R' => new Point(exit.X + g, exit.Y), _ => new Point(exit.X - g, exit.Y) };
+        var entryStub = vertical ? new Point(entry.X, entry.Y + (dy >= 0 ? -g : g))   // outside the target edge
+                                 : new Point(entry.X + (dx >= 0 ? -g : g), entry.Y);
+        var mid = vertical ? new Point(entryStub.X, exitStub.Y)    // after a vertical stub, turn horizontal
+                           : new Point(exitStub.X, entryStub.Y);   // after a horizontal stub, turn vertical
+        return Simplify(Orthogonalize(new() { exit, exitStub, mid, entryStub, entry }));
     }
 
     // Orthogonal route that steers clear of other nodes. Starts from the simple Z-route; if that already
@@ -2680,13 +2691,19 @@ public class FlowChartWindow : Window
         bool onLines   = !endsOnLine && OverlapsExisting(simple, otherSegs, g);
         if (!hitsNodes && !onLines) return simple;
 
-        var start = simple[0];
-        var goal  = simple[^1];
+        // Route A* between the STUB points (one grid straight out of each edge), keeping the exact edge
+        // points as the literal ends — so the line still leaves and enters perpendicular even when it has
+        // to detour around obstacles.
+        var exitEdge = simple[0]; var entryEdge = simple[^1];
+        var startPt = exitEdge; var goalPt = entryEdge;
+        if (s.Width > 0 || s.Height > 0) { var od = Outward(s, exitEdge);  startPt = new(exitEdge.X + od.X * g, exitEdge.Y + od.Y * g); }
+        if (t.Width > 0 || t.Height > 0) { var id = Outward(t, entryEdge); goalPt  = new(entryEdge.X + id.X * g, entryEdge.Y + id.Y * g); }
+
         double pad = 5 * g;
-        double minX = Math.Max(0, Math.Min(start.X, goal.X) - pad);
-        double minY = Math.Max(0, Math.Min(start.Y, goal.Y) - pad);
-        double maxX = Math.Max(start.X, goal.X) + pad;
-        double maxY = Math.Max(start.Y, goal.Y) + pad;
+        double minX = Math.Max(0, Math.Min(startPt.X, goalPt.X) - pad);
+        double minY = Math.Max(0, Math.Min(startPt.Y, goalPt.Y) - pad);
+        double maxX = Math.Max(startPt.X, goalPt.X) + pad;
+        double maxY = Math.Max(startPt.Y, goalPt.Y) + pad;
 
         int cols = (int)Math.Round((maxX - minX) / g) + 1;
         int rows = (int)Math.Round((maxY - minY) / g) + 1;
@@ -2706,18 +2723,18 @@ public class FlowChartWindow : Window
         foreach (var seg in otherSegs) MarkSegment(pen, seg, minX, minY, g, cols, rows, linePenalty);
 
         int Cc(double v, int max) => Math.Clamp((int)Math.Round(v), 0, max);
-        int sc = Cc((start.X - minX) / g, cols - 1), sr = Cc((start.Y - minY) / g, rows - 1);
-        int gc = Cc((goal.X  - minX) / g, cols - 1), gr = Cc((goal.Y  - minY) / g, rows - 1);
+        int sc = Cc((startPt.X - minX) / g, cols - 1), sr = Cc((startPt.Y - minY) / g, rows - 1);
+        int gc = Cc((goalPt.X  - minX) / g, cols - 1), gr = Cc((goalPt.Y  - minY) / g, rows - 1);
         blk[sc, sr] = false; blk[gc, gr] = false;   // endpoints must be enterable
         pen[sc, sr] = 0; pen[gc, gr] = 0;            // don't punish entering/leaving at the endpoints
 
         var cells = AStar(blk, cols, rows, sc, sr, gc, gr, pen);
         if (cells is null) return simple;
 
-        // Cells → points, with the exact node-edge endpoints, then drop redundant collinear points.
-        var pts = new List<Point> { start };
+        // Edge point → (stub via the first cell) → … → stub → edge point; drop redundant collinear points.
+        var pts = new List<Point> { exitEdge };
         foreach (var (c, r) in cells) pts.Add(new Point(minX + c * g, minY + r * g));
-        pts.Add(goal);
+        pts.Add(entryEdge);
         return Simplify(pts);
     }
 
