@@ -2598,33 +2598,38 @@ public class FlowChartWindow : Window
     static List<Point> OrthoRoute(Rect s, Rect t, ISet<char>? srcBusy = null, ISet<char>? dstBusy = null)
     {
         var sc = s.Center; var tc = t.Center;
-        double dx = tc.X - sc.X, dy = tc.Y - sc.Y;
-        // Departure bias: prefer leaving from the bottom/right (the "forward" edges). Only fall back to a
-        // top/left exit when the target is up and/or left with no forward option. So a target down-left
-        // exits at the BOTTOM (not the left, where an incoming arrow often sits), down-right by dominance.
+        double dx = tc.X - sc.X, dy = tc.Y - sc.Y, adx = Math.Abs(dx), ady = Math.Abs(dy);
         bool down = dy > 0, right = dx > 0;
-        bool vertical = (down && right) ? Math.Abs(dy) >= Math.Abs(dx)
-                       : down  ? true
-                       : right ? false
-                       : Math.Abs(dy) >= Math.Abs(dx);   // up-left: by dominance
+        bool Busy(char c) => srcBusy?.Contains(c) ?? false;
 
-        // If the chosen exit edge already carries another connection but the alternative axis' edge is
-        // free, switch axes — so a new line doesn't depart from a side that already has an arrow.
-        char SrcSide(bool vert) => vert ? (down ? 'B' : 'T') : (right ? 'R' : 'L');
-        if (srcBusy is { Count: > 0 } && srcBusy.Contains(SrcSide(vertical)) && !srcBusy.Contains(SrcSide(!vertical)))
-            vertical = !vertical;
+        // Departure-edge rule (auto-routing only): prefer the forward edges BOTTOM / RIGHT. Leave LEFT only
+        // when the target is left AND below (never above) and the left edge is free. Backward (upward)
+        // targets — e.g. a loop — leave to the RIGHT and go around, not out the left/top where the incoming
+        // arrows usually sit.
+        char ex;
+        if (right && down) ex = ady >= adx ? 'B' : 'R';                // down-right by dominance
+        else if (right)    ex = 'R';                                   // up-right
+        else if (down)     ex = (adx > ady && !Busy('L')) ? 'L' : 'B'; // down-left: left if free+dominant, else bottom
+        else               ex = 'R';                                   // up / up-left / straight up → loop to the right
+        if (Busy(ex)) foreach (var c in new[] { 'R', 'B', 'T', 'L' }) { if (!Busy(c)) { ex = c; break; } }
 
+        bool vertical = ex is 'B' or 'T';
+        var exit = ex switch
+        {
+            'B' => new Point(sc.X, s.Bottom),
+            'T' => new Point(sc.X, s.Top),
+            'R' => new Point(s.Right, sc.Y),
+            _   => new Point(s.Left, sc.Y),
+        };
         if (vertical)
         {
-            var exit  = new Point(sc.X, dy >= 0 ? s.Bottom : s.Top);
-            var entry = new Point(tc.X, dy >= 0 ? t.Top    : t.Bottom);
+            var entry = new Point(tc.X, dy >= 0 ? t.Top : t.Bottom);
             double midY = (exit.Y + entry.Y) / 2;
             return new() { exit, new(exit.X, midY), new(entry.X, midY), entry };
         }
         else
         {
-            var exit  = new Point(dx >= 0 ? s.Right : s.Left, sc.Y);
-            var entry = new Point(dx >= 0 ? t.Left  : t.Right, tc.Y);
+            var entry = new Point(dx >= 0 ? t.Left : t.Right, tc.Y);
             double midX = (exit.X + entry.X) / 2;
             return new() { exit, new(midX, exit.Y), new(midX, entry.Y), entry };
         }
