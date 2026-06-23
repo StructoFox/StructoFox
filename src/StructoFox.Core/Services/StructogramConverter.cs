@@ -63,6 +63,21 @@ public static class StructogramConverter
                 var to = Resolve(c, 0);
                 if (to is not null && _nodes.ContainsKey(to)) list.Add(new Edge(to, c.Label ?? ""));
             }
+
+            // Connector pairs (Sammelpunkte) replace a drawn line: a terminal connector "A" (a line goes IN,
+            // none out) continues at the matching connector "A" that has an outgoing edge. Link them so the
+            // flow follows the jump — when the match is unambiguous.
+            var connectors = fc.Nodes.Where(n => n.Kind == FlowNodeKind.Connector).ToList();
+            foreach (var ex in connectors)
+            {
+                if (_succ[ex.Id].Count > 0) continue;                       // already has its own continuation
+                var label = (ex.Text ?? "").Trim();
+                if (label.Length == 0) continue;
+                var entries = connectors.Where(d => d.Id != ex.Id
+                        && string.Equals((d.Text ?? "").Trim(), label, StringComparison.OrdinalIgnoreCase)
+                        && _succ[d.Id].Count > 0).ToList();
+                if (entries.Count == 1) _succ[ex.Id].Add(new Edge(entries[0].Id, ""));
+            }
         }
 
         // Successors of a node id — never throws on an unknown id.
@@ -86,7 +101,9 @@ public static class StructogramConverter
                 }
                 if (!_nodes.TryGetValue(cur, out var node)) break;
                 if (node.Kind == FlowNodeKind.End) break;
-                if (node.Kind == FlowNodeKind.Start) { cur = One(cur); continue; }
+                // Start, collector points (Sammelpunkte) and junctions are transparent: they carry no
+                // statement of their own, the flow just passes through to the successor.
+                if (node.Kind is FlowNodeKind.Start or FlowNodeKind.Connector or FlowNodeKind.Junction) { cur = One(cur); continue; }
 
                 var outs = Succ(cur);
 
