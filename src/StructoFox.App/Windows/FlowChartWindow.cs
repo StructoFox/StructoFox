@@ -2204,9 +2204,10 @@ public class FlowChartWindow : Window
         var affected = new HashSet<string>();
         foreach (var c in _data.Connections)
             if (c.FromId == nodeId || c.ToId == nodeId) { AlignManualEnds(c); RenderConnection(c); affected.Add(c.Id); }
-        // Any line tapping onto a re-routed line must follow its new path.
-        foreach (var c in _data.Connections)
-            if (!string.IsNullOrEmpty(c.ToTapConn) && affected.Contains(c.ToTapConn)) RenderConnection(c);
+        // Any line tapping onto a re-routed line must follow its new path — and lines tapping onto THOSE
+        // (nested taps), recursively, so a whole tap chain re-renders instead of leaving the deeper ones
+        // stale/collapsed.
+        foreach (var id in affected) RenderTapChain(id, 0);
         RenderTapDots();
     }
 
