@@ -1742,14 +1742,22 @@ public class FlowChartWindow : Window
         if (targetHoriz)
         {
             // target horizontal → final approach must be VERTICAL: exit top/bottom, across to tp.X, then in.
-            var exit = new Point(sc.X, sc.Y <= tp.Y ? s.Bottom : s.Top);
+            double exitY = sc.Y <= tp.Y ? s.Bottom : s.Top;
+            var exit = new Point(sc.X, exitY);
             pts = new() { exit, new Point(tp.X, exit.Y), tp };
         }
         else
         {
-            // target vertical → final approach must be HORIZONTAL: exit left/right, up/down to tp.Y, then in.
-            var exit = new Point(sc.X <= tp.X ? s.Right : s.Left, sc.Y);
-            pts = new() { exit, new Point(exit.X, tp.Y), tp };
+            // target vertical → final approach must be HORIZONTAL: exit a side, up/down to tp.Y, then in.
+            // Normally exit TOWARD the line (short). But for a loop-back (tap point ABOVE the source) exit
+            // the side AWAY from the line and wrap up the outside, so it doesn't run up in front of the
+            // source (which looked like the source was skipped).
+            bool lineLeft = tp.X <= sc.X;
+            bool loopUp   = tp.Y < sc.Y - 1;
+            double exitX = loopUp ? (lineLeft ? s.Right : s.Left)    // wrap around the outside
+                                  : (lineLeft ? s.Left  : s.Right);  // short, toward the line
+            var exit = new Point(exitX, sc.Y);
+            pts = new() { exit, new Point(exitX, tp.Y), tp };
         }
         return Simplify(Orthogonalize(pts));
     }
