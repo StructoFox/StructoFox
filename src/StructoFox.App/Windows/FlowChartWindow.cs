@@ -48,6 +48,18 @@ public class FlowChartWindow : Window
     Point?   _mousePos;    // last pointer position over the canvas (null when outside) — for paste-at-cursor
     Dictionary<string, Point>? _dragStart;   // start positions of all selected nodes during a multi-drag
     Dictionary<string, Point>? _dragTapStart;// start anchors of taps whose target line moves as a whole
+    Dictionary<string, List<Point>>? _dragWpStart;   // start waypoints of lines that move as a whole
+
+    // A connection moves rigidly with the group if every node it depends on is in the moved set: a
+    // node-to-node line needs both ends; a tap needs its source plus its target line's two ends.
+    bool MovesRigidly(FlowConnection c, HashSet<string> moved)
+    {
+        if (!string.IsNullOrEmpty(c.ToTapConn))
+            return moved.Contains(c.FromId)
+                && _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
+                && moved.Contains(tgt.FromId) && moved.Contains(tgt.ToId);
+        return moved.Contains(c.FromId) && moved.Contains(c.ToId);
+    }
 
     Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
@@ -1169,6 +1181,11 @@ public class FlowChartWindow : Window
                     .Where(c => _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
                                 && movedSet.Contains(tgt.FromId) && movedSet.Contains(tgt.ToId))
                     .ToDictionary(c => c.Id, c => new Point(c.ToTapX, c.ToTapY));
+                // Manual waypoints are absolute coords — a line that moves AS A WHOLE must carry them along,
+                // else its bends stay put while the ends move (the line distorts). Snapshot those too.
+                _dragWpStart = _data.Connections
+                    .Where(c => c.Waypoints.Count > 0 && MovesRigidly(c, movedSet))
+                    .ToDictionary(c => c.Id, c => c.Waypoints.Select(w => new Point(w.X, w.Y)).ToList());
             }
             // Snap the dragged node's CENTRE to the grid; shift the rest of the selection by the same delta.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
@@ -1179,6 +1196,12 @@ public class FlowChartWindow : Window
             if (_dragTapStart is not null)
                 foreach (var (cid, a) in _dragTapStart)
                     if (_data.Connections.FirstOrDefault(x => x.Id == cid) is { } tc) { tc.ToTapX = a.X + dx; tc.ToTapY = a.Y + dy; }
+            // Shift the manual waypoints of lines that move as a whole, so their bends travel with them.
+            if (_dragWpStart is not null)
+                foreach (var (cid, wps) in _dragWpStart)
+                    if (_data.Connections.FirstOrDefault(x => x.Id == cid) is { } wc)
+                        for (int i = 0; i < wc.Waypoints.Count && i < wps.Count; i++)
+                        { wc.Waypoints[i].X = wps[i].X + dx; wc.Waypoints[i].Y = wps[i].Y + dy; }
             foreach (var (id, start) in _dragStart)
             {
                 var nd = _data.Nodes.FirstOrDefault(n => n.Id == id);
@@ -1198,7 +1221,7 @@ public class FlowChartWindow : Window
             {
                 dragging = false; _liveDrag = false;
                 var moved = _dragStart?.Keys.ToList() ?? new List<string> { node.Id };
-                _dragStart = null; _dragTapStart = null;
+                _dragStart = null; _dragTapStart = null; _dragWpStart = null;
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
                 foreach (var id in moved)
                 {
