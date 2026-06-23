@@ -2229,18 +2229,38 @@ public class FlowChartWindow : Window
     // after everything's placed avoids the half-moved, collapsing/jumping intermediate states.
     void RerouteAfterMove(HashSet<string> movedSet)
     {
-        var rendered = new HashSet<string>();
-        void Do(FlowConnection c, bool align)
-        {
-            if (!rendered.Add(c.Id)) return;
-            if (align && c.Waypoints.Count > 0 && !(_dragWpStart?.ContainsKey(c.Id) ?? false)) AlignManualEnds(c);
-            RenderConnection(c);
-            RenderTapChain(c.Id, 0);
-        }
+        // 1) Which connections need re-rendering: those touching a moved node or whose geometry was shifted,
+        //    plus everything tapping onto them (transitively).
+        var need = new HashSet<string>();
         foreach (var c in _data.Connections)
-            if (movedSet.Contains(c.FromId) || movedSet.Contains(c.ToId)) Do(c, align: true);
-        if (_dragTapStart is not null) foreach (var id in _dragTapStart.Keys) if (_data.Connections.FirstOrDefault(x => x.Id == id) is { } c) Do(c, align: false);
-        if (_dragWpStart is not null)  foreach (var id in _dragWpStart.Keys)  if (_data.Connections.FirstOrDefault(x => x.Id == id) is { } c) Do(c, align: false);
+            if (movedSet.Contains(c.FromId) || movedSet.Contains(c.ToId)
+                || (_dragTapStart?.ContainsKey(c.Id) ?? false) || (_dragWpStart?.ContainsKey(c.Id) ?? false))
+                need.Add(c.Id);
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            foreach (var c in _data.Connections)
+                if (!string.IsNullOrEmpty(c.ToTapConn) && need.Contains(c.ToTapConn) && need.Add(c.Id)) grew = true;
+        }
+
+        // 2) Render in dependency order: a line renders once its target is rendered (or its target isn't in
+        //    the set / is a node), so a tap always sees its target's up-to-date points. Avoids the stale
+        //    projection that wobbled deep tap chains.
+        var done = new HashSet<string>();
+        for (bool progress = true; progress;)
+        {
+            progress = false;
+            foreach (var id in need)
+            {
+                if (done.Contains(id) || _data.Connections.FirstOrDefault(x => x.Id == id) is not { } c) continue;
+                bool ready = string.IsNullOrEmpty(c.ToTapConn) || !need.Contains(c.ToTapConn) || done.Contains(c.ToTapConn);
+                if (!ready) continue;
+                if (c.Waypoints.Count > 0 && !(_dragWpStart?.ContainsKey(c.Id) ?? false)) AlignManualEnds(c);
+                RenderConnection(c); done.Add(id); progress = true;
+            }
+        }
+        foreach (var id in need)   // any leftover (e.g. a tap cycle) — render anyway
+            if (!done.Contains(id) && _data.Connections.FirstOrDefault(x => x.Id == id) is { } c) RenderConnection(c);
         RenderTapDots();
     }
 
