@@ -61,6 +61,19 @@ public class FlowChartWindow : Window
         return moved.Contains(c.FromId) && moved.Contains(c.ToId);
     }
 
+    // Does the connection with this id move rigidly with the group? A node-to-node line needs both ends in
+    // the moved set; a tap needs its source plus its target line (recursively). Used to decide whether a
+    // tap's anchor should shift with the move (the anchor lives on the target line).
+    bool TargetRigid(string connId, HashSet<string> moved, int depth)
+    {
+        if (depth > 32) return false;
+        var t = _data.Connections.FirstOrDefault(x => x.Id == connId);
+        if (t is null) return false;
+        if (!string.IsNullOrEmpty(t.ToTapConn))
+            return moved.Contains(t.FromId) && TargetRigid(t.ToTapConn, moved, depth + 1);
+        return moved.Contains(t.FromId) && moved.Contains(t.ToId);
+    }
+
     Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
     bool   _selecting;  Point _selStart;             // left-drag selection on empty canvas
@@ -1176,10 +1189,10 @@ public class FlowChartWindow : Window
                 // A tap whose target line moves AS A WHOLE (both its nodes are in the group) should travel
                 // with it — snapshot those anchors so they shift by the same delta.
                 var movedSet = _dragStart.Keys.ToHashSet();
+                // A tap's anchor rides on its target line, so shift it whenever that target moves as a whole
+                // — resolved recursively through tap chains, so nested taps-on-taps travel along too.
                 _dragTapStart = _data.Connections
-                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn))
-                    .Where(c => _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
-                                && movedSet.Contains(tgt.FromId) && movedSet.Contains(tgt.ToId))
+                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn) && TargetRigid(c.ToTapConn, movedSet, 0))
                     .ToDictionary(c => c.Id, c => new Point(c.ToTapX, c.ToTapY));
                 // Manual waypoints are absolute coords — a line that moves AS A WHOLE must carry them along,
                 // else its bends stay put while the ends move (the line distorts). Snapshot those too.
