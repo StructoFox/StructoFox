@@ -413,9 +413,10 @@ public class StructogramWindow : Window
     Control LoopBox(NsBlock b, bool preTest)
     {
         var outer = new StackPanel();
+        var kw = preTest ? Loc.S("Struct_KwWhile") : Loc.S("Struct_KwDoWhile");
         var cond = PrimaryLabel(string.IsNullOrWhiteSpace(b.Text)
             ? (preTest ? Loc.S("Struct_PhWhile") : Loc.S("Struct_PhDoWhile"))
-            : b.Text, b);
+            : $"{kw} {b.Text}", b);
         cond.Margin = new(8, 5, 8, 5);
         cond.FontStyle = FontStyle.Italic;
         cond.DoubleTapped += (_, _) => EditText(b);
