@@ -47,32 +47,6 @@ public class FlowChartWindow : Window
     readonly Dictionary<string, List<Point>> _connPts = new();   // last rendered polyline per connection
     Point?   _mousePos;    // last pointer position over the canvas (null when outside) — for paste-at-cursor
     Dictionary<string, Point>? _dragStart;   // start positions of all selected nodes during a multi-drag
-    Dictionary<string, Point>? _dragTapStart;// start anchors of taps whose target line moves as a whole
-    Dictionary<string, List<Point>>? _dragWpStart;   // start waypoints of lines that move as a whole
-
-    // A connection moves rigidly with the group if every node it depends on is in the moved set: a
-    // node-to-node line needs both ends; a tap needs its source plus its target line's two ends.
-    bool MovesRigidly(FlowConnection c, HashSet<string> moved)
-    {
-        if (!string.IsNullOrEmpty(c.ToTapConn))
-            return moved.Contains(c.FromId)
-                && _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
-                && moved.Contains(tgt.FromId) && moved.Contains(tgt.ToId);
-        return moved.Contains(c.FromId) && moved.Contains(c.ToId);
-    }
-
-    // Does the connection with this id move rigidly with the group? A node-to-node line needs both ends in
-    // the moved set; a tap needs its source plus its target line (recursively). Used to decide whether a
-    // tap's anchor should shift with the move (the anchor lives on the target line).
-    bool TargetRigid(string connId, HashSet<string> moved, int depth)
-    {
-        if (depth > 32) return false;
-        var t = _data.Connections.FirstOrDefault(x => x.Id == connId);
-        if (t is null) return false;
-        if (!string.IsNullOrEmpty(t.ToTapConn))
-            return moved.Contains(t.FromId) && TargetRigid(t.ToTapConn, moved, depth + 1);
-        return moved.Contains(t.FromId) && moved.Contains(t.ToId);
-    }
 
     Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
@@ -1186,35 +1160,12 @@ public class FlowChartWindow : Window
                     .Select(id => _data.Nodes.FirstOrDefault(n => n.Id == id))
                     .Where(n => n is not null)
                     .ToDictionary(n => n!.Id, n => new Point(n!.X, n.Y));
-                // A tap whose target line moves AS A WHOLE (both its nodes are in the group) should travel
-                // with it — snapshot those anchors so they shift by the same delta.
-                var movedSet = _dragStart.Keys.ToHashSet();
-                // A tap's anchor rides on its target line, so shift it whenever that target moves as a whole
-                // — resolved recursively through tap chains, so nested taps-on-taps travel along too.
-                _dragTapStart = _data.Connections
-                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn) && TargetRigid(c.ToTapConn, movedSet, 0))
-                    .ToDictionary(c => c.Id, c => new Point(c.ToTapX, c.ToTapY));
-                // Manual waypoints are absolute coords — a line that moves AS A WHOLE must carry them along,
-                // else its bends stay put while the ends move (the line distorts). Snapshot those too.
-                _dragWpStart = _data.Connections
-                    .Where(c => c.Waypoints.Count > 0 && MovesRigidly(c, movedSet))
-                    .ToDictionary(c => c.Id, c => c.Waypoints.Select(w => new Point(w.X, w.Y)).ToList());
             }
             // Snap the dragged node's CENTRE to the grid; shift the rest of the selection by the same delta.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
             var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), node.Height);
             double dx = nx - (_dragStart!.TryGetValue(node.Id, out var s0) ? s0.X : node.X);
             double dy = ny - (_dragStart!.TryGetValue(node.Id, out s0) ? s0.Y : node.Y);
-            // Shift the anchors of taps riding on a fully-moved target line, BEFORE re-rendering them.
-            if (_dragTapStart is not null)
-                foreach (var (cid, a) in _dragTapStart)
-                    if (_data.Connections.FirstOrDefault(x => x.Id == cid) is { } tc) { tc.ToTapX = a.X + dx; tc.ToTapY = a.Y + dy; }
-            // Shift the manual waypoints of lines that move as a whole, so their bends travel with them.
-            if (_dragWpStart is not null)
-                foreach (var (cid, wps) in _dragWpStart)
-                    if (_data.Connections.FirstOrDefault(x => x.Id == cid) is { } wc)
-                        for (int i = 0; i < wc.Waypoints.Count && i < wps.Count; i++)
-                        { wc.Waypoints[i].X = wps[i].X + dx; wc.Waypoints[i].Y = wps[i].Y + dy; }
             foreach (var (id, start) in _dragStart)
             {
                 var nd = _data.Nodes.FirstOrDefault(n => n.Id == id);
@@ -1234,7 +1185,7 @@ public class FlowChartWindow : Window
             {
                 dragging = false; _liveDrag = false;
                 var moved = _dragStart?.Keys.ToList() ?? new List<string> { node.Id };
-                _dragStart = null; _dragTapStart = null; _dragWpStart = null;
+                _dragStart = null;
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
                 foreach (var id in moved)
                 {
