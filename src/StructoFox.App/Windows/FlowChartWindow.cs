@@ -1648,7 +1648,9 @@ public class FlowChartWindow : Window
     static List<Point> ManualRoute(Rect a, Rect b, FlowConnection conn)
     {
         var wps = conn.Waypoints.Select(w => new Point(w.X, w.Y)).ToList();
-        var pts = new List<Point> { EdgeSlide(a, wps[0]) };
+        // Source exit stays at the edge CENTRE (DIN style — outgoing flow leaves an element centred); the
+        // target entry SLIDES to where the line actually arrives so the arrowhead meets the edge head-on.
+        var pts = new List<Point> { EdgeMid(a, wps[0]) };
         pts.AddRange(wps);
         pts.Add(EdgeSlide(b, wps[^1]));
         return Orthogonalize(pts);   // never let a manual route draw a diagonal segment
@@ -1688,28 +1690,23 @@ public class FlowChartWindow : Window
     // outside), and a centred approach still lands dead-centre, exactly as before.
     static Point EdgeSlide(Rect r, Point toward)
     {
-        var c = r.Center;
         double inset = Math.Max(0, Math.Min(6, Math.Min(r.Width, r.Height) / 2 - 1));
         double cx = Math.Clamp(toward.X, r.Left + inset, r.Right  - inset);
         double cy = Math.Clamp(toward.Y, r.Top  + inset, r.Bottom - inset);
 
-        // Pick the edge by the DIRECTION the line approaches from, not by its angle to the centre — so the
-        // end can slide along an edge over its whole length without flipping to a neighbour (which jumped
-        // the endpoint and hid the arrowhead). A point horizontally over the box that is at or beyond the
-        // top/bottom rides that edge; one vertically level with the box that is at or beyond a side rides
-        // that side. The boundary is inclusive, so a waypoint sitting exactly ON the edge still counts.
-        bool withinX = toward.X > r.Left && toward.X < r.Right;
-        bool withinY = toward.Y > r.Top  && toward.Y < r.Bottom;
-        if (withinX && toward.Y <= r.Top)    return new Point(cx, r.Top);
-        if (withinX && toward.Y >= r.Bottom) return new Point(cx, r.Bottom);
-        if (withinY && toward.X <= r.Left)   return new Point(r.Left,  cy);
-        if (withinY && toward.X >= r.Right)  return new Point(r.Right, cy);
-
-        // Diagonally off a corner (or inside): fall back to the facing-edge midpoint by angle.
-        double dx = toward.X - c.X, dy = toward.Y - c.Y;
-        return Math.Abs(dy) >= Math.Abs(dx)
-            ? new Point(cx, dy >= 0 ? r.Bottom : r.Top)
-            : new Point(dx >= 0 ? r.Right : r.Left, cy);
+        // Choose the edge by signed distance to each side (negative = the point is OUTSIDE that side). The
+        // smallest wins: if the point is outside one side, that side's (negative) distance is the smallest,
+        // so the line attaches there; if it's inside/on the box, the nearest side is chosen. Then the end
+        // SLIDES along that edge to line up with the approaching point — so it rides the full length of an
+        // edge without flipping to a neighbour (which jumped the endpoint and hid the arrowhead), and a
+        // point sitting exactly on, or just inside, the edge no longer falls through to a wrong side.
+        double dL = toward.X - r.Left, dR = r.Right  - toward.X;
+        double dT = toward.Y - r.Top,  dB = r.Bottom - toward.Y;
+        double m = Math.Min(Math.Min(dL, dR), Math.Min(dT, dB));
+        if (m == dT) return new Point(cx, r.Top);
+        if (m == dB) return new Point(cx, r.Bottom);
+        if (m == dL) return new Point(r.Left,  cy);
+        return new Point(r.Right, cy);
     }
 
     // Starts dragging a segment. The full current polyline (incl. node-edge ends) is captured as the
@@ -2344,7 +2341,7 @@ public class FlowChartWindow : Window
         if (a is null || b is null) return;
 
         var w0 = c.Waypoints[0];
-        var exit = EdgeSlide(a.Value, new Point(w0.X, w0.Y));
+        var exit = EdgeMid(a.Value, new Point(w0.X, w0.Y));   // exit stays centred (see ManualRoute)
         if (Math.Abs(exit.Y - w0.Y) >= Math.Abs(exit.X - w0.X)) w0.X = exit.X;   // vertical stub → align X
         else                                                    w0.Y = exit.Y;   // horizontal stub → align Y
 
