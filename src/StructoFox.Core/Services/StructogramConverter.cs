@@ -168,14 +168,14 @@ public static class StructogramConverter
                 // instead of a bare "condition" / "!(condition)".
                 if (tBack && !fBack)
                 {
-                    var cond = string.IsNullOrWhiteSpace(tConn.Label) ? node.Text : $"{node.Text} → {tConn.Label}";
+                    var cond = string.IsNullOrWhiteSpace(tConn.Label) ? node.Text : tConn.Label;
                     blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Body = ParseRegion(tConn.ToId, cur, depth + 1) });
                     cur = fConn.ToId;
                     continue;
                 }
                 if (fBack && !tBack)
                 {
-                    var cond = string.IsNullOrWhiteSpace(fConn.Label) ? $"!({node.Text})" : $"{node.Text} → {fConn.Label}";
+                    var cond = string.IsNullOrWhiteSpace(fConn.Label) ? $"!({node.Text})" : fConn.Label;
                     blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Body = ParseRegion(fConn.ToId, cur, depth + 1) });
                     cur = tConn.ToId;
                     continue;
