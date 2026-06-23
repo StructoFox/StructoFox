@@ -1749,7 +1749,13 @@ public class FlowChartWindow : Window
         var ar = new Rect(approach.X, approach.Y, 0, 0);
         var head = _liveDrag ? OrthoRoute(s, ar)
                              : OrthoRouteAvoiding(s, ar, conn.FromId, "", conn.Id, endsOnLine: true);
-        var pts = new List<Point>(head) { tp };
+        // Clean the final approach: drop any short grid-staircase right before the line, then add one
+        // straight perpendicular stub into the meeting point (no zig-zag at the end).
+        var pts = new List<Point>(head);
+        while (pts.Count > 1 && Dist(pts[^1], tp) < g * 1.6) pts.RemoveAt(pts.Count - 1);
+        var lastp = pts[^1];
+        pts.Add(targetHoriz ? new Point(tp.X, lastp.Y) : new Point(lastp.X, tp.Y));
+        pts.Add(tp);
         return Simplify(Orthogonalize(pts));
     }
 
@@ -2705,11 +2711,19 @@ public class FlowChartWindow : Window
         if (s.Width > 0 || s.Height > 0) { var od = Outward(s, exitEdge);  startPt = new(exitEdge.X + od.X * g, exitEdge.Y + od.Y * g); }
         if (t.Width > 0 || t.Height > 0) { var id = Outward(t, entryEdge); goalPt  = new(entryEdge.X + id.X * g, entryEdge.Y + id.Y * g); }
 
-        double pad = 5 * g;
-        double minX = Math.Max(0, Math.Min(startPt.X, goalPt.X) - pad);
-        double minY = Math.Max(0, Math.Min(startPt.Y, goalPt.Y) - pad);
-        double maxX = Math.Max(startPt.X, goalPt.X) + pad;
-        double maxY = Math.Max(startPt.Y, goalPt.Y) + pad;
+        // The search area must be wide/tall enough to actually route AROUND obstacles, not just span the
+        // endpoints — so include every obstacle's extent, then a margin. (A narrow band left no room to go
+        // around boxes wider than the band, and A* failed → fell back to the straight-through route.)
+        double pad = 3 * g;
+        double minX = Math.Min(startPt.X, goalPt.X), minY = Math.Min(startPt.Y, goalPt.Y);
+        double maxX = Math.Max(startPt.X, goalPt.X), maxY = Math.Max(startPt.Y, goalPt.Y);
+        foreach (var o in obstacles)
+        {
+            minX = Math.Min(minX, o.X); minY = Math.Min(minY, o.Y);
+            maxX = Math.Max(maxX, o.Right); maxY = Math.Max(maxY, o.Bottom);
+        }
+        minX = Math.Max(0, minX - pad); minY = Math.Max(0, minY - pad);
+        maxX += pad; maxY += pad;
 
         int cols = (int)Math.Round((maxX - minX) / g) + 1;
         int rows = (int)Math.Round((maxY - minY) / g) + 1;
