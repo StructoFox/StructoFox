@@ -39,6 +39,7 @@ public class FlowChartWindow : Window
     string?  _connectFromId;
     Line?    _rubberBand;
     readonly HashSet<string> _selected = new();
+    readonly HashSet<string> _flaggedNodes = new();   // nodes the last structogram conversion couldn't structure
     double   _zoom = 1.0;
     bool     _liveDrag;    // a node is being dragged → route attached arrows cheaply (no A*) until release
     bool     _culling;     // re-entrancy guard for viewport culling
@@ -949,25 +950,23 @@ public class FlowChartWindow : Window
         }
 
         var title = string.IsNullOrEmpty(_data.Title) ? Loc.S("Common_Untitled") : _data.Title;
-        var sd = StructogramConverter.Convert(_data, title);
-        StructogramService.Save(_projFolder, _key, sd);
+        var sd = StructogramConverter.Convert(_data, title, out var unstructured);
 
-        if (AnyFlagged(sd.Root))
-            await MessageDialog.Show(this, Loc.S("Flow_ToStructogramPartial"), Loc.S("Flow_ToStructogramTitle"));
+        // Mark the unconvertible nodes orange in the PAP — that's where they can be fixed (marking the
+        // half-built structogram wouldn't help). Clears whatever was flagged before.
+        _flaggedNodes.Clear();
+        foreach (var id in unstructured) _flaggedNodes.Add(id);
+        RebuildAll();
 
-        DiagramWindows.OpenOrActivate(DiagramWindows.StructId(_projFolder, _key), () => new StructogramWindow(_projFolder, _key, title, _themePath));
-    }
-
-    // Recursively reports whether any block in the tree was flagged as unstructurable.
-    static bool AnyFlagged(List<NsBlock> blocks)
-    {
-        foreach (var b in blocks)
+        if (_flaggedNodes.Count > 0)
         {
-            if (b.Flagged) return true;
-            if (AnyFlagged(b.Body) || AnyFlagged(b.Else)) return true;
-            foreach (var arm in b.Arms) if (AnyFlagged(arm.Body)) return true;
+            // Don't write/open a misleading partial structogram — point the user at the PAP instead.
+            await MessageDialog.Show(this, Loc.S("Flow_ToStructogramPartial"), Loc.S("Flow_ToStructogramTitle"));
+            return;
         }
-        return false;
+
+        StructogramService.Save(_projFolder, _key, sd);
+        DiagramWindows.OpenOrActivate(DiagramWindows.StructId(_projFolder, _key), () => new StructogramWindow(_projFolder, _key, title, _themePath));
     }
 
     // Switches edit mode, cancelling any in-progress connection and clearing selection outside Select.
@@ -1120,6 +1119,19 @@ public class FlowChartWindow : Window
             };
             ToolTip.SetTip(mark, Loc.S("Flow_ExtOutsideSet"));
             inner.Children.Add(mark);
+        }
+
+        // Marked orange when the last structogram conversion couldn't structure this node — so the user
+        // sees WHERE to fix it in the PAP itself (clears on the next edit/convert).
+        if (_flaggedNodes.Contains(node.Id))
+        {
+            var warn = new Border
+            {
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0xF5, 0x7F, 0x17)), BorderThickness = new(3),
+                CornerRadius = new(4), IsHitTestVisible = false, Margin = new(-3),
+            };
+            ToolTip.SetTip(warn, Loc.S("Flow_ToStructogramNodeTip"));
+            inner.Children.Add(warn);
         }
 
         // Transparent container = the draggable/selectable hit area; carries the selection glow.

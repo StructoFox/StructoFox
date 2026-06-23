@@ -11,9 +11,14 @@ namespace StructoFox.Core;
 /// </summary>
 public static class StructogramConverter
 {
-    public static StructogramData Convert(FlowChartData fc, string title)
+    public static StructogramData Convert(FlowChartData fc, string title) => Convert(fc, title, out _);
+
+    /// <summary>Converts and also reports the flowchart node ids the converter could NOT structure, so the
+    /// caller can mark them in the PAP (where they can actually be fixed).</summary>
+    public static StructogramData Convert(FlowChartData fc, string title, out List<string> unstructured)
     {
         var sd = new StructogramData { Title = title };
+        unstructured = new List<string>();
         if (fc.Nodes.Count == 0) return sd;
 
         var ctx = new Ctx(fc);
@@ -29,6 +34,7 @@ public static class StructogramConverter
         }
 
         sd.Root.AddRange(ctx.ParseRegion(entry, null, 0));
+        unstructured = ctx.Flagged.ToList();
         return sd;
     }
 
@@ -40,6 +46,7 @@ public static class StructogramConverter
         private readonly Dictionary<string, List<Edge>> _succ;
         private static readonly List<Edge> _noEdges = new();
         private int _budget = 2000;   // overall block budget (guards against pathological graphs)
+        public readonly HashSet<string> Flagged = new();   // flowchart node ids that could not be structured
 
         public Ctx(FlowChartData fc)
         {
@@ -96,6 +103,7 @@ public static class StructogramConverter
             {
                 if (--_budget <= 0 || ++localGuard > 1000 || depth > 200)
                 {
+                    if (cur is not null) Flagged.Add(cur);
                     blocks.Add(Flag("diagram too complex or cyclic to structure here"));
                     break;
                 }
@@ -169,6 +177,7 @@ public static class StructogramConverter
                 }
 
                 // 3) Anything else (both branches loop, irreducible) → flag and stop.
+                Flagged.Add(node.Id);
                 blocks.Add(Flag($"unstructured branch at: {Short(node.Text)}"));
                 break;
             }
