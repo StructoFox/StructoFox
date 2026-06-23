@@ -1648,9 +1648,9 @@ public class FlowChartWindow : Window
     static List<Point> ManualRoute(Rect a, Rect b, FlowConnection conn)
     {
         var wps = conn.Waypoints.Select(w => new Point(w.X, w.Y)).ToList();
-        var pts = new List<Point> { EdgeMid(a, wps[0]) };
+        var pts = new List<Point> { EdgeSlide(a, wps[0]) };
         pts.AddRange(wps);
-        pts.Add(EdgeMid(b, wps[^1]));
+        pts.Add(EdgeSlide(b, wps[^1]));
         return Orthogonalize(pts);   // never let a manual route draw a diagonal segment
     }
 
@@ -1678,6 +1678,22 @@ public class FlowChartWindow : Window
         return Math.Abs(dy) >= Math.Abs(dx)
             ? new Point(c.X, dy >= 0 ? r.Bottom : r.Top)
             : new Point(dx >= 0 ? r.Right : r.Left, c.Y);
+    }
+
+    // Like EdgeMid, but the attach point SLIDES ALONG the facing edge to line up with the approaching
+    // point (clamped within the edge, kept a small inset from the corners). So a manually-routed end meets
+    // the symbol perpendicularly right where the line arrives — instead of always snapping to the edge
+    // centre, which drew a slanted final approach and hid the arrowhead behind the symbol when the stub
+    // was dragged off-centre. The chosen edge is still the one facing the point (so the head stays on the
+    // outside), and a centred approach still lands dead-centre, exactly as before.
+    static Point EdgeSlide(Rect r, Point toward)
+    {
+        var c = r.Center;
+        double dx = toward.X - c.X, dy = toward.Y - c.Y;
+        double inset = Math.Max(0, Math.Min(12, Math.Min(r.Width, r.Height) / 2 - 1));
+        return Math.Abs(dy) >= Math.Abs(dx)
+            ? new Point(Math.Clamp(toward.X, r.Left + inset, r.Right - inset), dy >= 0 ? r.Bottom : r.Top)
+            : new Point(dx >= 0 ? r.Right : r.Left, Math.Clamp(toward.Y, r.Top + inset, r.Bottom - inset));
     }
 
     // Starts dragging a segment. The full current polyline (incl. node-edge ends) is captured as the
@@ -2312,12 +2328,12 @@ public class FlowChartWindow : Window
         if (a is null || b is null) return;
 
         var w0 = c.Waypoints[0];
-        var exit = EdgeMid(a.Value, new Point(w0.X, w0.Y));
+        var exit = EdgeSlide(a.Value, new Point(w0.X, w0.Y));
         if (Math.Abs(exit.Y - w0.Y) >= Math.Abs(exit.X - w0.X)) w0.X = exit.X;   // vertical stub → align X
         else                                                    w0.Y = exit.Y;   // horizontal stub → align Y
 
         var wl = c.Waypoints[^1];
-        var entry = EdgeMid(b.Value, new Point(wl.X, wl.Y));
+        var entry = EdgeSlide(b.Value, new Point(wl.X, wl.Y));
         if (Math.Abs(entry.Y - wl.Y) >= Math.Abs(entry.X - wl.X)) wl.X = entry.X;
         else                                                      wl.Y = entry.Y;
     }
