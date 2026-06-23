@@ -47,6 +47,28 @@ public class FlowChartWindow : Window
     readonly Dictionary<string, List<Point>> _connPts = new();   // last rendered polyline per connection
     Point?   _mousePos;    // last pointer position over the canvas (null when outside) — for paste-at-cursor
     Dictionary<string, Point>? _dragStart;   // start positions of all selected nodes during a multi-drag
+    Dictionary<string, Point>? _dragTapStart;        // start anchors of taps whose target moves with the group
+    Dictionary<string, List<Point>>? _dragWpStart;   // start waypoints of lines that move as a whole
+
+    // Does the connection move rigidly with the group (everything it depends on is in the moved set)?
+    // node-to-node: both ends; tap: its source plus its target line (recursively, through tap chains).
+    bool MovesRigidly(FlowConnection c, HashSet<string> moved, int depth = 0)
+    {
+        if (depth > 32) return false;
+        if (!string.IsNullOrEmpty(c.ToTapConn))
+            return moved.Contains(c.FromId)
+                && _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
+                && MovesRigidly(tgt, moved, depth + 1);
+        return moved.Contains(c.FromId) && moved.Contains(c.ToId);
+    }
+
+    // Does the TARGET line (this id) move rigidly? Used to decide if a tap's anchor (which lives on that
+    // line) should shift with the move.
+    bool TargetRigid(string connId, HashSet<string> moved, int depth)
+    {
+        var t = _data.Connections.FirstOrDefault(x => x.Id == connId);
+        return t is not null && MovesRigidly(t, moved, depth);
+    }
 
     Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
@@ -1160,12 +1182,22 @@ public class FlowChartWindow : Window
                     .Select(id => _data.Nodes.FirstOrDefault(n => n.Id == id))
                     .Where(n => n is not null)
                     .ToDictionary(n => n!.Id, n => new Point(n!.X, n.Y));
+                var movedSet = _dragStart.Keys.ToHashSet();
+                // Snapshot the geometry that should travel rigidly with the group (like paste's offset):
+                // tap anchors whose target line moves, and waypoints of lines that move as a whole.
+                _dragTapStart = _data.Connections
+                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn) && TargetRigid(c.ToTapConn, movedSet, 0))
+                    .ToDictionary(c => c.Id, c => new Point(c.ToTapX, c.ToTapY));
+                _dragWpStart = _data.Connections
+                    .Where(c => c.Waypoints.Count > 0 && MovesRigidly(c, movedSet))
+                    .ToDictionary(c => c.Id, c => c.Waypoints.Select(w => new Point(w.X, w.Y)).ToList());
             }
             // Snap the dragged node's CENTRE to the grid; shift the rest of the selection by the same delta.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
             var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), node.Height);
             double dx = nx - (_dragStart!.TryGetValue(node.Id, out var s0) ? s0.X : node.X);
             double dy = ny - (_dragStart!.TryGetValue(node.Id, out s0) ? s0.Y : node.Y);
+            // 1) Move EVERY selected node to its final spot first (no per-node re-routing).
             foreach (var (id, start) in _dragStart)
             {
                 var nd = _data.Nodes.FirstOrDefault(n => n.Id == id);
@@ -1173,8 +1205,11 @@ public class FlowChartWindow : Window
                 nd.X = start.X + dx; nd.Y = start.Y + dy;
                 if (_nodeViews.TryGetValue(id, out var v)) { Canvas.SetLeft(v, nd.X); Canvas.SetTop(v, nd.Y); }
                 GrowCanvasFor(nd.X, nd.Y, nd.Width, nd.Height);
-                UpdateConnectionsFor(id);
             }
+            // 2) Shift the rigid geometry by the same delta (from the snapshots), exactly like paste.
+            ShiftDraggedGeometry(dx, dy);
+            // 3) Now that everything is at its final position, render the affected lines ONCE.
+            RerouteAfterMove(_dragStart.Keys.ToHashSet());
             e.Handled = true;
         };
         container.PointerReleased += (_, e) =>
@@ -1185,7 +1220,7 @@ public class FlowChartWindow : Window
             {
                 dragging = false; _liveDrag = false;
                 var moved = _dragStart?.Keys.ToList() ?? new List<string> { node.Id };
-                _dragStart = null;
+                _dragStart = null; _dragTapStart = null; _dragWpStart = null;   // geometry already shifted to final
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
                 foreach (var id in moved)
                 {
@@ -2172,6 +2207,40 @@ public class FlowChartWindow : Window
         // (nested taps), recursively, so a whole tap chain re-renders instead of leaving the deeper ones
         // stale/collapsed.
         foreach (var id in affected) RenderTapChain(id, 0);
+        RenderTapDots();
+    }
+
+    // Shifts the geometry that travels rigidly with a group move (from the drag-start snapshots) by the
+    // cumulative delta — tap anchors and manual waypoints — exactly like paste offsets them.
+    void ShiftDraggedGeometry(double dx, double dy)
+    {
+        if (_dragTapStart is not null)
+            foreach (var (cid, a) in _dragTapStart)
+                if (_data.Connections.FirstOrDefault(x => x.Id == cid) is { } tc) { tc.ToTapX = a.X + dx; tc.ToTapY = a.Y + dy; }
+        if (_dragWpStart is not null)
+            foreach (var (cid, wps) in _dragWpStart)
+                if (_data.Connections.FirstOrDefault(x => x.Id == cid) is { } wc)
+                    for (int i = 0; i < wc.Waypoints.Count && i < wps.Count; i++)
+                    { wc.Waypoints[i].X = wps[i].X + dx; wc.Waypoints[i].Y = wps[i].Y + dy; }
+    }
+
+    // After all nodes are at their final spot, render the affected lines ONCE: lines touching a moved node,
+    // plus the rigidly-moved lines (whose data was just shifted), plus their tap chains. Rendering only
+    // after everything's placed avoids the half-moved, collapsing/jumping intermediate states.
+    void RerouteAfterMove(HashSet<string> movedSet)
+    {
+        var rendered = new HashSet<string>();
+        void Do(FlowConnection c, bool align)
+        {
+            if (!rendered.Add(c.Id)) return;
+            if (align && c.Waypoints.Count > 0 && !(_dragWpStart?.ContainsKey(c.Id) ?? false)) AlignManualEnds(c);
+            RenderConnection(c);
+            RenderTapChain(c.Id, 0);
+        }
+        foreach (var c in _data.Connections)
+            if (movedSet.Contains(c.FromId) || movedSet.Contains(c.ToId)) Do(c, align: true);
+        if (_dragTapStart is not null) foreach (var id in _dragTapStart.Keys) if (_data.Connections.FirstOrDefault(x => x.Id == id) is { } c) Do(c, align: false);
+        if (_dragWpStart is not null)  foreach (var id in _dragWpStart.Keys)  if (_data.Connections.FirstOrDefault(x => x.Id == id) is { } c) Do(c, align: false);
         RenderTapDots();
     }
 
