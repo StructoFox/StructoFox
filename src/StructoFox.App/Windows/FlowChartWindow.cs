@@ -50,14 +50,16 @@ public class FlowChartWindow : Window
     Dictionary<string, Point>? _dragTapStart;// start anchors of taps whose target line moves as a whole
     Dictionary<string, List<Point>>? _dragWpStart;   // start waypoints of lines that move as a whole
 
-    // A connection moves rigidly with the group if every node it depends on is in the moved set: a
-    // node-to-node line needs both ends; a tap needs its source plus its target line's two ends.
-    bool MovesRigidly(FlowConnection c, HashSet<string> moved)
+    // A connection moves rigidly with the group if everything it depends on does: a node-to-node line
+    // needs both ends in the moved set; a tap needs its source AND its target line to move rigidly too —
+    // resolved recursively, so chains of taps-on-taps all travel together.
+    bool MovesRigidly(FlowConnection c, HashSet<string> moved, int depth = 0)
     {
+        if (depth > 32) return false;
         if (!string.IsNullOrEmpty(c.ToTapConn))
             return moved.Contains(c.FromId)
                 && _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
-                && moved.Contains(tgt.FromId) && moved.Contains(tgt.ToId);
+                && MovesRigidly(tgt, moved, depth + 1);
         return moved.Contains(c.FromId) && moved.Contains(c.ToId);
     }
 
@@ -1177,9 +1179,7 @@ public class FlowChartWindow : Window
                 // with it — snapshot those anchors so they shift by the same delta.
                 var movedSet = _dragStart.Keys.ToHashSet();
                 _dragTapStart = _data.Connections
-                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn))
-                    .Where(c => _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
-                                && movedSet.Contains(tgt.FromId) && movedSet.Contains(tgt.ToId))
+                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn) && MovesRigidly(c, movedSet))
                     .ToDictionary(c => c.Id, c => new Point(c.ToTapX, c.ToTapY));
                 // Manual waypoints are absolute coords — a line that moves AS A WHOLE must carry them along,
                 // else its bends stay put while the ends move (the line distorts). Snapshot those too.
