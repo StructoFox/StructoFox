@@ -2806,7 +2806,14 @@ public class FlowChartWindow : Window
         var otherSegs = endsOnLine ? new List<(Point a, Point b)>() : OtherConnectionSegments(selfId);
         bool hitsNodes = obstacles.Count > 0 && PolyHitsAny(simple, obstacles);
         bool onLines   = !endsOnLine && OverlapsExisting(simple, otherSegs, g);
-        if (!hitsNodes && !onLines) return simple;
+        // Also detect a route that runs straight THROUGH its own end node (they're excluded from obstacles
+        // so it may start/end at their edge — but it must not cut across the body). Shrink the body so a
+        // mere endpoint-touch doesn't count, only a genuine pass-through.
+        var ownBodies = new List<Rect>();
+        if (NodeRect(fromId) is { } frO) ownBodies.Add(frO.Inflate(-2));
+        if (NodeRect(toId)   is { } toO) ownBodies.Add(toO.Inflate(-2));
+        bool throughOwn = PolyHitsAny(simple, ownBodies);
+        if (!hitsNodes && !onLines && !throughOwn) return simple;
 
         // Route A* between the STUB points (one grid straight out of each edge), keeping the exact edge
         // points as the literal ends — so the line still leaves and enters perpendicular even when it has
@@ -2834,12 +2841,19 @@ public class FlowChartWindow : Window
         int rows = (int)Math.Round((maxY - minY) / g) + 1;
         if (cols < 2 || rows < 2 || (long)cols * rows > 40000) return simple;
 
+        // Block cells inside every obstacle AND inside the source/target BODIES (un-inflated) — otherwise
+        // a line could run straight back through its own end node (they're excluded from `obstacles` only
+        // so the route may start/end at their edge). The start/goal cells are freed again below.
+        var blockRects = new List<Rect>(obstacles);
+        if (NodeRect(fromId) is { } frB) blockRects.Add(frB);
+        if (NodeRect(toId)   is { } toB) blockRects.Add(toB);
+
         var blk = new bool[cols, rows];
         for (int c = 0; c < cols; c++)
             for (int r = 0; r < rows; r++)
             {
                 var p = new Point(minX + c * g, minY + r * g);
-                foreach (var o in obstacles) if (o.Contains(p)) { blk[c, r] = true; break; }
+                foreach (var o in blockRects) if (o.Contains(p)) { blk[c, r] = true; break; }
             }
 
         // Soft penalty on cells lying on another line, so A* prefers a clear corridor but never fails.
