@@ -31,7 +31,7 @@ public partial class MainWindow : Window
     static readonly FontFamily Emoji = new("Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji");
 
     /// <summary>Display version of the app, shown in the About box.</summary>
-    public const string Version = "0.5.1 ALPHA";
+    public const string Version = "0.5.2 ALPHA";
 
     string? _project;
     Section _section = Section.Class;
