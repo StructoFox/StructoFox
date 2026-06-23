@@ -1690,22 +1690,26 @@ public class FlowChartWindow : Window
     {
         var c = r.Center;
         double inset = Math.Max(0, Math.Min(6, Math.Min(r.Width, r.Height) / 2 - 1));
+        double cx = Math.Clamp(toward.X, r.Left + inset, r.Right  - inset);
+        double cy = Math.Clamp(toward.Y, r.Top  + inset, r.Bottom - inset);
 
-        // Pick the edge by WHERE the approaching point sits relative to the box, not by its angle from the
-        // centre — so sliding the end stub along an edge keeps it on THAT edge over the whole width/height
-        // instead of flipping to a neighbouring edge partway (which jumped the endpoint and hid the head).
-        bool overX = toward.X >= r.Left && toward.X <= r.Right;   // horizontally above/below the box
-        bool overY = toward.Y >= r.Top  && toward.Y <= r.Bottom;  // level with the box's left/right
-        if (overX && !overY)
-            return new Point(Math.Clamp(toward.X, r.Left + inset, r.Right - inset), toward.Y >= c.Y ? r.Bottom : r.Top);
-        if (overY && !overX)
-            return new Point(toward.X >= c.X ? r.Right : r.Left, Math.Clamp(toward.Y, r.Top + inset, r.Bottom - inset));
+        // Pick the edge by the DIRECTION the line approaches from, not by its angle to the centre — so the
+        // end can slide along an edge over its whole length without flipping to a neighbour (which jumped
+        // the endpoint and hid the arrowhead). A point horizontally over the box that is at or beyond the
+        // top/bottom rides that edge; one vertically level with the box that is at or beyond a side rides
+        // that side. The boundary is inclusive, so a waypoint sitting exactly ON the edge still counts.
+        bool withinX = toward.X > r.Left && toward.X < r.Right;
+        bool withinY = toward.Y > r.Top  && toward.Y < r.Bottom;
+        if (withinX && toward.Y <= r.Top)    return new Point(cx, r.Top);
+        if (withinX && toward.Y >= r.Bottom) return new Point(cx, r.Bottom);
+        if (withinY && toward.X <= r.Left)   return new Point(r.Left,  cy);
+        if (withinY && toward.X >= r.Right)  return new Point(r.Right, cy);
 
         // Diagonally off a corner (or inside): fall back to the facing-edge midpoint by angle.
         double dx = toward.X - c.X, dy = toward.Y - c.Y;
         return Math.Abs(dy) >= Math.Abs(dx)
-            ? new Point(Math.Clamp(toward.X, r.Left + inset, r.Right - inset), dy >= 0 ? r.Bottom : r.Top)
-            : new Point(dx >= 0 ? r.Right : r.Left, Math.Clamp(toward.Y, r.Top + inset, r.Bottom - inset));
+            ? new Point(cx, dy >= 0 ? r.Bottom : r.Top)
+            : new Point(dx >= 0 ? r.Right : r.Left, cy);
     }
 
     // Starts dragging a segment. The full current polyline (incl. node-edge ends) is captured as the
