@@ -47,6 +47,7 @@ public class FlowChartWindow : Window
     readonly Dictionary<string, List<Point>> _connPts = new();   // last rendered polyline per connection
     Point?   _mousePos;    // last pointer position over the canvas (null when outside) — for paste-at-cursor
     Dictionary<string, Point>? _dragStart;   // start positions of all selected nodes during a multi-drag
+    Dictionary<string, Point>? _dragTapStart;// start anchors of taps whose target line moves as a whole
 
     Avalonia.Controls.Shapes.Rectangle? _gridRect;   // the tiled grid behind the diagram
     Avalonia.Controls.Shapes.Rectangle? _selRect;    // rubber-band multi-select rectangle
@@ -1160,12 +1161,24 @@ public class FlowChartWindow : Window
                     .Select(id => _data.Nodes.FirstOrDefault(n => n.Id == id))
                     .Where(n => n is not null)
                     .ToDictionary(n => n!.Id, n => new Point(n!.X, n.Y));
+                // A tap whose target line moves AS A WHOLE (both its nodes are in the group) should travel
+                // with it — snapshot those anchors so they shift by the same delta.
+                var movedSet = _dragStart.Keys.ToHashSet();
+                _dragTapStart = _data.Connections
+                    .Where(c => !string.IsNullOrEmpty(c.ToTapConn))
+                    .Where(c => _data.Connections.FirstOrDefault(x => x.Id == c.ToTapConn) is { } tgt
+                                && movedSet.Contains(tgt.FromId) && movedSet.Contains(tgt.ToId))
+                    .ToDictionary(c => c.Id, c => new Point(c.ToTapX, c.ToTapY));
             }
             // Snap the dragged node's CENTRE to the grid; shift the rest of the selection by the same delta.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
             var ny = SnapCentered(Math.Max(0, pt.Y - offset.Y), node.Height);
             double dx = nx - (_dragStart!.TryGetValue(node.Id, out var s0) ? s0.X : node.X);
             double dy = ny - (_dragStart!.TryGetValue(node.Id, out s0) ? s0.Y : node.Y);
+            // Shift the anchors of taps riding on a fully-moved target line, BEFORE re-rendering them.
+            if (_dragTapStart is not null)
+                foreach (var (cid, a) in _dragTapStart)
+                    if (_data.Connections.FirstOrDefault(x => x.Id == cid) is { } tc) { tc.ToTapX = a.X + dx; tc.ToTapY = a.Y + dy; }
             foreach (var (id, start) in _dragStart)
             {
                 var nd = _data.Nodes.FirstOrDefault(n => n.Id == id);
@@ -1185,7 +1198,7 @@ public class FlowChartWindow : Window
             {
                 dragging = false; _liveDrag = false;
                 var moved = _dragStart?.Keys.ToList() ?? new List<string> { node.Id };
-                _dragStart = null;
+                _dragStart = null; _dragTapStart = null;
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
                 foreach (var id in moved)
                 {
