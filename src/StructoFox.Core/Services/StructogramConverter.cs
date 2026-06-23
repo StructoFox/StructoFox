@@ -163,15 +163,20 @@ public static class StructogramConverter
                 // 2) One branch loops back to the decision → pre-test while loop.
                 bool tBack = Reaches(tConn.ToId, cur);
                 bool fBack = Reaches(fConn.ToId, cur);
+                // The loop runs WHILE the back-edge branch is taken — so label the loop with that branch's
+                // own caption (e.g. "!chicken") when it has one, which keeps the decision's wording visible
+                // instead of a bare "condition" / "!(condition)".
                 if (tBack && !fBack)
                 {
-                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = node.Text, Body = ParseRegion(tConn.ToId, cur, depth + 1) });
+                    var cond = string.IsNullOrWhiteSpace(tConn.Label) ? node.Text : $"{node.Text} → {tConn.Label}";
+                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Body = ParseRegion(tConn.ToId, cur, depth + 1) });
                     cur = fConn.ToId;
                     continue;
                 }
                 if (fBack && !tBack)
                 {
-                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = $"!({node.Text})", Body = ParseRegion(fConn.ToId, cur, depth + 1) });
+                    var cond = string.IsNullOrWhiteSpace(fConn.Label) ? $"!({node.Text})" : $"{node.Text} → {fConn.Label}";
+                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Body = ParseRegion(fConn.ToId, cur, depth + 1) });
                     cur = tConn.ToId;
                     continue;
                 }
