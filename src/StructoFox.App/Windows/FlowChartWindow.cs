@@ -1737,28 +1737,19 @@ public class FlowChartWindow : Window
     // source exits toward the target, runs to the tap's level, then a straight stub into the tap point.
     List<Point> TapRoute(Rect s, Point tp, bool targetHoriz, FlowConnection conn)
     {
+        double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var sc = s.Center;
-        List<Point> pts;
-        if (targetHoriz)
-        {
-            // target horizontal → final approach must be VERTICAL: exit top/bottom, across to tp.X, then in.
-            double exitY = sc.Y <= tp.Y ? s.Bottom : s.Top;
-            var exit = new Point(sc.X, exitY);
-            pts = new() { exit, new Point(tp.X, exit.Y), tp };
-        }
-        else
-        {
-            // target vertical → final approach must be HORIZONTAL: exit a side, up/down to tp.Y, then in.
-            // Normally exit TOWARD the line (short). But for a loop-back (tap point ABOVE the source) exit
-            // the side AWAY from the line and wrap up the outside, so it doesn't run up in front of the
-            // source (which looked like the source was skipped).
-            bool lineLeft = tp.X <= sc.X;
-            bool loopUp   = tp.Y < sc.Y - 1;
-            double exitX = loopUp ? (lineLeft ? s.Right : s.Left)    // wrap around the outside
-                                  : (lineLeft ? s.Left  : s.Right);  // short, toward the line
-            var exit = new Point(exitX, sc.Y);
-            pts = new() { exit, new Point(exitX, tp.Y), tp };
-        }
+        // Approach point: one grid out from the meeting point, perpendicular to the target on the SOURCE's
+        // side — so the final stub meets the line head-on. The head from the source to this point is routed
+        // with full obstacle-avoidance (so it goes AROUND symbols) and the departure-edge/occupancy rule
+        // (so it leaves a sensible free edge), rather than a naive straight L that cuts through symbols.
+        Point approach = targetHoriz
+            ? new Point(tp.X, tp.Y + (sc.Y <= tp.Y ? -g : g))
+            : new Point(tp.X + (sc.X <= tp.X ? -g : g), tp.Y);
+        var ar = new Rect(approach.X, approach.Y, 0, 0);
+        var head = _liveDrag ? OrthoRoute(s, ar)
+                             : OrthoRouteAvoiding(s, ar, conn.FromId, "", conn.Id, endsOnLine: true);
+        var pts = new List<Point>(head) { tp };
         return Simplify(Orthogonalize(pts));
     }
 
@@ -2151,8 +2142,8 @@ public class FlowChartWindow : Window
 
         // Toggle arrowhead: the menu offers the OTHER style (line ⇄ arrow). The current effective state
         // is the explicit override, or the automatic one (no arrow into a junction).
-        bool toJunction = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId)?.Kind == FlowNodeKind.Junction;
-        bool hasArrow   = conn.Arrow ?? !toJunction;
+        bool toTap    = !string.IsNullOrEmpty(conn.ToTapConn);   // matches RenderConnection's default
+        bool hasArrow = conn.Arrow ?? !toTap;
         var style = new MenuItem { Header = hasArrow ? Loc.S("Flow_StyleLine") : Loc.S("Flow_StyleArrow") };
         style.Click += (_, _) => { conn.Arrow = !hasArrow; Save(); RenderConnection(conn); };
         cm.Items.Add(style);
