@@ -101,9 +101,12 @@ public static class StructogramConverter
                 }
                 if (!_nodes.TryGetValue(cur, out var node)) break;
                 if (node.Kind == FlowNodeKind.End) break;
-                // Start, collector points (Sammelpunkte) and junctions are transparent: they carry no
-                // statement of their own, the flow just passes through to the successor.
-                if (node.Kind is FlowNodeKind.Start or FlowNodeKind.Connector or FlowNodeKind.Junction) { cur = One(cur); continue; }
+                if (node.Kind == FlowNodeKind.Start) { cur = One(cur); continue; }
+                // Collector points / junctions carry no statement of their own. With one (or no) exit they
+                // are transparent — the flow passes straight through. But with several exits they ARE the
+                // fan-out (a labelled bus / multi-way), so fall through to the If/Case handling below.
+                if (node.Kind is FlowNodeKind.Connector or FlowNodeKind.Junction && Succ(cur).Count <= 1)
+                { cur = One(cur); continue; }
 
                 var outs = Succ(cur);
 
