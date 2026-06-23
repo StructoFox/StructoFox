@@ -49,6 +49,7 @@ public class FlowChartWindow : Window
     Dictionary<string, Point>? _dragStart;   // start positions of all selected nodes during a multi-drag
     Dictionary<string, Point>? _dragTapStart;        // start anchors of taps whose target moves with the group
     Dictionary<string, List<Point>>? _dragWpStart;   // start waypoints of lines that move as a whole
+    Dictionary<string, List<Point>>? _dragRoute;     // start RENDERED route of rigidly-moving lines (pure translate)
 
     // Does the connection move rigidly with the group (everything it depends on is in the moved set)?
     // node-to-node: both ends; tap: its source plus its target line (recursively, through tap chains).
@@ -1191,6 +1192,11 @@ public class FlowChartWindow : Window
                 _dragWpStart = _data.Connections
                     .Where(c => c.Waypoints.Count > 0 && MovesRigidly(c, movedSet))
                     .ToDictionary(c => c.Id, c => c.Waypoints.Select(w => new Point(w.X, w.Y)).ToList());
+                // Rigidly-moving lines keep their EXACT shape: snapshot their rendered route, then just
+                // translate it (no re-routing) — so nothing "corrects" or springs while moving.
+                _dragRoute = _data.Connections
+                    .Where(c => MovesRigidly(c, movedSet) && _connPts.ContainsKey(c.Id))
+                    .ToDictionary(c => c.Id, c => _connPts[c.Id].ToList());
             }
             // Snap the dragged node's CENTRE to the grid; shift the rest of the selection by the same delta.
             var nx = SnapCentered(Math.Max(0, pt.X - offset.X), node.Width);
@@ -1206,9 +1212,10 @@ public class FlowChartWindow : Window
                 if (_nodeViews.TryGetValue(id, out var v)) { Canvas.SetLeft(v, nd.X); Canvas.SetTop(v, nd.Y); }
                 GrowCanvasFor(nd.X, nd.Y, nd.Width, nd.Height);
             }
-            // 2) Shift the rigid geometry by the same delta (from the snapshots), exactly like paste.
-            ShiftDraggedGeometry(dx, dy);
-            // 3) Now that everything is at its final position, render the affected lines ONCE.
+            // 2) Rigidly-moving lines: just translate their snapshot route by the delta (no re-routing).
+            TranslateRigid(dx, dy);
+            // 3) Only the boundary lines (one end fixed) actually re-route — and after the rigid routes are
+            //    in place, so taps reading them see current points. Render once.
             RerouteAfterMove(_dragStart.Keys.ToHashSet());
             e.Handled = true;
         };
@@ -1219,15 +1226,15 @@ public class FlowChartWindow : Window
             if (dragging)
             {
                 dragging = false; _liveDrag = false;
-                var moved = _dragStart?.Keys.ToList() ?? new List<string> { node.Id };
-                _dragStart = null; _dragTapStart = null; _dragWpStart = null;   // geometry already shifted to final
+                var movedSet = _dragStart?.Keys.ToHashSet() ?? new HashSet<string> { node.Id };
+                // Total delta of the move (from a moved node's start), to commit the rigid geometry.
+                double tdx = 0, tdy = 0;
+                if (_dragStart is not null && _dragStart.TryGetValue(node.Id, out var st)) { tdx = node.X - st.X; tdy = node.Y - st.Y; }
+                ShiftDraggedGeometry(tdx, tdy);   // commit rigid waypoints + tap anchors to their final spot
+                TranslateRigid(tdx, tdy);         // and leave the rigid routes as the exact translated shape
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
-                foreach (var id in moved)
-                {
-                    foreach (var c in _data.Connections)
-                        if ((c.FromId == id || c.ToId == id) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
-                    UpdateConnectionsFor(id);   // re-route attached arrows with full A* now the drag settled
-                }
+                RerouteAfterMove(movedSet);       // boundary lines re-route (rigid still excluded via _dragRoute)
+                _dragStart = null; _dragTapStart = null; _dragWpStart = null; _dragRoute = null;
                 FitCanvas();   // grow/shrink the surface to fit the content (all sides)
                 RenderCrossovers();
                 Save();
@@ -1939,13 +1946,15 @@ public class FlowChartWindow : Window
     }
 
     // Draws one connection: line, arrowhead, a transparent hit-zone for editing, and an optional label.
-    void RenderConnection(FlowConnection conn)
+    void RenderConnection(FlowConnection conn, List<Point>? forcePts = null)
     {
         if (_connViews.TryGetValue(conn.Id, out var old))
             foreach (var v in old) _canvas!.Children.Remove(v);
         _connViews.Remove(conn.Id);
 
-        var pts = RouteOf(conn);
+        // forcePts lets a group-move draw a line as its pre-move route translated by the delta (a pure
+        // shift, no re-routing), so a rigidly-moved line keeps its exact shape instead of being recomputed.
+        var pts = forcePts ?? RouteOf(conn);
         if (pts is null || pts.Count < 2) return;
 
         bool toTap = !string.IsNullOrEmpty(conn.ToTapConn);   // this line ends ON another line (a T-piece)
@@ -2210,6 +2219,21 @@ public class FlowChartWindow : Window
         RenderTapDots();
     }
 
+    // Draws every rigidly-moving line as its pre-move route translated by the delta — a pure shift, no
+    // re-routing, so the shape is identical to before the move.
+    void TranslateRigid(double dx, double dy)
+    {
+        if (_dragRoute is null) return;
+        foreach (var (cid, route) in _dragRoute)
+        {
+            if (_data.Connections.FirstOrDefault(x => x.Id == cid) is not { } c) continue;
+            var tpts = route.Select(p => new Point(p.X + dx, p.Y + dy)).ToList();
+            _connPts[cid] = tpts;
+            RenderConnection(c, tpts);
+        }
+        RenderTapDots();
+    }
+
     // Shifts the geometry that travels rigidly with a group move (from the drag-start snapshots) by the
     // cumulative delta — tap anchors and manual waypoints — exactly like paste offsets them.
     void ShiftDraggedGeometry(double dx, double dy)
@@ -2231,16 +2255,17 @@ public class FlowChartWindow : Window
     {
         // 1) Which connections need re-rendering: those touching a moved node or whose geometry was shifted,
         //    plus everything tapping onto them (transitively).
+        // Rigid lines are already drawn by TranslateRigid — exclude them here so they're never re-routed.
+        bool Rigid(string id) => _dragRoute?.ContainsKey(id) ?? false;
         var need = new HashSet<string>();
         foreach (var c in _data.Connections)
-            if (movedSet.Contains(c.FromId) || movedSet.Contains(c.ToId)
-                || (_dragTapStart?.ContainsKey(c.Id) ?? false) || (_dragWpStart?.ContainsKey(c.Id) ?? false))
+            if (!Rigid(c.Id) && (movedSet.Contains(c.FromId) || movedSet.Contains(c.ToId)))
                 need.Add(c.Id);
         for (bool grew = true; grew;)
         {
             grew = false;
             foreach (var c in _data.Connections)
-                if (!string.IsNullOrEmpty(c.ToTapConn) && need.Contains(c.ToTapConn) && need.Add(c.Id)) grew = true;
+                if (!Rigid(c.Id) && !string.IsNullOrEmpty(c.ToTapConn) && need.Contains(c.ToTapConn) && need.Add(c.Id)) grew = true;
         }
 
         // 2) Render in dependency order: a line renders once its target is rendered (or its target isn't in
