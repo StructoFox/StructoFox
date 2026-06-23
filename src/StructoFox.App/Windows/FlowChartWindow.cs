@@ -1762,14 +1762,20 @@ public class FlowChartWindow : Window
         return Simplify(Orthogonalize(pts));
     }
 
+    readonly HashSet<string> _resolvingTaps = new();   // cycle guard for tap-on-tap resolution
+
     // The tap's meeting point and whether the target line runs horizontally there (so a stub can approach
-    // it perpendicularly). Null if the target is gone or not yet routed. Resolves one level only.
+    // it perpendicularly). Null if the target is gone. Targets may themselves be taps (nested) — resolved
+    // recursively with a cycle guard.
     (Point pt, bool targetHoriz)? TapInfo(FlowConnection conn)
     {
         var target = _data.Connections.FirstOrDefault(c => c.Id == conn.ToTapConn);
         if (target is null) return null;
         List<Point>? pts = _connPts.TryGetValue(target.Id, out var tp) && tp.Count >= 2 ? tp : null;
-        if (pts is null && string.IsNullOrEmpty(target.ToTapConn)) pts = RouteOf(target);   // compute non-tap target
+        if (pts is null && _resolvingTaps.Add(conn.Id))   // compute the target on the fly (incl. nested taps)
+        {
+            try { pts = RouteOf(target); } finally { _resolvingTaps.Remove(conn.Id); }
+        }
         if (pts is null || pts.Count < 2) return null;
         // Project the stored anchor onto the target: a sideways move of the target keeps the anchor's other
         // coordinate, so the stub grows/shrinks instead of dragging the meeting point along.
@@ -1803,16 +1809,7 @@ public class FlowChartWindow : Window
         _connectFromId = null;
         RemoveRubberBand();
 
-        // If the click landed on a tap line (its hit-zone overlaps the base at the meeting point), tap onto
-        // the BASE line it sits on instead — so all T-pieces share one target (they can coincide into the
-        // indicator dot) and no tap nests on another (which also wrongly cascade-deleted them together).
-        for (int guard = 0; !string.IsNullOrEmpty(target.ToTapConn) && guard < 10; guard++)
-        {
-            var baseConn = _data.Connections.FirstOrDefault(c => c.Id == target.ToTapConn);
-            if (baseConn is null) break;
-            target = baseConn;
-        }
-
+        // Tap onto exactly the line that was clicked — even if that line is itself a tap (nested T-pieces).
         // Anchor = the click projected onto the line, snapped to the grid.
         Point anchor = new(Snap(at.X), Snap(at.Y));
         if (_connPts.TryGetValue(target.Id, out var pts) && pts.Count >= 2)
@@ -1839,12 +1836,18 @@ public class FlowChartWindow : Window
     // Removes any tap whose target line no longer exists (e.g. its node was deleted).
     void CleanupTaps()
     {
-        var ids = _data.Connections.Select(c => c.Id).ToHashSet();
-        foreach (var c in _data.Connections.Where(c => !string.IsNullOrEmpty(c.ToTapConn) && !ids.Contains(c.ToTapConn)).ToList())
+        bool changed = true;
+        while (changed)
         {
-            _data.Connections.Remove(c);
-            if (_connViews.TryGetValue(c.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
-            _connViews.Remove(c.Id); _connPts.Remove(c.Id);
+            changed = false;
+            var ids = _data.Connections.Select(c => c.Id).ToHashSet();
+            foreach (var c in _data.Connections.Where(c => !string.IsNullOrEmpty(c.ToTapConn) && !ids.Contains(c.ToTapConn)).ToList())
+            {
+                _data.Connections.Remove(c);
+                if (_connViews.TryGetValue(c.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
+                _connViews.Remove(c.Id); _connPts.Remove(c.Id);
+                changed = true;
+            }
         }
     }
 
@@ -1865,12 +1868,21 @@ public class FlowChartWindow : Window
         RenderTapDots();
     }
 
-    // Re-renders every tap that ends on the given line (after it moved), plus the coincidence dots.
+    // Re-renders every tap that ends on the given line — and any tap riding on THOSE (nested) — plus the
+    // coincidence dots.
     void RenderTapsOnto(string targetId)
     {
-        foreach (var c in _data.Connections)
-            if (c.ToTapConn == targetId) RenderConnection(c);
+        RenderTapChain(targetId, 0);
         RenderTapDots();
+    }
+    void RenderTapChain(string targetId, int depth)
+    {
+        if (depth > 20) return;   // guard against a pathological tap cycle
+        foreach (var c in _data.Connections.Where(c => c.ToTapConn == targetId).ToList())
+        {
+            RenderConnection(c);
+            RenderTapChain(c.Id, depth + 1);
+        }
     }
 
     void RenderTapDots()
@@ -2348,9 +2360,12 @@ public class FlowChartWindow : Window
     // Removes a single connection and its visuals.
     void DeleteConnection(FlowConnection conn)
     {
-        // Lines that tapped onto this one lose their anchor — remove them too.
-        var tappers = _data.Connections.Where(c => c.ToTapConn == conn.Id).ToList();
-        foreach (var c in tappers.Append(conn))
+        // Lines that tapped onto this one lose their anchor — remove them, and anything tapping THOSE
+        // (nested), transitively.
+        var doomed = new List<FlowConnection> { conn };
+        for (int i = 0; i < doomed.Count; i++)
+            doomed.AddRange(_data.Connections.Where(c => c.ToTapConn == doomed[i].Id && !doomed.Contains(c)));
+        foreach (var c in doomed)
         {
             _data.Connections.Remove(c);
             if (_connViews.TryGetValue(c.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
