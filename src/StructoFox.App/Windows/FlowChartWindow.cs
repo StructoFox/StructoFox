@@ -1689,8 +1689,20 @@ public class FlowChartWindow : Window
     static Point EdgeSlide(Rect r, Point toward)
     {
         var c = r.Center;
+        double inset = Math.Max(0, Math.Min(6, Math.Min(r.Width, r.Height) / 2 - 1));
+
+        // Pick the edge by WHERE the approaching point sits relative to the box, not by its angle from the
+        // centre — so sliding the end stub along an edge keeps it on THAT edge over the whole width/height
+        // instead of flipping to a neighbouring edge partway (which jumped the endpoint and hid the head).
+        bool overX = toward.X >= r.Left && toward.X <= r.Right;   // horizontally above/below the box
+        bool overY = toward.Y >= r.Top  && toward.Y <= r.Bottom;  // level with the box's left/right
+        if (overX && !overY)
+            return new Point(Math.Clamp(toward.X, r.Left + inset, r.Right - inset), toward.Y >= c.Y ? r.Bottom : r.Top);
+        if (overY && !overX)
+            return new Point(toward.X >= c.X ? r.Right : r.Left, Math.Clamp(toward.Y, r.Top + inset, r.Bottom - inset));
+
+        // Diagonally off a corner (or inside): fall back to the facing-edge midpoint by angle.
         double dx = toward.X - c.X, dy = toward.Y - c.Y;
-        double inset = Math.Max(0, Math.Min(12, Math.Min(r.Width, r.Height) / 2 - 1));
         return Math.Abs(dy) >= Math.Abs(dx)
             ? new Point(Math.Clamp(toward.X, r.Left + inset, r.Right - inset), dy >= 0 ? r.Bottom : r.Top)
             : new Point(dx >= 0 ? r.Right : r.Left, Math.Clamp(toward.Y, r.Top + inset, r.Bottom - inset));
