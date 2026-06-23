@@ -52,7 +52,7 @@ public static class ProjectService
     /// Used for the at-a-glance hover stats on the home screen.</summary>
     public static (int classes, int functions, int boards) QuickStats(string folder)
     {
-        var code = Path.Combine(folder, "PROJECTPLAN", "code");
+        var code = Path.Combine(folder, "code");
         int Count(string sub, string pattern)
         {
             var d = Path.Combine(code, sub);
@@ -69,7 +69,7 @@ public static class ProjectService
     /// Keyed by the entity-type name (Namespace, Class, Struct, …); the boards count rides alongside.</summary>
     public static (Dictionary<string, int> byType, int boards) ContentCounts(string folder)
     {
-        var code = Path.Combine(folder, "PROJECTPLAN", "code");
+        var code = Path.Combine(folder, "code");
         int Count(string sub)
         {
             var d = Path.Combine(code, sub);

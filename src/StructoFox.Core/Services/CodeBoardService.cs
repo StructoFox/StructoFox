@@ -5,7 +5,7 @@ using StructoFox.Core.Models;
 namespace StructoFox.Core;
 
 /// <summary>
-/// Saves/loads CodeEntity JSON files under PROJECTPLAN/structure/{EntityType}/.
+/// Saves/loads CodeEntity JSON files under structure/{EntityType}/.
 /// </summary>
 public static class CodeEntityService
 {
@@ -15,7 +15,7 @@ public static class CodeEntityService
     // The plan's structure folder (entities + diagrams + boards). Named "structure", not "code": it holds
     // the design/model, while generated code is an export-time output that lives elsewhere.
     public static string StructureFolder(string projFolder) =>
-        Path.Combine(projFolder, "PROJECTPLAN", "structure");
+        Path.Combine(projFolder, "structure");
 
     private static string EntityFolder(string projFolder, string entityType) =>
         Path.Combine(StructureFolder(projFolder), entityType);
@@ -76,7 +76,7 @@ public static class CodeEntityService
 }
 
 /// <summary>
-/// Saves/loads CodeBoardData under PROJECTPLAN/structure/.
+/// Saves/loads CodeBoardData under structure/.
 /// </summary>
 public static class CodeBoardDataService
 {
@@ -107,7 +107,7 @@ public static class CodeBoardDataService
 }
 
 /// <summary>
-/// Saves/loads FlowChartData under PROJECTPLAN/structure/flow/.
+/// Saves/loads FlowChartData under structure/flow/.
 /// Key is the entity ID for a standalone function, or "{entityId}#{methodId}" for a method.
 /// </summary>
 public static class FlowChartService
@@ -145,7 +145,7 @@ public static class FlowChartService
 }
 
 /// <summary>
-/// Saves/loads StructogramData under PROJECTPLAN/structure/struct/.
+/// Saves/loads StructogramData under structure/struct/.
 /// Same key scheme as flowcharts: entityId or "{entityId}#{methodId}".
 /// </summary>
 public static class StructogramService
@@ -181,7 +181,7 @@ public static class StructogramService
 
 /// <summary>
 /// Registry of CodeBoards (list of boards) for a project.
-/// File: PROJECTPLAN/structure/_boards.json
+/// File: structure/_boards.json
 /// </summary>
 public static class CodeBoardRegistryService
 {
