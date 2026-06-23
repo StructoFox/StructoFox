@@ -401,10 +401,20 @@ public class FlowChartWindow : Window
     void CopySelection()
     {
         if (_selected.Count == 0) return;
+        // Base lines: both ends are selected nodes.
+        var baseConns = _data.Connections
+            .Where(c => string.IsNullOrEmpty(c.ToTapConn) && _selected.Contains(c.FromId) && _selected.Contains(c.ToId))
+            .ToList();
+        var baseIds = baseConns.Select(c => c.Id).ToHashSet();
+        // Taps: source node is selected AND they land on a base line that's being copied — so a T-piece
+        // travels with its target. (Manually-corrected taps were lost before: they were never matched.)
+        var taps = _data.Connections
+            .Where(c => !string.IsNullOrEmpty(c.ToTapConn) && _selected.Contains(c.FromId) && baseIds.Contains(c.ToTapConn))
+            .ToList();
         var payload = new ClipPayload
         {
             Nodes       = _data.Nodes.Where(n => _selected.Contains(n.Id)).ToList(),
-            Connections = _data.Connections.Where(c => _selected.Contains(c.FromId) && _selected.Contains(c.ToId)).ToList(),
+            Connections = baseConns.Concat(taps).ToList(),
         };
         _clip = System.Text.Json.JsonSerializer.Serialize(payload);
     }
@@ -438,15 +448,31 @@ public class FlowChartWindow : Window
             _selected.Add(n.Id);
             RenderNode(n);
         }
-        foreach (var c in p.Connections)
+        // Base (node→node) lines first, remembering old→new ids so taps can re-point at the copies.
+        var connMap = new Dictionary<string, string>();
+        foreach (var c in p.Connections.Where(c => string.IsNullOrEmpty(c.ToTapConn)))
         {
             if (!idMap.TryGetValue(c.FromId, out var f) || !idMap.TryGetValue(c.ToId, out var t)) continue;
+            var oldId = c.Id;
             c.Id = Guid.NewGuid().ToString("N")[..8];
             c.FromId = f; c.ToId = t;
+            foreach (var w in c.Waypoints) { w.X += offX; w.Y += offY; }
+            connMap[oldId] = c.Id;
+            _data.Connections.Add(c);
+            RenderConnection(c);
+        }
+        // Then taps: re-point onto the copied target line, offset their anchor + waypoints.
+        foreach (var c in p.Connections.Where(c => !string.IsNullOrEmpty(c.ToTapConn)))
+        {
+            if (!idMap.TryGetValue(c.FromId, out var f) || !connMap.TryGetValue(c.ToTapConn, out var nt)) continue;
+            c.Id = Guid.NewGuid().ToString("N")[..8];
+            c.FromId = f; c.ToTapConn = nt;
+            c.ToTapX += offX; c.ToTapY += offY;
             foreach (var w in c.Waypoints) { w.X += offX; w.Y += offY; }
             _data.Connections.Add(c);
             RenderConnection(c);
         }
+        RenderTapDots();
         RefreshSelection();
         Save();
     }
