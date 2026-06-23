@@ -1,0 +1,18 @@
+20:53:31.202  ROUTE self=33ed2cc0 from=4690386b to='997a3e17' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.202    -> kept SIMPLE (no A*)
+20:53:31.202  ROUTE self=403c65b1 from=997a3e17 to='ffd415dd' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.203    -> kept SIMPLE (no A*)
+20:53:31.203  ROUTE self=987d5799 from=ffd415dd to='d8a72b45' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.203    -> kept SIMPLE (no A*)
+20:53:31.203  ROUTE self=4d413bf1 from=d8a72b45 to='b21c0efd' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.203    -> kept SIMPLE (no A*)
+20:53:31.203  ROUTE self=7569e00c from=b21c0efd to='5477fae3' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.204    -> kept SIMPLE (no A*)
+20:53:31.204  ROUTE self=b08b27a8 from=5477fae3 to='c67a0ebe' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.204    -> kept SIMPLE (no A*)
+20:53:31.205  ROUTE self=45f12363 from=5477fae3 to='8d4125a4' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.205    -> kept SIMPLE (no A*)
+20:53:31.205  ROUTE self=79df014b from=9862da3e to='35569e8a' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.205    -> kept SIMPLE (no A*)
+20:53:31.205  ROUTE self=0175d0cb from=9862da3e to='c67a0ebe' endsOnLine=False obstacles=8 hitsNodes=False onLines=False simplePts=2
+20:53:31.205    -> kept SIMPLE (no A*)

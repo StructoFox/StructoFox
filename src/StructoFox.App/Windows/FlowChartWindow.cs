@@ -1825,7 +1825,10 @@ public class FlowChartWindow : Window
         if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
             label = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
 
-        _data.Connections.Add(new FlowConnection { FromId = from, ToTapConn = target.Id, ToTapX = anchor.X, ToTapY = anchor.Y, LineColor = _style.LineColor, Label = label });
+        // A tap normally carries no arrowhead, but a backward tap (the line meets a point LEFT of or ABOVE
+        // its source — typically a loop) gets one: it aids readability where the flow direction isn't obvious.
+        bool? arrow = NodeCenter(from) is { } fc && (anchor.X < fc.X - 1 || anchor.Y < fc.Y - 1) ? true : null;
+        _data.Connections.Add(new FlowConnection { FromId = from, ToTapConn = target.Id, ToTapX = anchor.X, ToTapY = anchor.Y, LineColor = _style.LineColor, Label = label, Arrow = arrow });
         Save();
         RenderAllConnections();
     }
