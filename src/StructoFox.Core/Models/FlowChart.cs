@@ -146,6 +146,10 @@ public class FlowConnection
     /// <summary>Arrowhead override: null = automatic (an arrow, except into a junction); true = force an
     /// arrowhead (e.g. a line pointing onto another line); false = plain line, no arrowhead.</summary>
     public bool?               Arrow { get; set; } = null;
+
+    /// <summary>For a Multi-Verzweigung comb tine: grid steps this tooth's slot is nudged ALONG the bar from
+    /// its evenly-spaced default position — drag the tooth to set it (the bar grows/shrinks to follow).</summary>
+    public int                 TineOffset { get; set; } = 0;
 }
 
 public class FlowChartData
