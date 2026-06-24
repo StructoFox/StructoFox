@@ -2027,7 +2027,10 @@ public class FlowChartWindow : Window
                 int side = StemSide(node, vertical);
                 var (vtx, od) = StemVertex(s, side);
                 double defAlong = vertical ? s.Center.X : s.Center.Y;
-                double along = Snap(defAlong + node.CombStemPos * g);
+                // A single comb's stem rides with the group shift (so shifting the whole comb doesn't leave the
+                // bar overhanging to the stem); the L's stem is independent of its bar shift.
+                double baseShift = node.CombDir == CombDirection.Both ? 0 : node.CombShift;
+                double along = Snap(defAlong + (baseShift + node.CombStemPos) * g);
                 if (node.CombDir == CombDirection.Both) along = Math.Min(along, CombLGeom(node, g).cornerX);   // stays on the bottom bar
                 // The final straight into the bar is a third of the distance from the diamond's near side to
                 // the bar (min one grid), so it's long enough to grab comfortably.
@@ -2242,6 +2245,7 @@ public class FlowChartWindow : Window
                 along = Math.Min(cur.X, CombLGeom(_stemDrag, g).cornerX);   // along the bottom bar (up to the elbow)
             else along = vertical ? cur.X : cur.Y;
             int pos = (int)Math.Round((along - defAlong) / g);
+            if (_stemDrag.CombDir != CombDirection.Both) pos -= _stemDrag.CombShift;   // stem offset is relative to the shifted comb
             if (pos == _stemDrag.CombStemPos) return;
             _stemDrag.CombStemPos = pos;
         }
