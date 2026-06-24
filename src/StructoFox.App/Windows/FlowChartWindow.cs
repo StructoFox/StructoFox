@@ -2006,7 +2006,7 @@ public class FlowChartWindow : Window
                 var bar = new Line
                 {
                     StartPoint = a, EndPoint = b, Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6,
-                    Cursor = new Cursor(vertical ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast),
+                    Cursor = new Cursor(StandardCursorType.SizeAll),   // 2D drag: gap (perpendicular) + shift (along)
                 };
                 var capNode = node; bool capVert = vertical;
                 bar.PointerPressed += (_, e) =>
