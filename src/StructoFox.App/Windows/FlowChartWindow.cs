@@ -86,7 +86,7 @@ public class FlowChartWindow : Window
     FlowConnection? _toothEndDrag; // a wired comb tooth whose target end is being dragged to another side
     FlowConnection? _armedTine; // in connect mode: the specific free tine clicked, to wire on the next target click
     FlowNode? _combDrag;  bool _combVert;   // a Multi-Verzweigung whose comb spine is being pushed nearer/further
-    FlowNode? _stemDrag;                     // a Multi-Verzweigung whose stem is being slid along the bar
+    FlowNode? _stemDrag;  bool _stemVertexMode;   // stem drag: near diamond = pick vertex, near bar = slide pos
     bool _combGapOnly;      // the L bottom-bar grab moves gap + bar-shift; a single comb's bar grab is 2D
     readonly List<Control> _combHandles = new();   // draggable spine handles, redrawn with the connections
 
@@ -2008,24 +2008,31 @@ public class FlowChartWindow : Window
                 var ln = new Line { StartPoint = a2, EndPoint = b2, Stroke = brush, StrokeThickness = 1.6, ZIndex = 1, IsHitTestVisible = false };
                 _canvas!.Children.Add(ln); _combHandles.Add(ln);
             }
-            // Draws the stem from the diamond vertex to its meeting point on the bar (CombStemPos along), as a
-            // Z when slid off-centre, with grab segments to slide it. Returns the meeting-along.
+            // Draws the stem from a chosen diamond vertex to its meeting point on the bar (CombStemPos along),
+            // routed around as needed, with grab segments. Grabbing near the diamond snaps the vertex; grabbing
+            // near the bar slides the meeting. Returns the meeting-along.
             double Stem(bool vertical, double spine)
             {
-                Point vtx = vertical ? new(s.Center.X, s.Bottom) : new(s.Right, s.Center.Y);
-                double defAlong = vertical ? vtx.X : vtx.Y;
+                int side = StemSide(node, vertical);
+                var (vtx, od) = StemVertex(s, side);
+                double defAlong = vertical ? s.Center.X : s.Center.Y;
                 double meet = Snap(defAlong + node.CombStemPos * g);
-                double jog = vertical ? Math.Min(s.Bottom + g, spine) : Math.Min(s.Right + g, spine);
-                var st = vertical
-                    ? new List<Point> { vtx, new(vtx.X, jog), new(meet, jog), new(meet, spine) }
-                    : new List<Point> { vtx, new(jog, vtx.Y), new(jog, meet), new(spine, meet) };
-                st = Simplify(st);
+                Point meetPt = vertical ? new(meet, spine) : new(spine, meet);
+                Point approach = vertical ? new(meet, spine - g) : new(spine - g, meet);   // perpendicular into the bar
+                var st = Simplify(Orthogonalize(new List<Point> { vtx, new(vtx.X + od.X * g, vtx.Y + od.Y * g), approach, meetPt }));
                 var capNode = node;
                 for (int k = 0; k < st.Count - 1; k++)
                 {
                     Spine(st[k], st[k + 1]);
                     var sg = new Line { StartPoint = st[k], EndPoint = st[k + 1], Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6, Cursor = new Cursor(StandardCursorType.SizeAll) };
-                    sg.PointerPressed += (_, e) => { if (_mode == EditMode.Remove) return; _stemDrag = capNode; e.Pointer.Capture(_canvas); e.Handled = true; };
+                    var pv = vtx; var pm = meetPt;
+                    sg.PointerPressed += (_, e) =>
+                    {
+                        if (_mode == EditMode.Remove) return;
+                        var gp = e.GetPosition(_canvas);
+                        _stemDrag = capNode; _stemVertexMode = Dist(gp, pv) < Dist(gp, pm);   // near diamond → set vertex
+                        e.Pointer.Capture(_canvas); e.Handled = true;
+                    };
                     _canvas!.Children.Add(sg); _combHandles.Add(sg);
                 }
                 return meet;
@@ -2138,18 +2145,41 @@ public class FlowChartWindow : Window
         RenderCombHandles();
     }
 
-    // Slides the stem along the bar: sets CombStemPos so its meeting point follows the cursor (a Z-stem).
+    // The stem's diamond vertex: -1 stored = the comb's natural side (bottom for a bottom/L comb, right for a
+    // right comb), else the explicit 0=Top/1=Bottom/2=Left/3=Right.
+    static int StemSide(FlowNode node, bool vertical) => node.CombStemVertex >= 0 ? node.CombStemVertex : (vertical ? 1 : 3);
+
+    // The vertex point + its outward normal for a diamond side index.
+    static (Point pt, Point outDir) StemVertex(Rect s, int side) => side switch
+    {
+        0 => (new Point(s.Center.X, s.Top),    new Point(0, -1)),
+        2 => (new Point(s.Left,     s.Center.Y), new Point(-1, 0)),
+        3 => (new Point(s.Right,    s.Center.Y), new Point(1, 0)),
+        _ => (new Point(s.Center.X, s.Bottom), new Point(0, 1)),
+    };
+
+    // Drags the stem: near the diamond picks which vertex it leaves from; near the bar slides where it meets.
     void DragStem(Point cur)
     {
         if (_stemDrag is null) return;
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var s = new Rect(_stemDrag.X, _stemDrag.Y, _stemDrag.Width, _stemDrag.Height);
         bool vertical = _stemDrag.CombDir != CombDirection.Right;   // bottom & both → horizontal bar (drag along X)
-        double defAlong = vertical ? s.Center.X : s.Center.Y;
-        double along = vertical ? cur.X : cur.Y;
-        int pos = (int)Math.Round((along - defAlong) / g);
-        if (pos == _stemDrag.CombStemPos) return;
-        _stemDrag.CombStemPos = pos;
+        if (_stemVertexMode)   // snap the diamond end to the vertex the cursor points at (dominant axis)
+        {
+            double dx = cur.X - s.Center.X, dy = cur.Y - s.Center.Y;
+            int side = Math.Abs(dx) >= Math.Abs(dy) ? (dx >= 0 ? 3 : 2) : (dy >= 0 ? 1 : 0);
+            if (side == _stemDrag.CombStemVertex) return;
+            _stemDrag.CombStemVertex = side;
+        }
+        else                   // slide the meeting along the bar
+        {
+            double defAlong = vertical ? s.Center.X : s.Center.Y;
+            double along = vertical ? cur.X : cur.Y;
+            int pos = (int)Math.Round((along - defAlong) / g);
+            if (pos == _stemDrag.CombStemPos) return;
+            _stemDrag.CombStemPos = pos;
+        }
         RenderCombHandles();
     }
 

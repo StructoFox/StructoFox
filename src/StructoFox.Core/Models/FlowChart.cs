@@ -116,6 +116,10 @@ public class FlowNode
     /// vertex's straight-down/across point — drag the stem along the bar to set it (a Z-stem). The meeting
     /// stays fixed relative to the diamond, so it rides along when the bar shifts.</summary>
     public int           CombStemPos { get; set; } = 0;
+
+    /// <summary>For a Multi-Verzweigung comb: which diamond vertex the stem leaves from — -1 = auto (the
+    /// comb's natural side), else 0=Top, 1=Bottom, 2=Left, 3=Right. Drag the stem's diamond end to set it.</summary>
+    public int           CombStemVertex { get; set; } = -1;
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>
