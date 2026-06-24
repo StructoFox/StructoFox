@@ -262,7 +262,10 @@ public class FlowChartWindow : Window
             // While connecting, the rubber-band follows the pointer.
             if (ConnectMode && _connectFromId is not null && _rubberBand is not null)
             {
-                if (NodeCenter(_connectFromId) is { } c) _rubberBand.StartPoint = c;
+                // From an armed comb tine the band starts at its open tip; otherwise at the source node centre.
+                if (_armedTine is not null && _connPts.TryGetValue(_armedTine.Id, out var ap) && ap.Count > 0)
+                    _rubberBand.StartPoint = ap[^1];
+                else if (NodeCenter(_connectFromId) is { } c) _rubberBand.StartPoint = c;
                 _rubberBand.EndPoint = e.GetPosition(_canvas);
                 return;
             }
@@ -1949,13 +1952,14 @@ public class FlowChartWindow : Window
                                      && c.Waypoints.Count == 0 && TineComb(node, c) == comb).ToList();
 
     // Pixel gap between adjacent tines. An explicit TineSpacing (grid steps) wins; 0 = the recommended
-    // auto value: a standard symbol's width + 1 grid for a downward comb, its height + 1 grid for a right
-    // comb — so neighbouring case bodies placed under/beside the teeth don't collide.
+    // auto value: a standard symbol plus one grid of breathing room on EACH side, so a case body can sit
+    // between two teeth with a clear field of gap to its neighbours. For the default 140-wide symbol that
+    // works out to 160px = 16 grid steps for a downward comb.
     double CombStep(FlowNode node, CombDirection comb, double g)
     {
         if (node.TineSpacing > 0) return node.TineSpacing * g;
         var (dw, dh) = DefaultNodeSize(FlowNodeKind.Process, FlowSymbol.Auto);
-        return (comb == CombDirection.Right ? dh : dw) + g;
+        return (comb == CombDirection.Right ? dh : dw) + 2 * g;
     }
 
     // The topmost node whose box contains p (excluding one id), or null — for dropping a dragged tine tip.
@@ -2308,7 +2312,13 @@ public class FlowChartWindow : Window
                 if (e.GetCurrentPoint(handle).Properties.IsRightButtonPressed) { ShowConnMenu(capTine, handle); e.Handled = true; return; }
                 if (_mode == EditMode.Remove) { DeleteConnection(capTine); e.Handled = true; return; }
                 // Connect mode: clicking a tine arms IT (not "next free"); the next node/line click wires it.
-                if (ConnectMode) { _armedTine = capTine; _connectFromId = capTine.FromId; EnsureRubberBand(); e.Handled = true; return; }
+                if (ConnectMode)
+                {
+                    _armedTine = capTine; _connectFromId = capTine.FromId;
+                    EnsureRubberBand();
+                    if (_rubberBand is not null) { _rubberBand.StartPoint = tip; _rubberBand.EndPoint = tip; }
+                    e.Handled = true; return;
+                }
                 _tineDrag = capTine;
                 EnsureRubberBand();
                 if (_rubberBand is not null) { _rubberBand.StartPoint = tip; _rubberBand.EndPoint = tip; }
