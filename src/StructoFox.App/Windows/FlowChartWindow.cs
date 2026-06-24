@@ -82,6 +82,7 @@ public class FlowChartWindow : Window
     string? _segJunctionId;   // if the dragged segment ends at a junction, the junction moves with it
     FlowConnection? _tapDrag;  // a tap line being slid along its target
     FlowConnection? _tineDrag; // a free comb tine whose open tip is being dragged onto a target
+    FlowConnection? _armedTine; // in connect mode: the specific free tine clicked, to wire on the next target click
 
     Button? _selectBtn, _removeBtn, _scaleBtn;
     readonly List<Control> _scaleHandles = new();   // resize grips shown on nodes while in Scale mode
@@ -380,6 +381,9 @@ public class FlowChartWindow : Window
                     foreach (var w in c.Waypoints) bbox = bbox.Union(new Rect(w.X - 1, w.Y - 1, 2, 2));
                     show = vis.Intersects(bbox);
                 }
+                else if (a is not null && string.IsNullOrEmpty(c.ToId)
+                         && _data.Nodes.FirstOrDefault(n => n.Id == c.FromId)?.Kind == FlowNodeKind.MultiDecision)
+                    show = vis.Intersects(a.Value.Inflate(300));   // a free comb tine hangs off its diamond (no ToId)
                 if (show && !realized) RenderConnection(c);
                 else if (!show && realized) { foreach (var v in _connViews[c.Id]) _canvas.Children.Remove(v); _connViews.Remove(c.Id); }
             }
@@ -1655,11 +1659,13 @@ public class FlowChartWindow : Window
         RemoveRubberBand();
         var src = _data.Nodes.FirstOrDefault(n => n.Id == fromId);
 
-        // A Multi-Verzweigung doesn't make a brand-new line — it WIRES its next free comb tine to the target
-        // (growing one if all are taken), keeping its mandatory unique case label.
+        // A Multi-Verzweigung doesn't make a brand-new line — it WIRES a comb tine to the target: the one the
+        // user armed by clicking its handle, else the next still-free tine (growing one if all are taken),
+        // keeping its mandatory unique case label.
         if (src is { Kind: FlowNodeKind.MultiDecision })
         {
-            var free = _data.Connections.FirstOrDefault(c => c.FromId == src.Id
+            var armed = _armedTine; _armedTine = null;
+            var free = armed ?? _data.Connections.FirstOrDefault(c => c.FromId == src.Id
                            && string.IsNullOrEmpty(c.ToId) && string.IsNullOrEmpty(c.ToTapConn));
             var lbl = await PromptBranchLabel(src, free?.Label ?? "", free?.Id);
             if (lbl is null) { RenderAllConnections(); return; }   // cancelled: leave the comb untouched
@@ -2122,6 +2128,7 @@ public class FlowChartWindow : Window
     {
         if (_connectFromId is null) return;
         var from = _connectFromId;
+        var armedTine = _armedTine; _armedTine = null;
         _connectFromId = null;
         RemoveRubberBand();
 
@@ -2152,7 +2159,11 @@ public class FlowChartWindow : Window
         // A tap normally carries no arrowhead, but a backward tap (the line meets a point LEFT of or ABOVE
         // its source — typically a loop) gets one: it aids readability where the flow direction isn't obvious.
         bool? arrow = NodeCenter(from) is { } fc && (anchor.X < fc.X - 1 || anchor.Y < fc.Y - 1) ? true : null;
-        _data.Connections.Add(new FlowConnection { FromId = from, ToTapConn = target.Id, ToTapX = anchor.X, ToTapY = anchor.Y, LineColor = _style.LineColor, Label = label, Arrow = arrow });
+        // An armed comb tine taps onto the line in place (it keeps its slot/label) instead of spawning a twin.
+        if (armedTine is not null)
+        { armedTine.ToTapConn = target.Id; armedTine.ToTapX = anchor.X; armedTine.ToTapY = anchor.Y; if (!string.IsNullOrEmpty(label)) armedTine.Label = label; armedTine.Arrow = arrow; }
+        else
+            _data.Connections.Add(new FlowConnection { FromId = from, ToTapConn = target.Id, ToTapX = anchor.X, ToTapY = anchor.Y, LineColor = _style.LineColor, Label = label, Arrow = arrow });
         Save();
         RenderAllConnections();
     }
@@ -2296,6 +2307,8 @@ public class FlowChartWindow : Window
             {
                 if (e.GetCurrentPoint(handle).Properties.IsRightButtonPressed) { ShowConnMenu(capTine, handle); e.Handled = true; return; }
                 if (_mode == EditMode.Remove) { DeleteConnection(capTine); e.Handled = true; return; }
+                // Connect mode: clicking a tine arms IT (not "next free"); the next node/line click wires it.
+                if (ConnectMode) { _armedTine = capTine; _connectFromId = capTine.FromId; EnsureRubberBand(); e.Handled = true; return; }
                 _tineDrag = capTine;
                 EnsureRubberBand();
                 if (_rubberBand is not null) { _rubberBand.StartPoint = tip; _rubberBand.EndPoint = tip; }
@@ -2405,14 +2418,26 @@ public class FlowChartWindow : Window
         if (pts.Count < 2) return (pts.Count == 1 ? pts[0] : default, true);
         if (conn.LabelPos >= 0) return PointAlong(pts, conn.LabelPos);
 
+        // A comb tine (free or wired) labels its case at the TOP of its own tooth — so each label sits over
+        // its tine, spread along the comb, and stays put when the tine gets wired (instead of piling up at
+        // the shared spine or jumping to the target end).
+        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mnode
+            && conn.Waypoints.Count == 0)
+        {
+            double g = _data.GridSize >= 4 ? _data.GridSize : 10;
+            var comb = TineComb(mnode, conn);
+            var tines = CombTines(mnode, comb);
+            int idx = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
+            double off = (idx - (tines.Count - 1) / 2.0) * CombStep(mnode, comb, g);
+            var nr = new Rect(mnode.X, mnode.Y, mnode.Width, mnode.Height);
+            return comb == CombDirection.Right
+                ? (new Point(Snap(nr.Right + g) + 12, Snap(nr.Center.Y + off)), true)
+                : (new Point(Snap(nr.Center.X + off), Snap(nr.Bottom + g) + 12), false);
+        }
+
         Point sa, sb;
         bool fromDecision = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { } fn && IsDecision(fn.Kind);
-        // A free comb tine: put the case label at the open TIP (the last segment), where the user reads it
-        // and where they'll attach the target — not back at the spine.
-        bool freeTine = string.IsNullOrEmpty(conn.ToId) && string.IsNullOrEmpty(conn.ToTapConn)
-                        && _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.MultiDecision;
-        if (freeTine) { sa = pts[^2]; sb = pts[^1]; }
-        else if (fromDecision) { sa = pts[0]; sb = pts[1]; }
+        if (fromDecision) { sa = pts[0]; sb = pts[1]; }
         else (sa, sb) = LongestSegment(pts);
         return (new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2), Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y));
     }
@@ -3469,6 +3494,7 @@ public class FlowChartWindow : Window
     void CancelConnect()
     {
         _connectFromId = null;
+        _armedTine = null;
         RemoveRubberBand();
     }
 
