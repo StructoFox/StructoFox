@@ -2019,7 +2019,23 @@ public class FlowChartWindow : Window
                 double meet = Snap(defAlong + node.CombStemPos * g);
                 Point meetPt = vertical ? new(meet, spine) : new(spine, meet);
                 Point approach = vertical ? new(meet, spine - g) : new(spine - g, meet);   // perpendicular into the bar
-                var st = Simplify(Orthogonalize(new List<Point> { vtx, new(vtx.X + od.X * g, vtx.Y + od.Y * g), approach, meetPt }));
+                Point exit = new(vtx.X + od.X * g, vtx.Y + od.Y * g);
+                // If the chosen vertex faces AWAY from the bar (e.g. Top vertex on a downward comb), go around
+                // the diamond's near side instead of cutting back through it.
+                bool opposite = vertical ? side == 0 /*Top*/ : side == 2 /*Left*/;
+                List<Point> raw;
+                if (opposite && vertical)
+                {
+                    double sideX = meet >= s.Center.X ? s.Right + g : s.Left - g;
+                    raw = new() { vtx, exit, new(sideX, exit.Y), new(sideX, spine - g), approach, meetPt };
+                }
+                else if (opposite)
+                {
+                    double sideY = meet >= s.Center.Y ? s.Bottom + g : s.Top - g;
+                    raw = new() { vtx, exit, new(exit.X, sideY), new(spine - g, sideY), approach, meetPt };
+                }
+                else raw = new() { vtx, exit, approach, meetPt };
+                var st = Simplify(Orthogonalize(raw));
                 var capNode = node;
                 // The stem line slides the meeting along the bar (pos mode).
                 for (int k = 0; k < st.Count - 1; k++)
