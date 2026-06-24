@@ -81,6 +81,7 @@ public class FlowChartWindow : Window
     FlowConnection? _segConn;  int _segIdx;  List<Point>? _segBasePts;  bool _segHoriz;  Point _segStart;  // segment drag
     string? _segJunctionId;   // if the dragged segment ends at a junction, the junction moves with it
     FlowConnection? _tapDrag;  // a tap line being slid along its target
+    FlowConnection? _tineDrag; // a free comb tine whose open tip is being dragged onto a target
 
     Button? _selectBtn, _removeBtn, _scaleBtn;
     readonly List<Control> _scaleHandles = new();   // resize grips shown on nodes while in Scale mode
@@ -264,6 +265,7 @@ public class FlowChartWindow : Window
                 _rubberBand.EndPoint = e.GetPosition(_canvas);
                 return;
             }
+            if (_tineDrag is not null) { if (_rubberBand is not null) _rubberBand.EndPoint = e.GetPosition(_canvas); return; }
             if (_segConn is not null && _segBasePts is not null) { DragSegment(e.GetPosition(_canvas)); return; }
             if (_tapDrag is not null) { SlideTap(e.GetPosition(_canvas)); return; }
             if (_panning)
@@ -277,6 +279,13 @@ public class FlowChartWindow : Window
         };
         _canvas.PointerReleased += (_, e) =>
         {
+            if (_tineDrag is not null)
+            {
+                var tine = _tineDrag; _tineDrag = null;
+                RemoveRubberBand(); e.Pointer.Capture(null);
+                _ = WireTineByDrag(tine, e.GetPosition(_canvas));
+                return;
+            }
             if (_tapDrag is not null) { Save(); _tapDrag = null; e.Pointer.Capture(null); return; }
             if (_segConn is not null)
             {
@@ -1943,6 +1952,60 @@ public class FlowChartWindow : Window
         return (comb == CombDirection.Right ? dh : dw) + g;
     }
 
+    // The topmost node whose box contains p (excluding one id), or null — for dropping a dragged tine tip.
+    FlowNode? NodeAtPoint(Point p, string? exceptId)
+    {
+        for (int i = _data.Nodes.Count - 1; i >= 0; i--)
+        {
+            var n = _data.Nodes[i];
+            if (n.Id == exceptId || n.Kind == FlowNodeKind.Junction) continue;
+            if (new Rect(n.X, n.Y, n.Width, n.Height).Contains(p)) return n;
+        }
+        return null;
+    }
+
+    // The rendered connection whose polyline passes within tol of p (excluding one id), or null.
+    FlowConnection? ConnNearPoint(Point p, string? exceptId, double tol)
+    {
+        FlowConnection? best = null; double bestD = tol;
+        foreach (var (id, pts) in _connPts)
+        {
+            if (id == exceptId || pts.Count < 2) continue;
+            for (int i = 0; i < pts.Count - 1; i++)
+            {
+                double d = DistToSegment(p, pts[i], pts[i + 1]);
+                if (d < bestD) { bestD = d; best = _data.Connections.FirstOrDefault(c => c.Id == id); }
+            }
+        }
+        return best;
+    }
+
+    // Finishes a tine-tip drag: dropping the open end on a node wires the tine to it; on a line taps onto
+    // that line; in empty space leaves the tine free. Either way the case label stays mandatory + unique.
+    async Task WireTineByDrag(FlowConnection tine, Point at)
+    {
+        var src = _data.Nodes.FirstOrDefault(n => n.Id == tine.FromId);
+        if (src is null) { RenderAllConnections(); return; }
+
+        var node = NodeAtPoint(at, src.Id);
+        var line = node is null ? ConnNearPoint(at, tine.Id, 10) : null;
+        if (node is null && line is null) { RenderAllConnections(); return; }   // dropped in space → stays free
+
+        var lbl = await PromptBranchLabel(src, tine.Label, tine.Id);
+        if (lbl is null) { RenderAllConnections(); return; }
+        tine.Label = lbl;
+        if (node is not null) { tine.ToId = node.Id; }
+        else
+        {
+            var pts = _connPts.TryGetValue(line!.Id, out var lp) ? lp : null;
+            var foot = pts is not null ? NearestPointOn(pts, at).pt : at;
+            tine.ToTapConn = line.Id; tine.ToTapX = Snap(foot.X); tine.ToTapY = Snap(foot.Y);
+        }
+        Save();
+        RenderAllConnections();
+        RefreshJunctions();
+    }
+
     // Routes one tine of a Multi-Verzweigung as part of a comb: a spine one grid off the diamond's bottom
     // (or right) edge, then a tooth at this tine's slot (index * spacing). A connected tine jogs into its
     // target head-on; a free tine just hangs a short stub in the air, ready to be wired up.
@@ -2190,6 +2253,11 @@ public class FlowChartWindow : Window
         if (pts is null || pts.Count < 2) return;
 
         bool toTap = !string.IsNullOrEmpty(conn.ToTapConn);   // this line ends ON another line (a T-piece)
+        // A free comb tine of a Multi-Verzweigung: not yet wired (no node target, no tap). Its open end is an
+        // empty HANDLE you drag onto a target — never an arrowhead (an arrow tempts users to just butt a node
+        // against it and think it's connected, which it wouldn't be).
+        bool freeTine = string.IsNullOrEmpty(conn.ToId) && !toTap
+                        && _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.MultiDecision;
 
         _connPts[conn.Id] = pts;   // remembered for the optional crossover-bridge overlay
 
@@ -2203,12 +2271,38 @@ public class FlowChartWindow : Window
         _canvas!.Children.Add(line); visuals.Add(line);
 
         // Arrowhead: explicit per-connection override wins, else automatic (an arrow, except onto a line —
-        // a T-piece carries no arrowhead, the meeting itself is the marker).
-        if (conn.Arrow ?? !toTap)
+        // a T-piece carries no arrowhead, the meeting itself is the marker). A free tine gets a handle below.
+        if (!freeTine && (conn.Arrow ?? !toTap))
         {
             var arrow = BuildArrow(pts[^2], pts[^1], brush);
             arrow.ZIndex = 1;
             _canvas.Children.Add(arrow); visuals.Add(arrow);
+        }
+
+        // Open handle at a free tine's tip: a hollow grabbable circle. Drag it onto a node (wire) or a line
+        // (tap); right-click for the line menu; Remove-mode deletes the tine.
+        if (freeTine)
+        {
+            const double hr = 5.5;
+            var tip = pts[^1];
+            var handle = new Ellipse
+            {
+                Width = hr * 2, Height = hr * 2, Stroke = brush, StrokeThickness = 1.6,
+                Fill = Brushes.Transparent, ZIndex = 4, Cursor = new Cursor(StandardCursorType.Hand),
+            };
+            Canvas.SetLeft(handle, tip.X - hr); Canvas.SetTop(handle, tip.Y - hr);
+            var capTine = conn;
+            handle.PointerPressed += (_, e) =>
+            {
+                if (e.GetCurrentPoint(handle).Properties.IsRightButtonPressed) { ShowConnMenu(capTine, handle); e.Handled = true; return; }
+                if (_mode == EditMode.Remove) { DeleteConnection(capTine); e.Handled = true; return; }
+                _tineDrag = capTine;
+                EnsureRubberBand();
+                if (_rubberBand is not null) { _rubberBand.StartPoint = tip; _rubberBand.EndPoint = tip; }
+                e.Pointer.Capture(_canvas);
+                e.Handled = true;
+            };
+            _canvas.Children.Add(handle); visuals.Add(handle);
         }
 
         // DIN departure marker: a small filled dot where the flow line leaves the source edge.
@@ -2313,7 +2407,12 @@ public class FlowChartWindow : Window
 
         Point sa, sb;
         bool fromDecision = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { } fn && IsDecision(fn.Kind);
-        if (fromDecision) { sa = pts[0]; sb = pts[1]; }
+        // A free comb tine: put the case label at the open TIP (the last segment), where the user reads it
+        // and where they'll attach the target — not back at the spine.
+        bool freeTine = string.IsNullOrEmpty(conn.ToId) && string.IsNullOrEmpty(conn.ToTapConn)
+                        && _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.MultiDecision;
+        if (freeTine) { sa = pts[^2]; sb = pts[^1]; }
+        else if (fromDecision) { sa = pts[0]; sb = pts[1]; }
         else (sa, sb) = LongestSegment(pts);
         return (new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2), Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y));
     }
