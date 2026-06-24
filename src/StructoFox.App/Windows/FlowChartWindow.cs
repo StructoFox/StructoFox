@@ -1577,19 +1577,17 @@ public class FlowChartWindow : Window
         // Multi-Verzweigung: choose which comb(s) the tines hang on and how far apart they sit.
         if (node.Kind == FlowNodeKind.MultiDecision)
         {
-            var combMenu = new MenuItem { Header = Loc.S("Flow_CombDir") };
-            Ui.Theme(combMenu, MenuItem.ForegroundProperty, "SidebarTextBrush");
+            // Flat direction items (no submenu, so no white Fluent sub-chevron); the active one gets a ●.
             void Dir(string label, CombDirection d)
             {
-                var mi = new MenuItem { Header = (node.CombDir == d ? "● " : "") + label };
+                var mi = new MenuItem { Header = (node.CombDir == d ? "● " : "") + Loc.S("Flow_CombDir") + ": " + label };
                 Ui.Theme(mi, MenuItem.ForegroundProperty, "SidebarTextBrush");
                 mi.Click += (_, _) => { node.CombDir = d; Save(); UpdateConnectionsFor(node.Id); };
-                combMenu.Items.Add(mi);
+                cm.Items.Add(mi);
             }
             Dir(Loc.S("Flow_CombBottom"), CombDirection.Bottom);
             Dir(Loc.S("Flow_CombRight"),  CombDirection.Right);
             Dir(Loc.S("Flow_CombBoth"),   CombDirection.Both);
-            cm.Items.Add(combMenu);
 
             var spacing = new MenuItem { Header = Loc.S("Flow_TineSpacing") };
             spacing.Click += async (_, _) =>
