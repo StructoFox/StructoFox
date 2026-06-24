@@ -1985,6 +1985,7 @@ public class FlowChartWindow : Window
             if (node.Kind != FlowNodeKind.MultiDecision || !_nodeViews.ContainsKey(node.Id)) continue;
             var s = new Rect(node.X, node.Y, node.Width, node.Height);
             double gap = Math.Max(1, node.CombGap) * g;
+            double shift = node.CombShift * g;
             void Bar(CombDirection comb)
             {
                 int n = CombTines(node, comb).Count;
@@ -1992,8 +1993,16 @@ public class FlowChartWindow : Window
                 double half = Math.Max(g, (n - 1) / 2.0 * CombStep(node, comb, g));   // min grabbable width
                 bool vertical = comb == CombDirection.Bottom;   // a bottom comb's spine is horizontal → drag vertically
                 Point a, b;
-                if (comb == CombDirection.Bottom) { double y = Snap(s.Bottom + gap); a = new(s.Center.X - half, y); b = new(s.Center.X + half, y); }
-                else                              { double x = Snap(s.Right  + gap); a = new(x, s.Center.Y - half); b = new(x, s.Center.Y + half); }
+                if (comb == CombDirection.Bottom)
+                {
+                    double y = Snap(s.Bottom + gap), c = s.Center.X + shift;   // bar spans the stem → the tines
+                    a = new(Math.Min(s.Center.X, c - half), y); b = new(Math.Max(s.Center.X, c + half), y);
+                }
+                else
+                {
+                    double x = Snap(s.Right + gap), c = s.Center.Y + shift;
+                    a = new(x, Math.Min(s.Center.Y, c - half)); b = new(x, Math.Max(s.Center.Y, c + half));
+                }
                 var bar = new Line
                 {
                     StartPoint = a, EndPoint = b, Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6,
@@ -2012,16 +2021,19 @@ public class FlowChartWindow : Window
         }
     }
 
-    // Pushes a Multi-Verzweigung's comb spine to follow the dragged handle (grid-stepped, min 1 from edge).
+    // Drags a Multi-Verzweigung's spine bar in 2D: perpendicular to the diamond sets the gap (min 1),
+    // along the bar sets the shift (asymmetric placement). Grid-stepped.
     void DragComb(Point cur)
     {
         if (_combDrag is null) return;
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var s = new Rect(_combDrag.X, _combDrag.Y, _combDrag.Width, _combDrag.Height);
-        int gap = _combVert ? (int)Math.Round((cur.Y - s.Bottom) / g) : (int)Math.Round((cur.X - s.Right) / g);
+        int gap, shift;
+        if (_combVert) { gap = (int)Math.Round((cur.Y - s.Bottom) / g); shift = (int)Math.Round((cur.X - s.Center.X) / g); }
+        else           { gap = (int)Math.Round((cur.X - s.Right)  / g); shift = (int)Math.Round((cur.Y - s.Center.Y) / g); }
         gap = Math.Max(1, gap);
-        if (gap == _combDrag.CombGap) return;
-        _combDrag.CombGap = gap;
+        if (gap == _combDrag.CombGap && shift == _combDrag.CombShift) return;
+        _combDrag.CombGap = gap; _combDrag.CombShift = shift;
         UpdateConnectionsFor(_combDrag.Id);
         RenderCombHandles();
     }
@@ -2091,9 +2103,10 @@ public class FlowChartWindow : Window
         int i = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
         double step = CombStep(node, comb, g);
         double stub = 3 * g;   // how far a free tine hangs in the air
-        double gap  = Math.Max(1, node.CombGap) * g;   // spine distance from the diamond (draggable)
-        // Centre the comb under/right-of the diamond so it sits symmetrically instead of leaning to one side.
-        double off = (i - (tines.Count - 1) / 2.0) * step;
+        double gap   = Math.Max(1, node.CombGap) * g;   // spine distance from the diamond (draggable)
+        double shift = node.CombShift * g;               // slide along the spine (asymmetric placement)
+        // Centre the comb under/right-of the diamond, then apply the user's along-spine shift.
+        double off = shift + (i - (tines.Count - 1) / 2.0) * step;
 
         List<Point> pts;
         if (comb == CombDirection.Right)
@@ -2501,7 +2514,7 @@ public class FlowChartWindow : Window
             var comb = TineComb(mnode, conn);
             var tines = CombTines(mnode, comb);
             int idx = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
-            double off = (idx - (tines.Count - 1) / 2.0) * CombStep(mnode, comb, g);
+            double off = mnode.CombShift * g + (idx - (tines.Count - 1) / 2.0) * CombStep(mnode, comb, g);
             double gap = Math.Max(1, mnode.CombGap) * g;
             var nr = new Rect(mnode.X, mnode.Y, mnode.Width, mnode.Height);
             return comb == CombDirection.Right

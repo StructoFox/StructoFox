@@ -102,6 +102,11 @@ public class FlowNode
     /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: grid steps from the diamond edge to the
     /// comb spine — drag the spine handle to push the comb nearer/further from the condition.</summary>
     public int           CombGap { get; set; } = 1;
+
+    /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: grid steps the comb is shifted ALONG its
+    /// spine (left/right for a bottom comb, up/down for a right comb) — so the tines can sit asymmetrically
+    /// to one side of the stem for a more compact plan. Drag the spine bar sideways to set it.</summary>
+    public int           CombShift { get; set; } = 0;
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>
