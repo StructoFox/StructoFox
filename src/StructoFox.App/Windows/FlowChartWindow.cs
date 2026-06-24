@@ -2016,8 +2016,28 @@ public class FlowChartWindow : Window
                 };
                 _canvas!.Children.Add(bar); _combHandles.Add(bar);
             }
-            if (node.CombDir is CombDirection.Bottom or CombDirection.Both) Bar(CombDirection.Bottom);
-            if (node.CombDir is CombDirection.Right  or CombDirection.Both) Bar(CombDirection.Right);
+            if (node.CombDir == CombDirection.Both)
+            {
+                // One grab along the L's bottom arm (stem → elbow); drives gap (down) + shift (stem along x).
+                var (stemX, bottomY, cornerX, _, _) = CombLGeom(node, g);
+                var bar = new Line
+                {
+                    StartPoint = new(stemX, bottomY), EndPoint = new(cornerX, bottomY),
+                    Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6,
+                    Cursor = new Cursor(StandardCursorType.SizeAll),
+                };
+                var capNode = node;
+                bar.PointerPressed += (_, e) =>
+                {
+                    if (_mode == EditMode.Remove) return;
+                    _combDrag = capNode; _combVert = true; e.Pointer.Capture(_canvas); e.Handled = true;
+                };
+                _canvas!.Children.Add(bar); _combHandles.Add(bar);
+            }
+            else
+            {
+                Bar(node.CombDir);
+            }
         }
     }
 
@@ -2095,12 +2115,54 @@ public class FlowChartWindow : Window
     // Routes one tine of a Multi-Verzweigung as part of a comb: a spine one grid off the diamond's bottom
     // (or right) edge, then a tooth at this tine's slot (index * spacing). A connected tine jogs into its
     // target head-on; a free tine just hangs a short stub in the air, ready to be wired up.
+    // Shared geometry of a Both-mode L comb: where the single stem leaves the diamond bottom (slidable via
+    // shift), the spine level below it, the elbow where the bottom arm meets the right arm, and the two
+    // per-arm tine spacings.
+    (double stemX, double bottomY, double cornerX, double stepB, double stepR) CombLGeom(FlowNode node, double g)
+    {
+        var s = new Rect(node.X, node.Y, node.Width, node.Height);
+        double stepB = CombStep(node, CombDirection.Bottom, g), stepR = CombStep(node, CombDirection.Right, g);
+        double stemX  = Math.Clamp(Snap(s.Center.X + node.CombShift * g), s.Left, s.Right);
+        double bottomY = Snap(s.Bottom + Math.Max(1, node.CombGap) * g);
+        int nB = CombTines(node, CombDirection.Bottom).Count;
+        double cornerX = Snap(stemX + Math.Max(1, nB) * stepB);
+        return (stemX, bottomY, cornerX, stepB, stepR);
+    }
+
+    // Routes one tine of a Both-mode L comb: a single stem leaves the diamond bottom, drops to the spine,
+    // runs right as the BOTTOM arm (teeth drop down), then turns up at the elbow as the RIGHT arm (teeth
+    // run right). Every tine shares the stem/elbow, so the overlapping segments draw one connected L.
+    List<Point> CombRouteL(FlowNode node, Rect? t, FlowConnection conn, CombDirection arm, int i, double g)
+    {
+        var (stemX, bottomY, cornerX, stepB, stepR) = CombLGeom(node, g);
+        double stub = 3 * g;
+        var s = new Rect(node.X, node.Y, node.Width, node.Height);
+        var head = new List<Point> { new(stemX, s.Bottom), new(stemX, bottomY) };
+        if (arm == CombDirection.Bottom)
+        {
+            double xk = Snap(stemX + i * stepB);
+            head.Add(new(xk, bottomY));
+            if (t is { } tr) { var e = EdgeSlide(tr, new(xk, tr.Top - g)); double j = Math.Max(bottomY, e.Y - g); head.Add(new(xk, j)); head.Add(new(e.X, j)); head.Add(e); }
+            else head.Add(new(xk, bottomY + stub));
+        }
+        else   // right arm rises from the elbow; teeth run right
+        {
+            double yj = Snap(bottomY - (i + 1) * stepR);
+            head.Add(new(cornerX, bottomY));
+            head.Add(new(cornerX, yj));
+            if (t is { } tr) { var e = EdgeSlide(tr, new(tr.Left - g, yj)); double j = Math.Max(cornerX, e.X - g); head.Add(new(j, yj)); head.Add(new(j, e.Y)); head.Add(e); }
+            else head.Add(new(cornerX + stub, yj));
+        }
+        return Simplify(Orthogonalize(head));
+    }
+
     List<Point> CombRoute(FlowNode node, Rect s, Rect? t, FlowConnection conn)
     {
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var comb = TineComb(node, conn);
         var tines = CombTines(node, comb);
         int i = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
+        if (node.CombDir == CombDirection.Both) return CombRouteL(node, t, conn, comb, i, g);
         double step = CombStep(node, comb, g);
         double stub = 3 * g;   // how far a free tine hangs in the air
         double gap   = Math.Max(1, node.CombGap) * g;   // spine distance from the diamond (draggable)
@@ -2514,6 +2576,13 @@ public class FlowChartWindow : Window
             var comb = TineComb(mnode, conn);
             var tines = CombTines(mnode, comb);
             int idx = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
+            if (mnode.CombDir == CombDirection.Both)
+            {
+                var (stemX, bottomY, cornerX, stepB, stepR) = CombLGeom(mnode, g);
+                return comb == CombDirection.Bottom
+                    ? (new Point(Snap(stemX + idx * stepB), bottomY + 12), false)
+                    : (new Point(cornerX + 12, Snap(bottomY - (idx + 1) * stepR)), true);
+            }
             double off = mnode.CombShift * g + (idx - (tines.Count - 1) / 2.0) * CombStep(mnode, comb, g);
             double gap = Math.Max(1, mnode.CombGap) * g;
             var nr = new Rect(mnode.X, mnode.Y, mnode.Width, mnode.Height);
