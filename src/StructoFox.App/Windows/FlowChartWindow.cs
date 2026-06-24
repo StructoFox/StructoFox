@@ -2030,31 +2030,22 @@ public class FlowChartWindow : Window
                 var (vtx, od) = StemVertex(s, side);
                 double defAlong = vertical ? s.Center.X : s.Center.Y;
                 double along = Snap(defAlong + node.CombStemPos * g);
-                bool both = node.CombDir == CombDirection.Both;
-                double cornerX = both ? CombLGeom(node, g).cornerX : 0;
+                if (node.CombDir == CombDirection.Both) along = Math.Min(along, CombLGeom(node, g).cornerX);   // stays on the bottom bar
                 // The final straight into the bar is a third of the distance from the diamond's near side to
                 // the bar (min one grid), so it's long enough to grab comfortably.
                 double lastLen = Math.Max(g, (vertical ? spine - s.Bottom : spine - s.Right) / 3);
                 Point exit = new(vtx.X + od.X * g, vtx.Y + od.Y * g);
                 var wps = node.CombStemWaypoints.Select(w => new Point(w.X, w.Y)).ToList();
-                Point meetPt; List<Point> raw;
-                if (both && wps.Count == 0 && along > cornerX)   // around the elbow, up the L's right arm
-                {
-                    meetPt = new(cornerX, spine - (along - cornerX));
-                    raw = new() { vtx, new(vtx.X, spine), new(cornerX, spine), meetPt };   // down, along bottom, up right arm
-                }
-                else
-                {
-                    meetPt = vertical ? new(along, spine) : new(spine, along);
-                    Point approach = vertical ? new(along, spine - lastLen) : new(spine - lastLen, along);
-                    bool opposite = vertical ? side == 0 /*Top*/ : side == 2 /*Left*/;
-                    if (wps.Count > 0) raw = new List<Point> { vtx }.Concat(wps).Append(meetPt).ToList();   // hand-routed
-                    else if (opposite && vertical)
-                    { double sideX = along >= s.Center.X ? s.Right + g : s.Left - g; raw = new() { vtx, exit, new(sideX, exit.Y), new(sideX, approach.Y), approach, meetPt }; }
-                    else if (opposite)
-                    { double sideY = along >= s.Center.Y ? s.Bottom + g : s.Top - g; raw = new() { vtx, exit, new(exit.X, sideY), new(approach.X, sideY), approach, meetPt }; }
-                    else raw = new() { vtx, exit, approach, meetPt };
-                }
+                Point meetPt = vertical ? new(along, spine) : new(spine, along);
+                Point approach = vertical ? new(along, spine - lastLen) : new(spine - lastLen, along);
+                bool opposite = vertical ? side == 0 /*Top*/ : side == 2 /*Left*/;
+                List<Point> raw;
+                if (wps.Count > 0) raw = new List<Point> { vtx }.Concat(wps).Append(meetPt).ToList();   // hand-routed
+                else if (opposite && vertical)
+                { double sideX = along >= s.Center.X ? s.Right + g : s.Left - g; raw = new() { vtx, exit, new(sideX, exit.Y), new(sideX, approach.Y), approach, meetPt }; }
+                else if (opposite)
+                { double sideY = along >= s.Center.Y ? s.Bottom + g : s.Top - g; raw = new() { vtx, exit, new(exit.X, sideY), new(approach.X, sideY), approach, meetPt }; }
+                else raw = new() { vtx, exit, approach, meetPt };
                 var st = Simplify(Orthogonalize(raw));
                 var capNode = node;
                 int last = st.Count - 2;
@@ -2143,13 +2134,11 @@ public class FlowChartWindow : Window
                 { double x = CombSlot(node, CombDirection.Bottom, k, bTeeth[k].TineOffset, g).slot.X; barLeft = Math.Min(barLeft, x); barRight = Math.Max(barRight, x); }
                 for (int k = 0; k < rTeeth.Count; k++)
                 { double y = CombSlot(node, CombDirection.Right, k, rTeeth[k].TineOffset, g).slot.Y; rTop = Math.Min(rTop, y); }
-                var stemMp = Stem(true, L.bottomY);   // Z-stem to its slidable meeting point (bottom bar or right arm)
-                bool stemOnRight = stemMp.Y < L.bottomY - 0.5;
+                var stemMp = Stem(true, L.bottomY);   // Z-stem to its meeting point on the bottom bar
                 barLeft = Math.Min(barLeft, stemMp.X); barRight = Math.Max(barRight, stemMp.X);
-                if (stemOnRight) rTop = Math.Min(rTop, stemMp.Y);
                 // Visible single L: bottom bar + right bar (the stem is drawn by Stem()).
                 Spine(new(barLeft, L.bottomY), new(barRight, L.bottomY));      // bottom bar
-                if (rTeeth.Count > 0 || stemOnRight)
+                if (rTeeth.Count > 0)
                     Spine(new(L.cornerX, L.bottomY), new(L.cornerX, rTop));    // right bar
 
                 var capNode = node;
@@ -2252,15 +2241,7 @@ public class FlowChartWindow : Window
             double defAlong = vertical ? s.Center.X : s.Center.Y;
             double along;
             if (_stemDrag.CombDir == CombDirection.Both)
-            {
-                // Project the cursor onto the L-path (bottom bar + right leg) and take the nearer point, so
-                // there's no flicker right at the elbow. `along` = distance from centre along that path.
-                var L = CombLGeom(_stemDrag, g);
-                double ax = Math.Min(cur.X, L.cornerX);                                // on the bottom bar (free to the left)
-                double by = Math.Clamp(cur.Y, L.bottomY - 300, L.bottomY);             // on the right leg
-                double dA = Dist(cur, new(ax, L.bottomY)), dB = Dist(cur, new(L.cornerX, by));
-                along = dB < dA ? L.cornerX + (L.bottomY - by) : ax;
-            }
+                along = Math.Min(cur.X, CombLGeom(_stemDrag, g).cornerX);   // along the bottom bar (up to the elbow)
             else along = vertical ? cur.X : cur.Y;
             int pos = (int)Math.Round((along - defAlong) / g);
             if (pos == _stemDrag.CombStemPos) return;
