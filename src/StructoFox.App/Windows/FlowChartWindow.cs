@@ -700,8 +700,10 @@ public class FlowChartWindow : Window
         proc.Items.Add(MI(Loc.S("Flow_SymParallel"),        () => AddNode(FlowNodeKind.Process, FlowSymbol.Parallel)));
         shapeMenu.Items.Add(proc);
 
-        shapeMenu.Items.Add(Act(Loc.S("Flow_Decision"), FlowNodeKind.Decision));
-        shapeMenu.Items.Add(Act(Loc.S("Flow_MultiDecision"), FlowNodeKind.MultiDecision));
+        var dec = Cat(Loc.S("Flow_Decision"));
+        dec.Items.Add(MI(Loc.S("Flow_Decision"),      () => AddNode(FlowNodeKind.Decision)));
+        dec.Items.Add(MI(Loc.S("Flow_MultiDecision"), () => AddNode(FlowNodeKind.MultiDecision)));
+        shapeMenu.Items.Add(dec);
 
         var io = Cat(Loc.S("Flow_CatIO"));
         io.Items.Add(MI(Loc.S("Flow_SymAuto"),         () => AddNode(FlowNodeKind.InputOutput)));
@@ -2461,8 +2463,12 @@ public class FlowChartWindow : Window
         // A free comb tine of a Multi-Verzweigung: not yet wired (no node target, no tap). Its open end is an
         // empty HANDLE you drag onto a target — never an arrowhead (an arrow tempts users to just butt a node
         // against it and think it's connected, which it wouldn't be).
-        bool freeTine = string.IsNullOrEmpty(conn.ToId) && !toTap
-                        && _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.MultiDecision;
+        bool isMultiSrc = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.MultiDecision;
+        bool freeTine = string.IsNullOrEmpty(conn.ToId) && !toTap && isMultiSrc;
+        // An auto comb tine (free or wired) is a tooth on the shared spine — no DIN departure dot (it isn't
+        // leaving a node edge), and a wired tooth in the L (Both) isn't hand-draggable (that would start a
+        // stray manual line at the node).
+        bool combTine = isMultiSrc && !toTap && conn.Waypoints.Count == 0;
 
         _connPts[conn.Id] = pts;   // remembered for the optional crossover-bridge overlay
 
@@ -2518,8 +2524,9 @@ public class FlowChartWindow : Window
             _canvas.Children.Add(handle); visuals.Add(handle);
         }
 
-        // DIN departure marker: a small filled dot where the flow line leaves the source edge.
-        if (!_data.DiagonalLines)
+        // DIN departure marker: a small filled dot where the flow line leaves the source edge. Comb teeth
+        // start on the spine, not a node edge, so they get no dot.
+        if (!_data.DiagonalLines && !combTine)
         {
             const double r = 3.5;
             var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, IsHitTestVisible = false };
@@ -2538,7 +2545,10 @@ public class FlowChartWindow : Window
             // for a straight arrow at the same height as its target (it grows a fresh knick). Only a FREE
             // comb tine is locked (its open tip handle is the interaction, and it has no target to route to —
             // bending it would vanish it); a WIRED tine can be hand-routed, taking it out of the auto comb.
-            bool draggable = !_data.DiagonalLines && !freeTine;
+            // Lock free tines (handle is the interaction) and L-comb teeth (their spine is shared; a hand
+            // drag would spawn a stray manual line from the node). A wired SINGLE-comb tooth stays draggable.
+            bool bothTooth = combTine && _data.Nodes.FirstOrDefault(n => n.Id == capConn.FromId)?.CombDir == CombDirection.Both;
+            bool draggable = !_data.DiagonalLines && !freeTine && !bothTooth;
             bool horiz = Math.Abs(p1.Y - p0.Y) < Math.Abs(p1.X - p0.X);
             var seg = new Line
             {
