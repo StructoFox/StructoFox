@@ -1968,41 +1968,44 @@ public class FlowChartWindow : Window
         return (comb == CombDirection.Right ? dh : dw) + 2 * g;
     }
 
-    // Draws a small draggable handle on each realized Multi-Verzweigung's comb spine; dragging it pushes the
-    // whole comb nearer to / further from the diamond (node.CombGap). Redrawn whenever connections are.
+    // Lays a transparent grab-line over each realized Multi-Verzweigung's comb SPINE (the bar at right angles
+    // to the stem). Dragging the bar pushes the whole comb nearer to / further from the diamond
+    // (node.CombGap). Redrawn whenever connections are.
     void RenderCombHandles()
     {
         if (_canvas is null) return;
         foreach (var h in _combHandles) _canvas.Children.Remove(h);
         _combHandles.Clear();
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
-        var brush = new SolidColorBrush(ParseColor(_style.LineColor));
         foreach (var node in _data.Nodes)
         {
             if (node.Kind != FlowNodeKind.MultiDecision || !_nodeViews.ContainsKey(node.Id)) continue;
             var s = new Rect(node.X, node.Y, node.Width, node.Height);
             double gap = Math.Max(1, node.CombGap) * g;
-            void Handle(Point at, bool vertical)
+            void Bar(CombDirection comb)
             {
-                const double hw = 4.5;
-                var h = new Rectangle
+                int n = CombTines(node, comb).Count;
+                if (n == 0) return;
+                double half = Math.Max(g, (n - 1) / 2.0 * CombStep(node, comb, g));   // min grabbable width
+                bool vertical = comb == CombDirection.Bottom;   // a bottom comb's spine is horizontal → drag vertically
+                Point a, b;
+                if (comb == CombDirection.Bottom) { double y = Snap(s.Bottom + gap); a = new(s.Center.X - half, y); b = new(s.Center.X + half, y); }
+                else                              { double x = Snap(s.Right  + gap); a = new(x, s.Center.Y - half); b = new(x, s.Center.Y + half); }
+                var bar = new Line
                 {
-                    Width = hw * 2, Height = hw * 2, Fill = brush, ZIndex = 6,
+                    StartPoint = a, EndPoint = b, Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6,
                     Cursor = new Cursor(vertical ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast),
                 };
-                Canvas.SetLeft(h, at.X - hw); Canvas.SetTop(h, at.Y - hw);
                 var capNode = node; bool capVert = vertical;
-                h.PointerPressed += (_, e) =>
+                bar.PointerPressed += (_, e) =>
                 {
                     if (_mode == EditMode.Remove) return;
                     _combDrag = capNode; _combVert = capVert; e.Pointer.Capture(_canvas); e.Handled = true;
                 };
-                _canvas!.Children.Add(h); _combHandles.Add(h);
+                _canvas!.Children.Add(bar); _combHandles.Add(bar);
             }
-            if (node.CombDir is CombDirection.Bottom or CombDirection.Both)
-                Handle(new Point(s.Center.X, Snap(s.Bottom + gap)), true);
-            if (node.CombDir is CombDirection.Right or CombDirection.Both)
-                Handle(new Point(Snap(s.Right + gap), s.Center.Y), false);
+            if (node.CombDir is CombDirection.Bottom or CombDirection.Both) Bar(CombDirection.Bottom);
+            if (node.CombDir is CombDirection.Right  or CombDirection.Both) Bar(CombDirection.Right);
         }
     }
 
@@ -2725,6 +2728,7 @@ public class FlowChartWindow : Window
         foreach (var id in need)   // any leftover (e.g. a tap cycle) — render anyway
             if (!done.Contains(id) && _data.Connections.FirstOrDefault(x => x.Id == id) is { } c) RenderConnection(c);
         RenderTapDots();
+        RenderCombHandles();   // keep the spine grab-bars on their moving diamonds
     }
 
     // Keeps a manually-routed connection's END segments straight when a node it touches moves: the first
