@@ -98,6 +98,10 @@ public class FlowNode
     /// 0 = automatic (a target symbol's width+1 grid for a bottom comb, height+1 for a right comb), so
     /// neighbouring case bodies don't collide.</summary>
     public int           TineSpacing { get; set; } = 0;
+
+    /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: grid steps from the diamond edge to the
+    /// comb spine — drag the spine handle to push the comb nearer/further from the condition.</summary>
+    public int           CombGap { get; set; } = 1;
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>
