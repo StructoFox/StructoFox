@@ -1099,7 +1099,7 @@ public class FlowChartWindow : Window
     static (double w, double h) DefaultNodeSize(FlowNodeKind kind, FlowSymbol sym)
     {
         bool offPage = sym == FlowSymbol.OffPageConnector;
-        double w = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : IsDecision(kind) ? 150 : 140;
+        double w = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : 140;   // diamonds match the others, so their L/R vertices stay grid-aligned
         double h = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind == FlowNodeKind.Connector ? 46 : 56;
         return (w, h);
     }
@@ -2024,7 +2024,7 @@ public class FlowChartWindow : Window
                 for (int k = 0; k < st.Count - 1; k++)
                 {
                     Spine(st[k], st[k + 1]);
-                    var sg = new Line { StartPoint = st[k], EndPoint = st[k + 1], Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6, Cursor = new Cursor(StandardCursorType.SizeAll) };
+                    var sg = new Line { StartPoint = st[k], EndPoint = st[k + 1], Stroke = Brushes.Transparent, StrokeThickness = 16, ZIndex = 7, Cursor = new Cursor(StandardCursorType.SizeAll) };
                     var pv = vtx; var pm = meetPt;
                     sg.PointerPressed += (_, e) =>
                     {
