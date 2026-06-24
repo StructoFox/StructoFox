@@ -150,6 +150,13 @@ public class FlowConnection
     /// <summary>For a Multi-Verzweigung comb tine: grid steps this tooth's slot is nudged ALONG the bar from
     /// its evenly-spaced default position — drag the tooth to set it (the bar grows/shrinks to follow).</summary>
     public int                 TineOffset { get; set; } = 0;
+
+    /// <summary>For a wired comb tooth: a user-chosen approach anchor near the target. The entry is the
+    /// projection of this onto the target's nearest edge, so the arrow can sit on any side (always
+    /// perpendicular, from outside). When <see cref="TineTargetSet"/> is false the entry is automatic.</summary>
+    public bool                TineTargetSet { get; set; } = false;
+    public double              TineTargetX   { get; set; } = 0;
+    public double              TineTargetY   { get; set; } = 0;
 }
 
 public class FlowChartData

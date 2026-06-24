@@ -83,6 +83,7 @@ public class FlowChartWindow : Window
     FlowConnection? _tapDrag;  // a tap line being slid along its target
     FlowConnection? _tineDrag; // a free comb tine whose open tip is being dragged onto a target
     FlowConnection? _toothDrag; // a wired comb tooth being slid along its bar (sets TineOffset)
+    FlowConnection? _toothEndDrag; // a wired comb tooth whose target end is being dragged to another side
     FlowConnection? _armedTine; // in connect mode: the specific free tine clicked, to wire on the next target click
     FlowNode? _combDrag;  bool _combVert;   // a Multi-Verzweigung whose comb spine is being pushed nearer/further
     bool _combGapOnly;      // the L bottom-bar grab moves gap + bar-shift; a single comb's bar grab is 2D
@@ -275,6 +276,7 @@ public class FlowChartWindow : Window
             }
             if (_combDrag is not null) { DragComb(e.GetPosition(_canvas)); return; }
             if (_toothDrag is not null) { DragTooth(e.GetPosition(_canvas)); return; }
+            if (_toothEndDrag is not null) { DragToothEnd(e.GetPosition(_canvas)); return; }
             if (_tineDrag is not null) { if (_rubberBand is not null) _rubberBand.EndPoint = e.GetPosition(_canvas); return; }
             if (_segConn is not null && _segBasePts is not null) { DragSegment(e.GetPosition(_canvas)); return; }
             if (_tapDrag is not null) { SlideTap(e.GetPosition(_canvas)); return; }
@@ -291,6 +293,7 @@ public class FlowChartWindow : Window
         {
             if (_combDrag is not null) { _combDrag = null; Save(); e.Pointer.Capture(null); return; }
             if (_toothDrag is not null) { _toothDrag = null; Save(); e.Pointer.Capture(null); return; }
+            if (_toothEndDrag is not null) { _toothEndDrag = null; Save(); e.Pointer.Capture(null); return; }
             if (_tineDrag is not null)
             {
                 var tine = _tineDrag; _tineDrag = null;
@@ -2130,6 +2133,16 @@ public class FlowChartWindow : Window
         RenderCombHandles();
     }
 
+    // Drags a wired comb tooth's TARGET end: stores the cursor as the approach anchor so the entry projects
+    // onto the target's nearest edge (any side, perpendicular). The bar-side bends absorb the rest.
+    void DragToothEnd(Point cur)
+    {
+        if (_toothEndDrag is null) return;
+        _toothEndDrag.TineTargetSet = true;
+        _toothEndDrag.TineTargetX = cur.X; _toothEndDrag.TineTargetY = cur.Y;
+        RenderConnection(_toothEndDrag);
+    }
+
     // Shifts the stored waypoints of a node's hand-routed comb teeth by (dx,dy) — used so a manual tooth
     // tail rides along when the whole comb is moved (its slot moves by the same delta).
     void TranslateCombTeeth(FlowNode node, double dx, double dy)
@@ -2223,18 +2236,28 @@ public class FlowChartWindow : Window
         var comb = TineComb(node, conn);
         int i = Math.Max(0, CombTines(node, comb).FindIndex(c => c.Id == conn.Id));
         var slot = CombSlot(node, comb, i, conn.TineOffset, g).slot;
-        return RouteToothFromSlot(slot, comb, t, g);
+        Point? anchor = conn.TineTargetSet ? new Point(conn.TineTargetX, conn.TineTargetY) : null;
+        return RouteToothFromSlot(slot, comb, t, g, anchor);
     }
 
-    // The straight tooth from a bar slot to its target (or a free stub in the air). Bottom teeth drop down,
-    // right teeth run right; a short jog enters the target head-on if it isn't directly in line.
-    List<Point> RouteToothFromSlot(Point slot, CombDirection comb, Rect? t, double g)
+    // The tooth from a bar slot to its target (or a free stub in the air). Without a user anchor the tooth
+    // drops down (bottom) / runs right (right) and jogs in. With an anchor the entry is that point projected
+    // onto the target's nearest edge (any side, perpendicular, from outside); the bar-side bends absorb a
+    // moving bar while the target end stays put.
+    List<Point> RouteToothFromSlot(Point slot, CombDirection comb, Rect? t, double g, Point? anchor = null)
     {
         double stub = 3 * g;
         var head = new List<Point> { slot };
         if (t is { } tr)
         {
-            if (comb == CombDirection.Right)
+            if (anchor is { } a)
+            {
+                var e = EdgeSlide(tr, a);
+                var od = Outward(tr, e);                                   // outward edge normal
+                var ap = new Point(e.X + od.X * g, e.Y + od.Y * g);        // one grid outside, perpendicular
+                head.Add(ap); head.Add(e);
+            }
+            else if (comb == CombDirection.Right)
             { var e = EdgeSlide(tr, new(tr.Left - g, slot.Y)); double j = Math.Max(slot.X, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
             else
             { var e = EdgeSlide(tr, new(slot.X, tr.Top - g)); double j = Math.Max(slot.Y, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }
@@ -2583,8 +2606,20 @@ public class FlowChartWindow : Window
                 if (_mode != EditMode.Remove && !string.IsNullOrEmpty(capConn.ToTapConn)
                     && _connPts.TryGetValue(capConn.Id, out var tpts) && segIdx == tpts.Count - 2)
                 { _tapDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
-                // A wired comb tooth: dragging slides its slot along the bar (sets TineOffset) — not free bends.
-                if (combTine && !freeTine) { _toothDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
+                // A wired comb tooth: grabbing nearer the TARGET drags its end onto another side (perpendicular);
+                // grabbing nearer the BAR slides its slot along the bar (TineOffset).
+                if (combTine && !freeTine)
+                {
+                    bool wired = !string.IsNullOrEmpty(capConn.ToId)
+                                 && _connPts.TryGetValue(capConn.Id, out var rp) && rp.Count >= 2;
+                    if (wired)
+                    {
+                        var gp = e.GetPosition(_canvas); var rpts = _connPts[capConn.Id];
+                        if (Dist(gp, rpts[^1]) < Dist(gp, rpts[0])) _toothEndDrag = capConn; else _toothDrag = capConn;
+                    }
+                    else _toothDrag = capConn;
+                    e.Pointer.Capture(_canvas); e.Handled = true; return;
+                }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
             };
             _canvas.Children.Add(seg); visuals.Add(seg);
@@ -2734,7 +2769,8 @@ public class FlowChartWindow : Window
         badge.PointerMoved += (_, e) =>
         {
             if (!drag || !_connPts.TryGetValue(conn.Id, out var pts) || pts.Count < 2) return;
-            var q = e.GetPosition(_canvas);
+            var raw = e.GetPosition(_canvas);
+            var q = new Point(Snap(raw.X), Snap(raw.Y));   // snap to the grid, so the label steps along the line
             conn.LabelPos = NearestFraction(pts, q);
             var (anchor, horizontal) = PointAlong(pts, conn.LabelPos);
             double perp = horizontal ? q.Y - anchor.Y : q.X - anchor.X;
