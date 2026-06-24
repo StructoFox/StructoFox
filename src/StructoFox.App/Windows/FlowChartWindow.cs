@@ -2029,7 +2029,7 @@ public class FlowChartWindow : Window
                 double defAlong = vertical ? s.Center.X : s.Center.Y;
                 // A single comb's stem rides with the group shift (so shifting the whole comb doesn't leave the
                 // bar overhanging to the stem); the L's stem is independent of its bar shift.
-                double baseShift = node.CombDir == CombDirection.Both ? 0 : node.CombShift;
+                double baseShift = node.CombDir == CombDirection.Both ? node.CombBarShift : node.CombShift;
                 double along = Snap(defAlong + (baseShift + node.CombStemPos) * g);
                 if (node.CombDir == CombDirection.Both) along = Math.Min(along, CombLGeom(node, g).cornerX);   // stays on the bottom bar
                 // The final straight into the bar is a third of the distance from the diamond's near side to
@@ -2130,13 +2130,15 @@ public class FlowChartWindow : Window
                 var rTeeth = CombTines(node, CombDirection.Right);
                 // The bar spans only stem ↔ actual teeth (and the elbow if a right arm exists) — no phantom
                 // overhang at the abstract bar origin, so moving the outer tooth inward shortens the bar.
-                double barLeft = L.stemX, barRight = rTeeth.Count > 0 ? L.cornerX : L.stemX, rTop = L.bottomY, rBot = L.bottomY;
+                var stemMp = Stem(true, L.bottomY);   // Z-stem to its meeting point on the bottom bar (call first)
+                // The bottom bar spans only the actual elements (stem meeting, teeth, and the elbow when a
+                // right arm exists) — NOT the diamond centre, so a shifted bar leaves no spike to the middle.
+                double barLeft = stemMp.X, barRight = stemMp.X, rTop = L.bottomY, rBot = L.bottomY;
+                if (rTeeth.Count > 0) { barLeft = Math.Min(barLeft, L.cornerX); barRight = Math.Max(barRight, L.cornerX); }
                 for (int k = 0; k < bTeeth.Count; k++)
                 { double x = CombSlot(node, CombDirection.Bottom, k, bTeeth[k].TineOffset, g).slot.X; barLeft = Math.Min(barLeft, x); barRight = Math.Max(barRight, x); }
                 for (int k = 0; k < rTeeth.Count; k++)
                 { double y = CombSlot(node, CombDirection.Right, k, rTeeth[k].TineOffset, g).slot.Y; rTop = Math.Min(rTop, y); rBot = Math.Max(rBot, y); }
-                var stemMp = Stem(true, L.bottomY);   // Z-stem to its meeting point on the bottom bar
-                barLeft = Math.Min(barLeft, stemMp.X); barRight = Math.Max(barRight, stemMp.X);
                 // Visible single L: bottom bar + right bar (the stem is drawn by Stem()).
                 Spine(new(barLeft, L.bottomY), new(barRight, L.bottomY));      // bottom bar
                 if (rTeeth.Count > 0)
@@ -2245,7 +2247,7 @@ public class FlowChartWindow : Window
                 along = Math.Min(cur.X, CombLGeom(_stemDrag, g).cornerX);   // along the bottom bar (up to the elbow)
             else along = vertical ? cur.X : cur.Y;
             int pos = (int)Math.Round((along - defAlong) / g);
-            if (_stemDrag.CombDir != CombDirection.Both) pos -= _stemDrag.CombShift;   // stem offset is relative to the shifted comb
+            pos -= _stemDrag.CombDir == CombDirection.Both ? _stemDrag.CombBarShift : _stemDrag.CombShift;   // relative to the shifted comb
             if (pos == _stemDrag.CombStemPos) return;
             _stemDrag.CombStemPos = pos;
         }
