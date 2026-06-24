@@ -1028,9 +1028,27 @@ public class FlowChartWindow : Window
             Height = dh,
         };
         _data.Nodes.Add(node);
+        // A Multi-Verzweigung is born with a small comb of free tines (cases), ready to be wired to targets.
+        if (kind == FlowNodeKind.MultiDecision) for (int k = 0; k < 3; k++) AddTine(node);
         Save();
         RenderNode(node);
+        if (kind == FlowNodeKind.MultiDecision) RenderAllConnections();
         if (_mode != EditMode.Select) SetMode(EditMode.Select);   // a fresh node is ready to place, not delete
+    }
+
+    // Adds one free comb tine (an outgoing connection with no target yet) to a Multi-Verzweigung, with a
+    // unique default case label. The tine hangs in the air until the user connects it to a target.
+    FlowConnection AddTine(FlowNode node)
+    {
+        var baseLbl = Loc.S("Flow_CaseDefault");
+        int n = _data.Connections.Count(c => c.FromId == node.Id) + 1;
+        string lbl;
+        do { lbl = $"{baseLbl} {n++}"; }
+        while (_data.Connections.Any(c => c.FromId == node.Id &&
+               string.Equals(c.Label.Trim(), lbl, StringComparison.OrdinalIgnoreCase)));
+        var tine = new FlowConnection { FromId = node.Id, Label = lbl, LineColor = _style.LineColor };
+        _data.Connections.Add(tine);
+        return tine;
     }
 
     // A diamond branch — either a binary Decision or a multi-way Multi-Verzweigung (switch/case). Both
@@ -1537,6 +1555,21 @@ public class FlowChartWindow : Window
                 if (int.TryParse(s, out var v) && v >= 1) { node.TineSpacing = v; Save(); UpdateConnectionsFor(node.Id); }
             };
             cm.Items.Add(spacing);
+
+            var addTine = new MenuItem { Header = Loc.S("Flow_AddTine") };
+            addTine.Click += (_, _) => { AddTine(node); Save(); RenderAllConnections(); };
+            cm.Items.Add(addTine);
+
+            var remTine = new MenuItem { Header = Loc.S("Flow_RemoveTine") };
+            remTine.Click += (_, _) =>
+            {
+                // Prefer dropping a still-free tine; otherwise the last one added.
+                var drop = _data.Connections.LastOrDefault(c => c.FromId == node.Id
+                               && string.IsNullOrEmpty(c.ToId) && string.IsNullOrEmpty(c.ToTapConn))
+                           ?? _data.Connections.LastOrDefault(c => c.FromId == node.Id);
+                if (drop is not null) DeleteConnection(drop);
+            };
+            cm.Items.Add(remTine);
         }
 
         cm.Items.Add(new Separator());
@@ -1605,19 +1638,32 @@ public class FlowChartWindow : Window
         }
         if (nodeId == _connectFromId) { _connectFromId = null; RemoveRubberBand(); return; }
 
-        var conn = new FlowConnection { FromId = _connectFromId, ToId = nodeId, LineColor = _style.LineColor };
+        var fromId = _connectFromId;
         _connectFromId = null;
         RemoveRubberBand();
+        var src = _data.Nodes.FirstOrDefault(n => n.Id == fromId);
 
-        // (Multi-)decisions get a branch/case label. A Multi-Verzweigung's label is mandatory + unique;
-        // cancelling it aborts the tine rather than creating an unlabelled case.
-        var src = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId);
-        if (src is not null && IsDecision(src.Kind))
+        // A Multi-Verzweigung doesn't make a brand-new line — it WIRES its next free comb tine to the target
+        // (growing one if all are taken), keeping its mandatory unique case label.
+        if (src is { Kind: FlowNodeKind.MultiDecision })
         {
-            var lbl = await PromptBranchLabel(src, "", conn.Id);
-            if (lbl is null && src.Kind == FlowNodeKind.MultiDecision) return;   // cancelled a required case label
-            conn.Label = lbl ?? "";
+            var free = _data.Connections.FirstOrDefault(c => c.FromId == src.Id
+                           && string.IsNullOrEmpty(c.ToId) && string.IsNullOrEmpty(c.ToTapConn));
+            var lbl = await PromptBranchLabel(src, free?.Label ?? "", free?.Id);
+            if (lbl is null) { RenderAllConnections(); return; }   // cancelled: leave the comb untouched
+            var tine = free ?? AddTine(src);
+            tine.ToId = nodeId;
+            tine.Label = lbl;
+            Save();
+            RenderAllConnections();
+            RefreshJunctions();
+            return;
         }
+
+        var conn = new FlowConnection { FromId = fromId, ToId = nodeId, LineColor = _style.LineColor };
+        // A plain decision gets an optional branch label (yes/no, etc.).
+        if (src is not null && IsDecision(src.Kind))
+            conn.Label = await PromptBranchLabel(src, "", conn.Id) ?? "";
 
         _data.Connections.Add(conn);
         Save();
@@ -1852,14 +1898,18 @@ public class FlowChartWindow : Window
         }
 
         var bn = RouteRect(conn.ToId);
+
+        // A Multi-Verzweigung lays its outgoing tines out as a comb — a shared spine off the diamond with
+        // one labelled tooth per case. A free (not-yet-connected) tine ends in the air at its comb slot
+        // (bn is null); a connected one runs into its target. A manually-routed tine keeps the user's path.
+        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mds
+            && conn.Waypoints.Count == 0)
+            return CombRoute(mds, a.Value, bn, conn);
+
         if (bn is null) return null;
         if (_data.DiagonalLines)
             return new List<Point> { RectBorderPoint(a.Value, bn.Value.Center), RectBorderPoint(bn.Value, a.Value.Center) };
         if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, bn.Value, conn);
-        // A Multi-Verzweigung lays its (auto-routed) outgoing tines out as a comb — a shared spine off the
-        // diamond with one labelled tooth per case. A manually-routed tine (above) keeps the user's path.
-        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mds)
-            return CombRoute(mds, a.Value, bn.Value, conn);
         return Simplify(_liveDrag ? OrthoRoute(a.Value, bn.Value)
                                   : OrthoRouteAvoiding(a.Value, bn.Value, conn.FromId, conn.ToId, conn.Id));
     }
@@ -1874,17 +1924,23 @@ public class FlowChartWindow : Window
         return (tc.X - nc.X) > (tc.Y - nc.Y) ? CombDirection.Right : CombDirection.Bottom;
     }
 
+    // All comb tines of a node on the same comb, in stable creation order (so a tooth keeps its slot as
+    // others are added/removed). Includes free (not-yet-connected) tines so they occupy slots too.
+    List<FlowConnection> CombTines(FlowNode node, CombDirection comb) =>
+        _data.Connections.Where(c => c.FromId == node.Id && string.IsNullOrEmpty(c.ToTapConn)
+                                     && c.Waypoints.Count == 0 && TineComb(node, c) == comb).ToList();
+
     // Routes one tine of a Multi-Verzweigung as part of a comb: a spine one grid off the diamond's bottom
-    // (or right) edge, then a tooth at this tine's slot (index * spacing), then a short jog into the target
-    // entering it head-on. Teeth are ordered by creation order so they stay put as others are added.
-    List<Point> CombRoute(FlowNode node, Rect s, Rect t, FlowConnection conn)
+    // (or right) edge, then a tooth at this tine's slot (index * spacing). A connected tine jogs into its
+    // target head-on; a free tine just hangs a short stub in the air, ready to be wired up.
+    List<Point> CombRoute(FlowNode node, Rect s, Rect? t, FlowConnection conn)
     {
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var comb = TineComb(node, conn);
-        var tines = _data.Connections.Where(c => c.FromId == node.Id && !string.IsNullOrEmpty(c.ToId)
-                                                 && c.Waypoints.Count == 0 && TineComb(node, c) == comb).ToList();
+        var tines = CombTines(node, comb);
         int i = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
         double step = Math.Max(1, node.TineSpacing) * g;
+        double stub = 3 * g;   // how far a free tine hangs in the air
 
         List<Point> pts;
         if (comb == CombDirection.Right)
@@ -1892,18 +1948,28 @@ public class FlowChartWindow : Window
             var exit  = new Point(s.Right, s.Center.Y);
             double spineX = Snap(s.Right + g);
             double tineY  = Snap(s.Center.Y + i * step);
-            var entry = EdgeSlide(t, new Point(t.Left - g, tineY));
-            double jogX = Math.Max(spineX, entry.X - g);
-            pts = new() { exit, new(spineX, exit.Y), new(spineX, tineY), new(jogX, tineY), new(jogX, entry.Y), entry };
+            if (t is { } tr)
+            {
+                var entry = EdgeSlide(tr, new Point(tr.Left - g, tineY));
+                double jogX = Math.Max(spineX, entry.X - g);
+                pts = new() { exit, new(spineX, exit.Y), new(spineX, tineY), new(jogX, tineY), new(jogX, entry.Y), entry };
+            }
+            else
+                pts = new() { exit, new(spineX, exit.Y), new(spineX, tineY), new(spineX + stub, tineY) };
         }
         else
         {
             var exit  = new Point(s.Center.X, s.Bottom);
             double spineY = Snap(s.Bottom + g);
             double tineX  = Snap(s.Center.X + i * step);
-            var entry = EdgeSlide(t, new Point(tineX, t.Top - g));
-            double jogY = Math.Max(spineY, entry.Y - g);
-            pts = new() { exit, new(exit.X, spineY), new(tineX, spineY), new(tineX, jogY), new(entry.X, jogY), entry };
+            if (t is { } tr)
+            {
+                var entry = EdgeSlide(tr, new Point(tineX, tr.Top - g));
+                double jogY = Math.Max(spineY, entry.Y - g);
+                pts = new() { exit, new(exit.X, spineY), new(tineX, spineY), new(tineX, jogY), new(entry.X, jogY), entry };
+            }
+            else
+                pts = new() { exit, new(exit.X, spineY), new(tineX, spineY), new(tineX, spineY + stub) };
         }
         return Simplify(Orthogonalize(pts));
     }
@@ -2339,10 +2405,11 @@ public class FlowChartWindow : Window
         style.Click += (_, _) => { conn.Arrow = !hasArrow; Save(); RenderConnection(conn); };
         cm.Items.Add(style);
 
-        // Flipping swaps the two node ends. It's meaningless for a tap (which ends ON a line, not at a node,
-        // so it has no ToId) — and swapping would blank FromId and make the line vanish — so offer it only
-        // for node-to-node lines.
-        if (!toTap)
+        // Flipping swaps the two node ends. It's meaningless (and would blank FromId, vanishing the line)
+        // for a tap or a free comb tine (no ToId), and reversing a Multi-Verzweigung tine would break its
+        // comb — so offer it only for plain node-to-node lines.
+        bool fromMulti = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.MultiDecision;
+        if (!toTap && !string.IsNullOrEmpty(conn.ToId) && !fromMulti)
         {
             var flip = new MenuItem { Header = Loc.S("Flow_FlipArrow") };
             flip.Click += (_, _) => { (conn.FromId, conn.ToId) = (conn.ToId, conn.FromId); Save(); RenderConnection(conn); };
