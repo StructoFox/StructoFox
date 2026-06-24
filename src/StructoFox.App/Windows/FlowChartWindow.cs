@@ -2229,9 +2229,15 @@ public class FlowChartWindow : Window
         style.Click += (_, _) => { conn.Arrow = !hasArrow; Save(); RenderConnection(conn); };
         cm.Items.Add(style);
 
-        var flip = new MenuItem { Header = Loc.S("Flow_FlipArrow") };
-        flip.Click += (_, _) => { (conn.FromId, conn.ToId) = (conn.ToId, conn.FromId); Save(); RenderConnection(conn); };
-        cm.Items.Add(flip);
+        // Flipping swaps the two node ends. It's meaningless for a tap (which ends ON a line, not at a node,
+        // so it has no ToId) — and swapping would blank FromId and make the line vanish — so offer it only
+        // for node-to-node lines.
+        if (!toTap)
+        {
+            var flip = new MenuItem { Header = Loc.S("Flow_FlipArrow") };
+            flip.Click += (_, _) => { (conn.FromId, conn.ToId) = (conn.ToId, conn.FromId); Save(); RenderConnection(conn); };
+            cm.Items.Add(flip);
+        }
         var trans = new MenuItem { Header = conn.Transmission ? Loc.S("Flow_TransmissionOff") : Loc.S("Flow_Transmission") };
         trans.Click += (_, _) => { conn.Transmission = !conn.Transmission; Save(); RenderConnection(conn); };
         cm.Items.Add(trans);
