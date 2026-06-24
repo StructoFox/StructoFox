@@ -1606,6 +1606,15 @@ public class FlowChartWindow : Window
             addTine.Click += (_, _) => { AddTine(node); Save(); RenderAllConnections(); };
             cm.Items.Add(addTine);
 
+            var resetStem = new MenuItem { Header = Loc.S("Flow_ResetStem") };
+            Ui.Theme(resetStem, MenuItem.ForegroundProperty, "SidebarTextBrush");
+            resetStem.Click += (_, _) =>
+            {
+                node.CombStemWaypoints.Clear(); node.CombStemPos = 0; node.CombStemVertex = -1;
+                Save(); RenderAllConnections();
+            };
+            cm.Items.Add(resetStem);
+
             var remTine = new MenuItem { Header = Loc.S("Flow_RemoveTine") };
             remTine.Click += (_, _) =>
             {
@@ -2021,7 +2030,10 @@ public class FlowChartWindow : Window
                 double defAlong = vertical ? s.Center.X : s.Center.Y;
                 double meet = Snap(defAlong + node.CombStemPos * g);
                 Point meetPt = vertical ? new(meet, spine) : new(spine, meet);
-                Point approach = vertical ? new(meet, spine - g) : new(spine - g, meet);   // perpendicular into the bar
+                // The final straight into the bar is a third of the distance from the diamond's near side to
+                // the bar (min one grid), so it's long enough to grab comfortably.
+                double lastLen = Math.Max(g, (vertical ? spine - s.Bottom : spine - s.Right) / 3);
+                Point approach = vertical ? new(meet, spine - lastLen) : new(spine - lastLen, meet);
                 Point exit = new(vtx.X + od.X * g, vtx.Y + od.Y * g);
                 // If the chosen vertex faces AWAY from the bar (e.g. Top vertex on a downward comb), go around
                 // the diamond's near side instead of cutting back through it.
@@ -2030,12 +2042,12 @@ public class FlowChartWindow : Window
                 if (opposite && vertical)
                 {
                     double sideX = meet >= s.Center.X ? s.Right + g : s.Left - g;
-                    raw = new() { vtx, exit, new(sideX, exit.Y), new(sideX, spine - g), approach, meetPt };
+                    raw = new() { vtx, exit, new(sideX, exit.Y), new(sideX, approach.Y), approach, meetPt };
                 }
                 else if (opposite)
                 {
                     double sideY = meet >= s.Center.Y ? s.Bottom + g : s.Top - g;
-                    raw = new() { vtx, exit, new(exit.X, sideY), new(spine - g, sideY), approach, meetPt };
+                    raw = new() { vtx, exit, new(exit.X, sideY), new(approach.X, sideY), approach, meetPt };
                 }
                 else raw = new() { vtx, exit, approach, meetPt };
                 var wps = node.CombStemWaypoints.Select(w => new Point(w.X, w.Y)).ToList();
