@@ -2256,7 +2256,7 @@ public class FlowChartWindow : Window
                 // Project the cursor onto the L-path (bottom bar + right leg) and take the nearer point, so
                 // there's no flicker right at the elbow. `along` = distance from centre along that path.
                 var L = CombLGeom(_stemDrag, g);
-                double ax = Math.Clamp(cur.X, s.Center.X, L.cornerX);                  // on the bottom bar
+                double ax = Math.Min(cur.X, L.cornerX);                                // on the bottom bar (free to the left)
                 double by = Math.Clamp(cur.Y, L.bottomY - 300, L.bottomY);             // on the right leg
                 double dA = Dist(cur, new(ax, L.bottomY)), dB = Dist(cur, new(L.cornerX, by));
                 along = dB < dA ? L.cornerX + (L.bottomY - by) : ax;
