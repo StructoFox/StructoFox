@@ -679,6 +679,7 @@ public class FlowChartWindow : Window
         shapeMenu.Items.Add(proc);
 
         shapeMenu.Items.Add(Act(Loc.S("Flow_Decision"), FlowNodeKind.Decision));
+        shapeMenu.Items.Add(Act(Loc.S("Flow_MultiDecision"), FlowNodeKind.MultiDecision));
 
         var io = Cat(Loc.S("Flow_CatIO"));
         io.Items.Add(MI(Loc.S("Flow_SymAuto"),         () => AddNode(FlowNodeKind.InputOutput)));
@@ -1032,12 +1033,17 @@ public class FlowChartWindow : Window
         if (_mode != EditMode.Select) SetMode(EditMode.Select);   // a fresh node is ready to place, not delete
     }
 
+    // A diamond branch — either a binary Decision or a multi-way Multi-Verzweigung (switch/case). Both
+    // share the norm-compliant diamond shape, colours, branch labelling and default size; only the number
+    // of outgoing tines and the comb layout differ.
+    static bool IsDecision(FlowNodeKind k) => k is FlowNodeKind.Decision or FlowNodeKind.MultiDecision;
+
     // The standard (and minimum) size per node kind/symbol — shared by AddNode and the resize clamp,
     // so a symbol never scales below the dimensions it would be created at.
     static (double w, double h) DefaultNodeSize(FlowNodeKind kind, FlowSymbol sym)
     {
         bool offPage = sym == FlowSymbol.OffPageConnector;
-        double w = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : kind == FlowNodeKind.Decision ? 150 : 140;
+        double w = kind == FlowNodeKind.Junction ? 9 : offPage ? 50 : kind == FlowNodeKind.Connector ? 46 : IsDecision(kind) ? 150 : 140;
         double h = kind == FlowNodeKind.Junction ? 9 : offPage ? 54 : kind == FlowNodeKind.Connector ? 46 : 56;
         return (w, h);
     }
@@ -1059,7 +1065,8 @@ public class FlowChartWindow : Window
     {
         FlowNodeKind.Start       => Loc.S("Flow_DefStart"),
         FlowNodeKind.End         => Loc.S("Flow_DefEnd"),
-        FlowNodeKind.Decision    => Loc.S("Flow_DefDecision"),
+        FlowNodeKind.Decision      => Loc.S("Flow_DefDecision"),
+        FlowNodeKind.MultiDecision => Loc.S("Flow_DefDecision"),
         FlowNodeKind.InputOutput => Loc.S("Flow_DefIO"),
         FlowNodeKind.Subroutine  => Loc.S("Flow_DefCall"),
         FlowNodeKind.Comment     => Loc.S("Flow_DefNote"),
@@ -1085,7 +1092,7 @@ public class FlowChartWindow : Window
             : node.Kind switch
             {
                 FlowNodeKind.Start or FlowNodeKind.End => RoundedBox(node.Height / 2, fill, stroke),
-                FlowNodeKind.Decision    => DiamondShape(node.Width, node.Height, fill, stroke),
+                FlowNodeKind.Decision or FlowNodeKind.MultiDecision => DiamondShape(node.Width, node.Height, fill, stroke),
                 FlowNodeKind.InputOutput => ParallelogramShape(node.Width, node.Height, fill, stroke),
                 FlowNodeKind.Subroutine  => SubroutineShape(fill, stroke),
                 FlowNodeKind.Comment     => CommentShape(fill, stroke),
@@ -1508,6 +1515,30 @@ public class FlowChartWindow : Window
             cm.Items.Add(symMenu);
         }
 
+        // Multi-Verzweigung: choose which comb(s) the tines hang on and how far apart they sit.
+        if (node.Kind == FlowNodeKind.MultiDecision)
+        {
+            var combMenu = new MenuItem { Header = Loc.S("Flow_CombDir") };
+            void Dir(string label, CombDirection d)
+            {
+                var mi = new MenuItem { Header = (node.CombDir == d ? "● " : "") + label };
+                mi.Click += (_, _) => { node.CombDir = d; Save(); UpdateConnectionsFor(node.Id); };
+                combMenu.Items.Add(mi);
+            }
+            Dir(Loc.S("Flow_CombBottom"), CombDirection.Bottom);
+            Dir(Loc.S("Flow_CombRight"),  CombDirection.Right);
+            Dir(Loc.S("Flow_CombBoth"),   CombDirection.Both);
+            cm.Items.Add(combMenu);
+
+            var spacing = new MenuItem { Header = Loc.S("Flow_TineSpacing") };
+            spacing.Click += async (_, _) =>
+            {
+                var s = await PromptDialog.Show(this, Loc.S("Flow_TineSpacing"), node.TineSpacing.ToString());
+                if (int.TryParse(s, out var v) && v >= 1) { node.TineSpacing = v; Save(); UpdateConnectionsFor(node.Id); }
+            };
+            cm.Items.Add(spacing);
+        }
+
         cm.Items.Add(new Separator());
         var del = new MenuItem { Header = Loc.S("Flow_DeleteNode") };
         del.Click += (_, _) => { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); };
@@ -1578,14 +1609,40 @@ public class FlowChartWindow : Window
         _connectFromId = null;
         RemoveRubberBand();
 
-        // Decisions get a branch label (yes/no, etc.).
-        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Decision)
-            conn.Label = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
+        // (Multi-)decisions get a branch/case label. A Multi-Verzweigung's label is mandatory + unique;
+        // cancelling it aborts the tine rather than creating an unlabelled case.
+        var src = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId);
+        if (src is not null && IsDecision(src.Kind))
+        {
+            var lbl = await PromptBranchLabel(src, "", conn.Id);
+            if (lbl is null && src.Kind == FlowNodeKind.MultiDecision) return;   // cancelled a required case label
+            conn.Label = lbl ?? "";
+        }
 
         _data.Connections.Add(conn);
         Save();
         RenderConnection(conn);
         RefreshJunctions();   // a new line onto a junction may turn it into a crossing → show its dot
+    }
+
+    // Prompts for a branch/case label on a line leaving a (multi-)decision. For a Multi-Verzweigung the
+    // label is mandatory and must be unique among that node's other outgoing tines — re-prompts on a blank
+    // or duplicate. Returns the chosen label, or null if the user cancelled.
+    async Task<string?> PromptBranchLabel(FlowNode src, string current, string? excludeConnId)
+    {
+        bool multi = src.Kind == FlowNodeKind.MultiDecision;
+        while (true)
+        {
+            var entered = (await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), current))?.Trim();
+            if (entered is null) return null;                       // cancelled
+            if (!multi) return entered;                             // plain decision: any label (incl. empty) is fine
+            bool dup = entered.Length == 0 || _data.Connections.Any(c =>
+                c.Id != excludeConnId && c.FromId == src.Id &&
+                string.Equals(c.Label.Trim(), entered, StringComparison.OrdinalIgnoreCase));
+            if (!dup) return entered;
+            await MessageDialog.Show(this, Loc.S("Flow_CaseLabelDup"), Loc.S("Flow_MultiDecision"));
+            current = entered;
+        }
     }
 
     // Renders every saved connection (used once after nodes are laid out).
@@ -1799,8 +1856,56 @@ public class FlowChartWindow : Window
         if (_data.DiagonalLines)
             return new List<Point> { RectBorderPoint(a.Value, bn.Value.Center), RectBorderPoint(bn.Value, a.Value.Center) };
         if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, bn.Value, conn);
+        // A Multi-Verzweigung lays its (auto-routed) outgoing tines out as a comb — a shared spine off the
+        // diamond with one labelled tooth per case. A manually-routed tine (above) keeps the user's path.
+        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mds)
+            return CombRoute(mds, a.Value, bn.Value, conn);
         return Simplify(_liveDrag ? OrthoRoute(a.Value, bn.Value)
                                   : OrthoRouteAvoiding(a.Value, bn.Value, conn.FromId, conn.ToId, conn.Id));
+    }
+
+    // Which comb a Multi-Verzweigung tine rides on. A single-direction node forces it; in Both mode each
+    // tine joins the comb its target most faces (further right → right comb, else bottom).
+    CombDirection TineComb(FlowNode node, FlowConnection c)
+    {
+        if (node.CombDir != CombDirection.Both) return node.CombDir;
+        var nc = new Rect(node.X, node.Y, node.Width, node.Height).Center;
+        var tc = RouteRect(c.ToId)?.Center ?? nc;
+        return (tc.X - nc.X) > (tc.Y - nc.Y) ? CombDirection.Right : CombDirection.Bottom;
+    }
+
+    // Routes one tine of a Multi-Verzweigung as part of a comb: a spine one grid off the diamond's bottom
+    // (or right) edge, then a tooth at this tine's slot (index * spacing), then a short jog into the target
+    // entering it head-on. Teeth are ordered by creation order so they stay put as others are added.
+    List<Point> CombRoute(FlowNode node, Rect s, Rect t, FlowConnection conn)
+    {
+        double g = _data.GridSize >= 4 ? _data.GridSize : 10;
+        var comb = TineComb(node, conn);
+        var tines = _data.Connections.Where(c => c.FromId == node.Id && !string.IsNullOrEmpty(c.ToId)
+                                                 && c.Waypoints.Count == 0 && TineComb(node, c) == comb).ToList();
+        int i = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
+        double step = Math.Max(1, node.TineSpacing) * g;
+
+        List<Point> pts;
+        if (comb == CombDirection.Right)
+        {
+            var exit  = new Point(s.Right, s.Center.Y);
+            double spineX = Snap(s.Right + g);
+            double tineY  = Snap(s.Center.Y + i * step);
+            var entry = EdgeSlide(t, new Point(t.Left - g, tineY));
+            double jogX = Math.Max(spineX, entry.X - g);
+            pts = new() { exit, new(spineX, exit.Y), new(spineX, tineY), new(jogX, tineY), new(jogX, entry.Y), entry };
+        }
+        else
+        {
+            var exit  = new Point(s.Center.X, s.Bottom);
+            double spineY = Snap(s.Bottom + g);
+            double tineX  = Snap(s.Center.X + i * step);
+            var entry = EdgeSlide(t, new Point(tineX, t.Top - g));
+            double jogY = Math.Max(spineY, entry.Y - g);
+            pts = new() { exit, new(exit.X, spineY), new(tineX, spineY), new(tineX, jogY), new(entry.X, jogY), entry };
+        }
+        return Simplify(Orthogonalize(pts));
     }
 
     // Routes a tap as a clean L whose FINAL segment is perpendicular to the target line (a proper T): the
@@ -1892,8 +1997,13 @@ public class FlowChartWindow : Window
         { RenderAllConnections(); return; }
 
         string label = "";
-        if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
-            label = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
+        var tapSrc = _data.Nodes.FirstOrDefault(n => n.Id == from);
+        if (tapSrc is not null && IsDecision(tapSrc.Kind))
+        {
+            var lbl = await PromptBranchLabel(tapSrc, "", null);
+            if (lbl is null && tapSrc.Kind == FlowNodeKind.MultiDecision) { RenderAllConnections(); return; }
+            label = lbl ?? "";
+        }
 
         // A tap normally carries no arrowhead, but a backward tap (the line meets a point LEFT of or ABOVE
         // its source — typically a loop) gets one: it aids readability where the flow direction isn't obvious.
@@ -2117,7 +2227,7 @@ public class FlowChartWindow : Window
         if (conn.LabelPos >= 0) return PointAlong(pts, conn.LabelPos);
 
         Point sa, sb;
-        bool fromDecision = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId)?.Kind == FlowNodeKind.Decision;
+        bool fromDecision = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { } fn && IsDecision(fn.Kind);
         if (fromDecision) { sa = pts[0]; sb = pts[1]; }
         else (sa, sb) = LongestSegment(pts);
         return (new Point((sa.X + sb.X) / 2, (sa.Y + sb.Y) / 2), Math.Abs(sb.X - sa.X) >= Math.Abs(sb.Y - sa.Y));
@@ -2719,6 +2829,7 @@ public class FlowChartWindow : Window
         FlowNodeKind.Start       => (Color.FromRgb(0xC8, 0xE6, 0xC9), Color.FromRgb(0x2E, 0x7D, 0x32)),
         FlowNodeKind.End         => (Color.FromRgb(0xFF, 0xCD, 0xD2), Color.FromRgb(0xC6, 0x28, 0x28)),
         FlowNodeKind.Decision    => (Color.FromRgb(0xFF, 0xF1, 0xC4), Color.FromRgb(0xF5, 0x7F, 0x17)),
+        FlowNodeKind.MultiDecision => (Color.FromRgb(0xFF, 0xF1, 0xC4), Color.FromRgb(0xF5, 0x7F, 0x17)),
         FlowNodeKind.InputOutput => (Color.FromRgb(0xBB, 0xDE, 0xFB), Color.FromRgb(0x15, 0x65, 0xC0)),
         FlowNodeKind.Subroutine  => (Color.FromRgb(0xD1, 0xC4, 0xE9), Color.FromRgb(0x51, 0x2D, 0xA8)),
         FlowNodeKind.Comment     => (Color.FromRgb(0xEC, 0xEF, 0xF1), Color.FromRgb(0x45, 0x5A, 0x64)),
@@ -3185,8 +3296,13 @@ public class FlowChartWindow : Window
 
         // A branch leaving a decision gets a label here too (same as a node-to-node connection).
         string fromLabel = "";
-        if (_data.Nodes.FirstOrDefault(n => n.Id == from)?.Kind == FlowNodeKind.Decision)
-            fromLabel = await PromptDialog.Show(this, Loc.S("Flow_BranchPrompt"), "") ?? "";
+        var juncSrc = _data.Nodes.FirstOrDefault(n => n.Id == from);
+        if (juncSrc is not null && IsDecision(juncSrc.Kind))
+        {
+            var lbl = await PromptBranchLabel(juncSrc, "", null);
+            if (lbl is null && juncSrc.Kind == FlowNodeKind.MultiDecision) return;
+            fromLabel = lbl ?? "";
+        }
 
         // Find which segment of the line was clicked and project the click exactly ONTO it, so the
         // junction sits on the line — both halves stay straight (no spurious left-right jog). The along-edge

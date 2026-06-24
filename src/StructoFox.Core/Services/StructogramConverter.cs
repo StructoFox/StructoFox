@@ -121,8 +121,9 @@ public static class StructogramConverter
                 if (outs.Count == 0) { blocks.Add(Stmt(node)); break; }
                 if (outs.Count == 1) { blocks.Add(Stmt(node)); cur = outs[0].ToId; continue; }
 
-                // ── Multi-way (3+ exits) → Case ──
-                if (outs.Count >= 3)
+                // ── Multi-way → Case ── (3+ exits, or a Multi-Verzweigung node with 2+ tines: it is an
+                // explicit switch/case, so even two labelled tines render as a Case rather than an if/else).
+                if (outs.Count >= 3 || (node.Kind == FlowNodeKind.MultiDecision && outs.Count >= 2))
                 {
                     var join = FindJoinMulti(outs.Select(o => o.ToId).ToList(), cur);
                     var caseBlock = new NsBlock { Kind = NsBlockKind.Case, Text = node.Text };

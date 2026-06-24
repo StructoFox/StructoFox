@@ -12,7 +12,16 @@ public enum FlowNodeKind
     Subroutine,   // double-bordered rectangle — calls another function
     Comment,      // free note
     Connector,    // on-page connector — a small labelled circle that continues the flow elsewhere
-    Junction      // merge/collector point (Sammelpunkt) — a small filled dot several lines join at
+    Junction,     // merge/collector point (Sammelpunkt) — a small filled dot several lines join at
+    MultiDecision // diamond — a multi-way branch (switch/case): many labelled outgoing tines, drawn as a comb
+}
+
+/// <summary>Which comb(s) a <see cref="FlowNodeKind.MultiDecision"/> hangs its labelled tines on.</summary>
+public enum CombDirection
+{
+    Bottom,   // a horizontal spine below the diamond; tines drop down
+    Right,    // a vertical spine right of the diamond; tines run right
+    Both      // both combs; each tine joins the one its target faces
 }
 
 /// <summary>Cosmetic DIN 66001 symbol variants for an I/O node. Purely a drawing choice — the node's
@@ -81,6 +90,12 @@ public class FlowNode
     /// <summary>Optional per-node colour overrides (line/fill/text). Null = keep the kind's standard
     /// colours, which stay the default for every newly placed node. Purely presentational.</summary>
     public ElementStyle? Style { get; set; }
+
+    // ── Multi-Verzweigung (switch/case) only — ignored by every other kind ──
+    /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: which comb(s) its tines hang on.</summary>
+    public CombDirection CombDir { get; set; } = CombDirection.Bottom;
+    /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: grid steps between adjacent tines.</summary>
+    public int           TineSpacing { get; set; } = 4;
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>
