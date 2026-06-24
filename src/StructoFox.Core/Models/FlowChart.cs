@@ -94,8 +94,10 @@ public class FlowNode
     // ── Multi-Verzweigung (switch/case) only — ignored by every other kind ──
     /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: which comb(s) its tines hang on.</summary>
     public CombDirection CombDir { get; set; } = CombDirection.Bottom;
-    /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: grid steps between adjacent tines.</summary>
-    public int           TineSpacing { get; set; } = 4;
+    /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: grid steps between adjacent tines.
+    /// 0 = automatic (a target symbol's width+1 grid for a bottom comb, height+1 for a right comb), so
+    /// neighbouring case bodies don't collide.</summary>
+    public int           TineSpacing { get; set; } = 0;
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>

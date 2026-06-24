@@ -1551,8 +1551,11 @@ public class FlowChartWindow : Window
             var spacing = new MenuItem { Header = Loc.S("Flow_TineSpacing") };
             spacing.Click += async (_, _) =>
             {
-                var s = await PromptDialog.Show(this, Loc.S("Flow_TineSpacing"), node.TineSpacing.ToString());
-                if (int.TryParse(s, out var v) && v >= 1) { node.TineSpacing = v; Save(); UpdateConnectionsFor(node.Id); }
+                double gg = _data.GridSize >= 4 ? _data.GridSize : 10;
+                var baseComb = node.CombDir == CombDirection.Right ? CombDirection.Right : CombDirection.Bottom;
+                int eff = node.TineSpacing > 0 ? node.TineSpacing : (int)Math.Round(CombStep(node, baseComb, gg) / gg);
+                var s = await PromptDialog.Show(this, Loc.S("Flow_TineSpacing"), eff.ToString());
+                if (int.TryParse(s, out var v) && v >= 0) { node.TineSpacing = v; Save(); UpdateConnectionsFor(node.Id); }
             };
             cm.Items.Add(spacing);
 
@@ -1930,6 +1933,16 @@ public class FlowChartWindow : Window
         _data.Connections.Where(c => c.FromId == node.Id && string.IsNullOrEmpty(c.ToTapConn)
                                      && c.Waypoints.Count == 0 && TineComb(node, c) == comb).ToList();
 
+    // Pixel gap between adjacent tines. An explicit TineSpacing (grid steps) wins; 0 = the recommended
+    // auto value: a standard symbol's width + 1 grid for a downward comb, its height + 1 grid for a right
+    // comb — so neighbouring case bodies placed under/beside the teeth don't collide.
+    double CombStep(FlowNode node, CombDirection comb, double g)
+    {
+        if (node.TineSpacing > 0) return node.TineSpacing * g;
+        var (dw, dh) = DefaultNodeSize(FlowNodeKind.Process, FlowSymbol.Auto);
+        return (comb == CombDirection.Right ? dh : dw) + g;
+    }
+
     // Routes one tine of a Multi-Verzweigung as part of a comb: a spine one grid off the diamond's bottom
     // (or right) edge, then a tooth at this tine's slot (index * spacing). A connected tine jogs into its
     // target head-on; a free tine just hangs a short stub in the air, ready to be wired up.
@@ -1939,15 +1952,17 @@ public class FlowChartWindow : Window
         var comb = TineComb(node, conn);
         var tines = CombTines(node, comb);
         int i = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
-        double step = Math.Max(1, node.TineSpacing) * g;
+        double step = CombStep(node, comb, g);
         double stub = 3 * g;   // how far a free tine hangs in the air
+        // Centre the comb under/right-of the diamond so it sits symmetrically instead of leaning to one side.
+        double off = (i - (tines.Count - 1) / 2.0) * step;
 
         List<Point> pts;
         if (comb == CombDirection.Right)
         {
             var exit  = new Point(s.Right, s.Center.Y);
             double spineX = Snap(s.Right + g);
-            double tineY  = Snap(s.Center.Y + i * step);
+            double tineY  = Snap(s.Center.Y + off);
             if (t is { } tr)
             {
                 var entry = EdgeSlide(tr, new Point(tr.Left - g, tineY));
@@ -1961,7 +1976,7 @@ public class FlowChartWindow : Window
         {
             var exit  = new Point(s.Center.X, s.Bottom);
             double spineY = Snap(s.Bottom + g);
-            double tineX  = Snap(s.Center.X + i * step);
+            double tineX  = Snap(s.Center.X + off);
             if (t is { } tr)
             {
                 var entry = EdgeSlide(tr, new Point(tineX, tr.Top - g));
@@ -2213,8 +2228,12 @@ public class FlowChartWindow : Window
         {
             var p0 = pts[i]; var p1 = pts[i + 1];
             // Any segment is draggable (not in diagonal mode): dragging perpendicular bends the line, even
-            // for a straight arrow at the same height as its target (it grows a fresh knick).
-            bool draggable = !_data.DiagonalLines;
+            // for a straight arrow at the same height as its target (it grows a fresh knick). A comb tine of
+            // a Multi-Verzweigung is laid out automatically (spacing/direction), so it isn't hand-draggable —
+            // bending it would give it waypoints, drop it out of the comb and (when still free) vanish it.
+            bool isCombTine = _data.Nodes.FirstOrDefault(n => n.Id == capConn.FromId)?.Kind == FlowNodeKind.MultiDecision
+                              && capConn.Waypoints.Count == 0;
+            bool draggable = !_data.DiagonalLines && !isCombTine;
             bool horiz = Math.Abs(p1.Y - p0.Y) < Math.Abs(p1.X - p0.X);
             var seg = new Line
             {
