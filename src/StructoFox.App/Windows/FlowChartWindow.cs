@@ -84,7 +84,7 @@ public class FlowChartWindow : Window
     FlowConnection? _tineDrag; // a free comb tine whose open tip is being dragged onto a target
     FlowConnection? _armedTine; // in connect mode: the specific free tine clicked, to wire on the next target click
     FlowNode? _combDrag;  bool _combVert;   // a Multi-Verzweigung whose comb spine is being pushed nearer/further
-    bool _combGapOnly, _combShiftOnly;      // L-mode handles: the bar moves only the gap, the stem only the shift
+    bool _combGapOnly;      // the L bottom-bar grab moves gap + bar-shift; a single comb's bar grab is 2D
     readonly List<Control> _combHandles = new();   // draggable spine handles, redrawn with the connections
 
     Button? _selectBtn, _removeBtn, _scaleBtn;
@@ -1566,9 +1566,11 @@ public class FlowChartWindow : Window
         if (node.Kind == FlowNodeKind.MultiDecision)
         {
             var combMenu = new MenuItem { Header = Loc.S("Flow_CombDir") };
+            Ui.Theme(combMenu, MenuItem.ForegroundProperty, "SidebarTextBrush");
             void Dir(string label, CombDirection d)
             {
                 var mi = new MenuItem { Header = (node.CombDir == d ? "● " : "") + label };
+                Ui.Theme(mi, MenuItem.ForegroundProperty, "SidebarTextBrush");
                 mi.Click += (_, _) => { node.CombDir = d; Save(); UpdateConnectionsFor(node.Id); };
                 combMenu.Items.Add(mi);
             }
@@ -2024,7 +2026,7 @@ public class FlowChartWindow : Window
                 bar.PointerPressed += (_, e) =>
                 {
                     if (_mode == EditMode.Remove) return;
-                    _combDrag = capNode; _combVert = capVert; _combGapOnly = false; _combShiftOnly = false;
+                    _combDrag = capNode; _combVert = capVert; _combGapOnly = false;
                     e.Pointer.Capture(_canvas); e.Handled = true;
                 };
                 _canvas!.Children.Add(bar); _combHandles.Add(bar);
@@ -2050,7 +2052,7 @@ public class FlowChartWindow : Window
                 barGrab.PointerPressed += (_, e) =>
                 {
                     if (_mode == EditMode.Remove) return;
-                    _combDrag = capNode; _combVert = true; _combGapOnly = true; _combShiftOnly = false;
+                    _combDrag = capNode; _combVert = true; _combGapOnly = true;
                     e.Pointer.Capture(_canvas); e.Handled = true;
                 };
                 _canvas!.Children.Add(barGrab); _combHandles.Add(barGrab);
@@ -2062,24 +2064,21 @@ public class FlowChartWindow : Window
         }
     }
 
-    // Drags a Multi-Verzweigung's spine bar in 2D: perpendicular to the diamond sets the gap (min 1),
-    // along the bar sets the shift (asymmetric placement). Grid-stepped.
+    // Drags a Multi-Verzweigung's spine bar in 2D: perpendicular to the diamond sets the gap (min 1), along
+    // the bar the shift. Hand-routed teeth are carried by the SAME slot delta, so their custom shape stays
+    // attached to the bar instead of kinking when the whole comb moves.
     void DragComb(Point cur)
     {
         if (_combDrag is null) return;
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var s = new Rect(_combDrag.X, _combDrag.Y, _combDrag.Width, _combDrag.Height);
-        if (_combShiftOnly)   // L stem: slide along the bottom edge only
-        {
-            int shift = (int)Math.Round((cur.X - s.Center.X) / g);
-            if (shift == _combDrag.CombShift) return;
-            _combDrag.CombShift = shift;
-        }
-        else if (_combGapOnly)   // L bottom bar: gap (down) + bar slide left/right; the stem stays put
+        double dx, dy;
+        if (_combGapOnly)   // L bottom bar: gap (down) + bar slide left/right
         {
             int gap = Math.Max(1, (int)Math.Round((cur.Y - s.Bottom) / g));
             int barShift = (int)Math.Round((cur.X - s.Center.X) / g);
             if (gap == _combDrag.CombGap && barShift == _combDrag.CombBarShift) return;
+            dx = (barShift - _combDrag.CombBarShift) * g; dy = (gap - _combDrag.CombGap) * g;
             _combDrag.CombGap = gap; _combDrag.CombBarShift = barShift;
         }
         else   // single comb bar: 2D — gap (perpendicular) + shift (along)
@@ -2089,10 +2088,23 @@ public class FlowChartWindow : Window
             else           { gap = (int)Math.Round((cur.X - s.Right)  / g); shift = (int)Math.Round((cur.Y - s.Center.Y) / g); }
             gap = Math.Max(1, gap);
             if (gap == _combDrag.CombGap && shift == _combDrag.CombShift) return;
+            if (_combVert) { dx = (shift - _combDrag.CombShift) * g; dy = (gap - _combDrag.CombGap) * g; }
+            else           { dy = (shift - _combDrag.CombShift) * g; dx = (gap - _combDrag.CombGap) * g; }
             _combDrag.CombGap = gap; _combDrag.CombShift = shift;
         }
+        TranslateCombTeeth(_combDrag, dx, dy);
         UpdateConnectionsFor(_combDrag.Id);
         RenderCombHandles();
+    }
+
+    // Shifts the stored waypoints of a node's hand-routed comb teeth by (dx,dy) — used so a manual tooth
+    // tail rides along when the whole comb is moved (its slot moves by the same delta).
+    void TranslateCombTeeth(FlowNode node, double dx, double dy)
+    {
+        if (Math.Abs(dx) < 0.01 && Math.Abs(dy) < 0.01) return;
+        foreach (var c in _data.Connections)
+            if (c.FromId == node.Id && string.IsNullOrEmpty(c.ToTapConn) && c.Waypoints.Count > 0)
+                foreach (var w in c.Waypoints) { w.X += dx; w.Y += dy; }
     }
 
     // The topmost node whose box contains p (excluding one id), or null — for dropping a dragged tine tip.
