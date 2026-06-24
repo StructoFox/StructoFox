@@ -2057,21 +2057,6 @@ public class FlowChartWindow : Window
                     e.Pointer.Capture(_canvas); e.Handled = true;
                 };
                 _canvas!.Children.Add(barGrab); _combHandles.Add(barGrab);
-
-                // Grab the stem → shift only (slide the stem along the bottom edge).
-                var stemGrab = new Line
-                {
-                    StartPoint = new(L.stemX, s.Bottom), EndPoint = new(L.stemX, L.bottomY),
-                    Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6,
-                    Cursor = new Cursor(StandardCursorType.SizeWestEast),
-                };
-                stemGrab.PointerPressed += (_, e) =>
-                {
-                    if (_mode == EditMode.Remove) return;
-                    _combDrag = capNode; _combVert = false; _combGapOnly = false; _combShiftOnly = true;
-                    e.Pointer.Capture(_canvas); e.Handled = true;
-                };
-                _canvas!.Children.Add(stemGrab); _combHandles.Add(stemGrab);
             }
             else
             {
@@ -2185,7 +2170,7 @@ public class FlowChartWindow : Window
         int nB = CombTines(node, CombDirection.Bottom).Count, nR = CombTines(node, CombDirection.Right).Count;
         double bottomY   = Snap(s.Bottom + Math.Max(1, node.CombGap) * g);
         double cornerX   = Snap(barStartX + Math.Max(1, nB) * stepB);
-        double stemX     = Math.Clamp(Snap(barStartX + node.CombShift * g), s.Left, s.Right);
+        double stemX     = Snap(s.Center.X);   // the diamond's bottom vertex — the only real bottom anchor
         double topRightY = Snap(bottomY - Math.Max(1, nR) * stepR);
         return (stemX, bottomY, cornerX, barStartX, topRightY, stepB, stepR);
     }
