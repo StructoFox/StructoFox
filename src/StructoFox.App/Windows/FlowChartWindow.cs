@@ -293,7 +293,7 @@ public class FlowChartWindow : Window
         {
             if (_combDrag is not null) { _combDrag = null; Save(); e.Pointer.Capture(null); return; }
             if (_toothDrag is not null) { _toothDrag = null; Save(); e.Pointer.Capture(null); return; }
-            if (_toothEndDrag is not null) { _toothEndDrag = null; Save(); e.Pointer.Capture(null); return; }
+            if (_toothEndDrag is not null) { SettleToothEnd(_toothEndDrag); RenderConnection(_toothEndDrag); _toothEndDrag = null; Save(); e.Pointer.Capture(null); return; }
             if (_tineDrag is not null)
             {
                 var tine = _tineDrag; _tineDrag = null;
@@ -2139,8 +2139,25 @@ public class FlowChartWindow : Window
     {
         if (_toothEndDrag is null) return;
         _toothEndDrag.TineTargetSet = true;
-        _toothEndDrag.TineTargetX = cur.X; _toothEndDrag.TineTargetY = cur.Y;
+        _toothEndDrag.TineTargetX = Snap(cur.X); _toothEndDrag.TineTargetY = Snap(cur.Y);   // grid-snapped anchor
         RenderConnection(_toothEndDrag);
+    }
+
+    // After dragging a tooth end: if its anchor lands back where the automatic entry would be, drop the
+    // anchor so the tooth is auto again (and rides along when the bar/node moves).
+    void SettleToothEnd(FlowConnection conn)
+    {
+        if (!conn.TineTargetSet) return;
+        var node = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId);
+        var tr = NodeRect(conn.ToId);
+        if (node is null || tr is null) return;
+        double g = _data.GridSize >= 4 ? _data.GridSize : 10;
+        var comb = TineComb(node, conn);
+        int i = Math.Max(0, CombTines(node, comb).FindIndex(c => c.Id == conn.Id));
+        var slot = CombSlot(node, comb, i, conn.TineOffset, g).slot;
+        var auto = RouteToothFromSlot(slot, comb, tr, g, null);
+        var here = RouteToothFromSlot(slot, comb, tr, g, new Point(conn.TineTargetX, conn.TineTargetY));
+        if (auto.Count > 0 && here.Count > 0 && Dist(auto[^1], here[^1]) < g) conn.TineTargetSet = false;
     }
 
     // Shifts the stored waypoints of a node's hand-routed comb teeth by (dx,dy) — used so a manual tooth
@@ -2252,10 +2269,16 @@ public class FlowChartWindow : Window
         {
             if (anchor is { } a)
             {
-                var e = EdgeSlide(tr, a);
-                var od = Outward(tr, e);                                   // outward edge normal
-                var ap = new Point(e.X + od.X * g, e.Y + od.Y * g);        // one grid outside, perpendicular
-                head.Add(ap); head.Add(e);
+                // Pick the edge by the direction the anchor lies from the target centre, so dragging toward a
+                // side lands on THAT side (top/bottom OR left/right), then slide along it and enter perpendicular.
+                var c = tr.Center; double dx = a.X - c.X, dy = a.Y - c.Y;
+                double inset = Math.Max(0, Math.Min(6, Math.Min(tr.Width, tr.Height) / 2 - 1));
+                Point e, od;
+                if (Math.Abs(dx) >= Math.Abs(dy))
+                { e = new(dx >= 0 ? tr.Right : tr.Left, Math.Clamp(a.Y, tr.Top + inset, tr.Bottom - inset)); od = new(dx >= 0 ? 1 : -1, 0); }
+                else
+                { e = new(Math.Clamp(a.X, tr.Left + inset, tr.Right - inset), dy >= 0 ? tr.Bottom : tr.Top); od = new(0, dy >= 0 ? 1 : -1); }
+                head.Add(new(e.X + od.X * g, e.Y + od.Y * g)); head.Add(e);   // one grid outside → perpendicular in
             }
             else if (comb == CombDirection.Right)
             { var e = EdgeSlide(tr, new(tr.Left - g, slot.Y)); double j = Math.Max(slot.X, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
