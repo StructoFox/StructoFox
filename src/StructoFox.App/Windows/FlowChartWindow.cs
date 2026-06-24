@@ -87,6 +87,7 @@ public class FlowChartWindow : Window
     FlowConnection? _armedTine; // in connect mode: the specific free tine clicked, to wire on the next target click
     FlowNode? _combDrag;  bool _combVert;   // a Multi-Verzweigung whose comb spine is being pushed nearer/further
     FlowNode? _stemDrag;  bool _stemVertexMode;   // stem drag: near diamond = pick vertex, near bar = slide pos
+    FlowNode? _stemSegNode; List<Point>? _stemSegBase; int _stemSegIdx; bool _stemSegHoriz; Point _stemSegStart;  // stem bend
     bool _combGapOnly;      // the L bottom-bar grab moves gap + bar-shift; a single comb's bar grab is 2D
     readonly List<Control> _combHandles = new();   // draggable spine handles, redrawn with the connections
 
@@ -276,6 +277,7 @@ public class FlowChartWindow : Window
                 return;
             }
             if (_combDrag is not null) { DragComb(e.GetPosition(_canvas)); return; }
+            if (_stemSegNode is not null && _stemSegBase is not null) { DragStemSeg(e.GetPosition(_canvas)); return; }
             if (_stemDrag is not null) { DragStem(e.GetPosition(_canvas)); return; }
             if (_toothDrag is not null) { DragTooth(e.GetPosition(_canvas)); return; }
             if (_toothEndDrag is not null) { DragToothEnd(e.GetPosition(_canvas)); return; }
@@ -294,6 +296,7 @@ public class FlowChartWindow : Window
         _canvas.PointerReleased += (_, e) =>
         {
             if (_combDrag is not null) { _combDrag = null; Save(); e.Pointer.Capture(null); return; }
+            if (_stemSegNode is not null) { _stemSegNode = null; _stemSegBase = null; Save(); e.Pointer.Capture(null); return; }
             if (_stemDrag is not null) { _stemDrag = null; Save(); e.Pointer.Capture(null); return; }
             if (_toothDrag is not null) { _toothDrag = null; Save(); e.Pointer.Capture(null); return; }
             if (_toothEndDrag is not null) { SettleToothEnd(_toothEndDrag); RenderConnection(_toothEndDrag); _toothEndDrag = null; Save(); e.Pointer.Capture(null); return; }
@@ -2035,17 +2038,28 @@ public class FlowChartWindow : Window
                     raw = new() { vtx, exit, new(exit.X, sideY), new(spine - g, sideY), approach, meetPt };
                 }
                 else raw = new() { vtx, exit, approach, meetPt };
+                var wps = node.CombStemWaypoints.Select(w => new Point(w.X, w.Y)).ToList();
+                if (wps.Count > 0) raw = new List<Point> { vtx }.Concat(wps).Append(meetPt).ToList();   // hand-routed
                 var st = Simplify(Orthogonalize(raw));
                 var capNode = node;
-                // The stem line slides the meeting along the bar (pos mode).
+                int last = st.Count - 2;
                 for (int k = 0; k < st.Count - 1; k++)
                 {
                     Spine(st[k], st[k + 1]);
+                    int ki = k;
+                    var baseRoute = st;
                     var sg = new Line { StartPoint = st[k], EndPoint = st[k + 1], Stroke = Brushes.Transparent, StrokeThickness = 14, ZIndex = 6, Cursor = new Cursor(StandardCursorType.SizeAll) };
                     sg.PointerPressed += (_, e) =>
                     {
                         if (_mode == EditMode.Remove) return;
-                        _stemDrag = capNode; _stemVertexMode = false;
+                        if (ki == last)   // the segment touching the bar slides the meeting (pos)
+                            { _stemDrag = capNode; _stemVertexMode = false; }
+                        else              // any other segment bends the stem (hand-routed waypoints)
+                        {
+                            _stemSegNode = capNode; _stemSegBase = baseRoute; _stemSegIdx = ki;
+                            _stemSegHoriz = Math.Abs(baseRoute[ki + 1].Y - baseRoute[ki].Y) < Math.Abs(baseRoute[ki + 1].X - baseRoute[ki].X);
+                            _stemSegStart = e.GetPosition(_canvas);
+                        }
                         e.Pointer.Capture(_canvas); e.Handled = true;
                     };
                     _canvas!.Children.Add(sg); _combHandles.Add(sg);
@@ -2188,6 +2202,18 @@ public class FlowChartWindow : Window
         3 => (new Point(s.Right,    s.Center.Y), new Point(1, 0)),
         _ => (new Point(s.Center.X, s.Bottom), new Point(0, 1)),
     };
+
+    // Bends a stem segment (perpendicular), storing the result as the stem's hand-routed waypoints. The
+    // vertex and the bends are fixed; the final straight into the bar still flexes when the bar moves.
+    void DragStemSeg(Point cur)
+    {
+        if (_stemSegNode is null || _stemSegBase is null) return;
+        double v = _stemSegHoriz ? Snap(_stemSegBase[_stemSegIdx].Y + (cur.Y - _stemSegStart.Y))
+                                 : Snap(_stemSegBase[_stemSegIdx].X + (cur.X - _stemSegStart.X));
+        var full = BuildDragged(_stemSegBase, _stemSegIdx, _stemSegHoriz, v);
+        _stemSegNode.CombStemWaypoints = full.Skip(1).Take(full.Count - 2).Select(p => new BoardWaypoint { X = p.X, Y = p.Y }).ToList();
+        RenderCombHandles();
+    }
 
     // Drags the stem: near the diamond picks which vertex it leaves from; near the bar slides where it meets.
     void DragStem(Point cur)

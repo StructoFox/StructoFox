@@ -120,6 +120,10 @@ public class FlowNode
     /// <summary>For a Multi-Verzweigung comb: which diamond vertex the stem leaves from — -1 = auto (the
     /// comb's natural side), else 0=Top, 1=Bottom, 2=Left, 3=Right. Drag the stem's diamond end to set it.</summary>
     public int           CombStemVertex { get; set; } = -1;
+
+    /// <summary>For a Multi-Verzweigung comb: hand-routed bends of the stem (vertex → …waypoints… → bar). The
+    /// vertex end and these bends are fixed; only the final straight into the bar flexes when the bar moves.</summary>
+    public List<BoardWaypoint> CombStemWaypoints { get; set; } = [];
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>
