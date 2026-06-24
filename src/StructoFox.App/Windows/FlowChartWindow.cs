@@ -2420,9 +2420,9 @@ public class FlowChartWindow : Window
                 head.Add(new(e.X + od.X * g, e.Y + od.Y * g)); head.Add(e);   // one grid outside → perpendicular in
             }
             else if (comb == CombDirection.Right)
-            { var e = EdgeSlide(tr, new(tr.Left - g, slot.Y)); double j = Math.Max(slot.X, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
+            { var e = EdgeSlide(tr, new(tr.Left - g, slot.Y)); double j = Math.Max(slot.X + g, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }   // leave the bar by 1 grid first
             else
-            { var e = EdgeSlide(tr, new(slot.X, tr.Top - g)); double j = Math.Max(slot.Y, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }
+            { var e = EdgeSlide(tr, new(slot.X, tr.Top - g)); double j = Math.Max(slot.Y + g, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }   // leave the bar by 1 grid first
         }
         else head.Add(comb == CombDirection.Right ? new(slot.X + stub, slot.Y) : new(slot.X, slot.Y + stub));
         return Simplify(Orthogonalize(head));
