@@ -2808,7 +2808,7 @@ public class FlowChartWindow : Window
         else               ex = 'R';                                   // up / up-left / straight up → loop to the right
         if (Busy(ex)) foreach (var c in new[] { 'R', 'B', 'T', 'L' }) { if (!Busy(c)) { ex = c; break; } }
 
-        bool vertical = ex is 'B' or 'T';
+        bool exitVert = ex is 'B' or 'T';
         var exit = ex switch
         {
             'B' => new Point(sc.X, s.Bottom),
@@ -2816,18 +2816,22 @@ public class FlowChartWindow : Window
             'R' => new Point(s.Right, sc.Y),
             _   => new Point(s.Left, sc.Y),
         };
-        // Entry edge of the target: the side facing the source, so the line meets it head-on.
-        var entry = vertical ? new Point(tc.X, dy >= 0 ? t.Top : t.Bottom)
-                             : new Point(dx >= 0 ? t.Left : t.Right, tc.Y);
+        // Entry edge of the target: the side actually FACING the source, chosen by the dominant axis of the
+        // source→target vector — NOT by the exit edge's orientation. (Tying it to the exit made a line that
+        // left sideways enter the target's bottom/top even when the source sat above/beside it — landing on
+        // the bottom rim that's normally reserved for the target's own outgoing flow.)
+        bool entryVert = ady >= adx;
+        var entry = entryVert ? new Point(tc.X, dy >= 0 ? t.Top : t.Bottom)
+                              : new Point(dx >= 0 ? t.Left : t.Right, tc.Y);
 
         // One grid-step straight stub out of each symbol, then turn — so lines always leave (and enter)
         // perpendicular before bending toward the target.
         var exitStub  = ex switch { 'B' => new Point(exit.X, exit.Y + g), 'T' => new Point(exit.X, exit.Y - g),
                                     'R' => new Point(exit.X + g, exit.Y), _ => new Point(exit.X - g, exit.Y) };
-        var entryStub = vertical ? new Point(entry.X, entry.Y + (dy >= 0 ? -g : g))   // outside the target edge
-                                 : new Point(entry.X + (dx >= 0 ? -g : g), entry.Y);
-        var mid = vertical ? new Point(entryStub.X, exitStub.Y)    // after a vertical stub, turn horizontal
-                           : new Point(exitStub.X, entryStub.Y);   // after a horizontal stub, turn vertical
+        var entryStub = entryVert ? new Point(entry.X, entry.Y + (dy >= 0 ? -g : g))   // outside the target edge
+                                  : new Point(entry.X + (dx >= 0 ? -g : g), entry.Y);
+        var mid = exitVert ? new Point(entryStub.X, exitStub.Y)    // after a vertical exit stub, turn horizontal
+                           : new Point(exitStub.X, entryStub.Y);   // after a horizontal exit stub, turn vertical
         return Simplify(Orthogonalize(new() { exit, exitStub, mid, entryStub, entry }));
     }
 
