@@ -107,6 +107,10 @@ public class FlowNode
     /// spine (left/right for a bottom comb, up/down for a right comb) — so the tines can sit asymmetrically
     /// to one side of the stem for a more compact plan. Drag the spine bar sideways to set it.</summary>
     public int           CombShift { get; set; } = 0;
+
+    /// <summary>For a Both-mode L comb: grid steps the whole tine group / bar is shifted left/right,
+    /// independently of the stem. Drag the L's bottom bar sideways to set it.</summary>
+    public int           CombBarShift { get; set; } = 0;
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>
