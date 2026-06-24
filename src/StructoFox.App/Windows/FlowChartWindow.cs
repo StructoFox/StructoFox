@@ -1582,7 +1582,19 @@ public class FlowChartWindow : Window
             {
                 var mi = new MenuItem { Header = (node.CombDir == d ? "● " : "") + Loc.S("Flow_CombDir") + ": " + label };
                 Ui.Theme(mi, MenuItem.ForegroundProperty, "SidebarTextBrush");
-                mi.Click += (_, _) => { node.CombDir = d; Save(); UpdateConnectionsFor(node.Id); };
+                mi.Click += (_, _) =>
+                {
+                    if (node.CombDir != d)
+                    {
+                        node.CombDir = d;
+                        // Reset the (direction-specific) layout so the new comb lays out cleanly.
+                        node.CombShift = 0; node.CombBarShift = 0; node.CombStemPos = 0; node.CombStemVertex = -1;
+                        node.CombStemWaypoints.Clear();
+                        foreach (var c in _data.Connections.Where(c => c.FromId == node.Id))
+                        { c.TineOffset = 0; c.TineTargetSet = false; c.Waypoints.Clear(); }
+                    }
+                    Save(); RenderAllConnections();
+                };
                 cm.Items.Add(mi);
             }
             Dir(Loc.S("Flow_CombBottom"), CombDirection.Bottom);
