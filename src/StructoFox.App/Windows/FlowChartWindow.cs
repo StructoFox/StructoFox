@@ -298,11 +298,11 @@ public class FlowChartWindow : Window
             if (_tapDrag is not null) { Save(); _tapDrag = null; e.Pointer.Capture(null); return; }
             if (_segConn is not null)
             {
-                // An L tooth is re-anchored to the bar by CombRouteL; normalising via ManualRoute would
-                // re-anchor it to the node, so skip it for those.
-                bool lTooth = string.IsNullOrEmpty(_segConn.ToTapConn)
-                    && _data.Nodes.FirstOrDefault(n => n.Id == _segConn.FromId) is { Kind: FlowNodeKind.MultiDecision, CombDir: CombDirection.Both };
-                if (!lTooth) NormalizeWaypoints(_segConn);
+                // A comb tooth is re-anchored to the bar by CombRoute; normalising via ManualRoute would
+                // re-anchor it to the node, so skip it for any comb tooth.
+                bool combTooth = string.IsNullOrEmpty(_segConn.ToTapConn)
+                    && _data.Nodes.FirstOrDefault(n => n.Id == _segConn.FromId)?.Kind == FlowNodeKind.MultiDecision;
+                if (!combTooth) NormalizeWaypoints(_segConn);
                 RenderConnection(_segConn);
                 RenderTapsOnto(_segConn.Id);   // T-pieces on this line settle with it
                 RenderCrossovers(); Save();
@@ -1938,8 +1938,7 @@ public class FlowChartWindow : Window
         // one labelled tooth per case. A free (not-yet-connected) tine ends in the air at its comb slot
         // (bn is null); a connected one runs into its target. In the L (Both) the tooth always starts on the
         // shared bar — even when hand-routed — so a bent tooth keeps a bar anchor (no stray line at the node).
-        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mds
-            && (conn.Waypoints.Count == 0 || mds.CombDir == CombDirection.Both))
+        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mds)
             return CombRoute(mds, a.Value, bn, conn);
 
         if (bn is null) return null;
@@ -1966,7 +1965,6 @@ public class FlowChartWindow : Window
     // others are added/removed). Includes free (not-yet-connected) tines so they occupy slots too.
     List<FlowConnection> CombTines(FlowNode node, CombDirection comb) =>
         _data.Connections.Where(c => c.FromId == node.Id && string.IsNullOrEmpty(c.ToTapConn)
-                                     && (node.CombDir == CombDirection.Both || c.Waypoints.Count == 0)
                                      && TineComb(node, c) == comb).ToList();
 
     // Pixel gap between adjacent tines. An explicit TineSpacing (grid steps) wins; 0 = the recommended
@@ -1993,25 +1991,30 @@ public class FlowChartWindow : Window
         {
             if (node.Kind != FlowNodeKind.MultiDecision || !_nodeViews.ContainsKey(node.Id)) continue;
             var s = new Rect(node.X, node.Y, node.Width, node.Height);
-            double gap = Math.Max(1, node.CombGap) * g;
-            double shift = node.CombShift * g;
+            var brush = new SolidColorBrush(ParseColor(_style.LineColor));
+            void Spine(Point a2, Point b2)
+            {
+                var ln = new Line { StartPoint = a2, EndPoint = b2, Stroke = brush, StrokeThickness = 1.6, ZIndex = 1, IsHitTestVisible = false };
+                _canvas!.Children.Add(ln); _combHandles.Add(ln);
+            }
             void Bar(CombDirection comb)
             {
                 int n = CombTines(node, comb).Count;
                 if (n == 0) return;
-                double half = Math.Max(g, (n - 1) / 2.0 * CombStep(node, comb, g));   // min grabbable width
                 bool vertical = comb == CombDirection.Bottom;   // a bottom comb's spine is horizontal → drag vertically
+                // Slot extent of the tine group plus the stem vertex, so the visible bar reaches the stem.
+                double lo = double.MaxValue, hi = double.MinValue, spine = 0; Point vertex = default;
+                for (int k = 0; k < n; k++)
+                {
+                    var (slot, sp, vx) = CombSlot(node, comb, k, g); spine = sp; vertex = vx;
+                    double along = vertical ? slot.X : slot.Y; lo = Math.Min(lo, along); hi = Math.Max(hi, along);
+                }
+                double vAlong = vertical ? vertex.X : vertex.Y;
+                lo = Math.Min(lo, vAlong); hi = Math.Max(hi, vAlong);
                 Point a, b;
-                if (comb == CombDirection.Bottom)
-                {
-                    double y = Snap(s.Bottom + gap), c = s.Center.X + shift;   // bar spans the stem → the tines
-                    a = new(Math.Min(s.Center.X, c - half), y); b = new(Math.Max(s.Center.X, c + half), y);
-                }
-                else
-                {
-                    double x = Snap(s.Right + gap), c = s.Center.Y + shift;
-                    a = new(x, Math.Min(s.Center.Y, c - half)); b = new(x, Math.Max(s.Center.Y, c + half));
-                }
+                if (vertical) { Spine(vertex, new(vertex.X, spine)); a = new(lo, spine); b = new(hi, spine); }
+                else          { Spine(vertex, new(spine, vertex.Y)); a = new(spine, lo); b = new(spine, hi); }
+                Spine(a, b);   // the bar
                 var bar = new Line
                 {
                     StartPoint = a, EndPoint = b, Stroke = Brushes.Transparent, StrokeThickness = 12, ZIndex = 6,
@@ -2029,14 +2032,8 @@ public class FlowChartWindow : Window
             if (node.CombDir == CombDirection.Both)
             {
                 var L = CombLGeom(node, g);
-                var lineBrush = new SolidColorBrush(ParseColor(_style.LineColor));
                 double barLeft = Math.Min(L.barStartX, L.stemX);
                 // Visible single L: stem + bottom bar + right bar (one shared drawing; tines are just teeth).
-                void Spine(Point a2, Point b2)
-                {
-                    var ln = new Line { StartPoint = a2, EndPoint = b2, Stroke = lineBrush, StrokeThickness = 1.6, ZIndex = 1, IsHitTestVisible = false };
-                    _canvas!.Children.Add(ln); _combHandles.Add(ln);
-                }
                 Spine(new(L.stemX, s.Bottom), new(L.stemX, L.bottomY));      // stem
                 Spine(new(barLeft, L.bottomY), new(L.cornerX, L.bottomY));   // bottom bar
                 if (CombTines(node, CombDirection.Right).Count > 0)
@@ -2207,43 +2204,41 @@ public class FlowChartWindow : Window
         var tines = CombTines(node, comb);
         int i = Math.Max(0, tines.FindIndex(c => c.Id == conn.Id));
         if (node.CombDir == CombDirection.Both) return CombRouteL(node, t, conn, comb, i, g);
-        double step = CombStep(node, comb, g);
-        double stub = 3 * g;   // how far a free tine hangs in the air
-        double gap   = Math.Max(1, node.CombGap) * g;   // spine distance from the diamond (draggable)
-        double shift = node.CombShift * g;               // slide along the spine (asymmetric placement)
-        // Centre the comb under/right-of the diamond, then apply the user's along-spine shift.
-        double off = shift + (i - (tines.Count - 1) / 2.0) * step;
+        // A single-direction comb works like the L: the stem + bar are drawn once (RenderCombHandles); each
+        // tooth routes only from its slot on the bar, so dragging/shifting can't fragment a shared stem.
+        var (slot, _, _) = CombSlot(node, comb, i, g);
+        var wps = conn.Waypoints.Select(w => new Point(w.X, w.Y)).ToList();
+        double stub = 3 * g;
+        var head = new List<Point> { slot };
+        if (t is { } tr)
+        {
+            if (wps.Count > 0) { head.AddRange(wps); head.Add(EdgeSlide(tr, wps[^1])); }
+            else if (comb == CombDirection.Right)
+            { var e = EdgeSlide(tr, new(tr.Left - g, slot.Y)); double j = Math.Max(slot.X, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
+            else
+            { var e = EdgeSlide(tr, new(slot.X, tr.Top - g)); double j = Math.Max(slot.Y, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }
+        }
+        else if (wps.Count > 0) head.AddRange(wps);
+        else head.Add(comb == CombDirection.Right ? new(slot.X + stub, slot.Y) : new(slot.X, slot.Y + stub));
+        return Simplify(Orthogonalize(head));
+    }
 
-        List<Point> pts;
+    // The slot point on a single-direction comb's bar for tine index i, plus the spine coordinate and the
+    // diamond vertex the stem leaves from. Stem stays at the diamond's vertex (centre); the tine group is
+    // centred on the spine and slid by CombShift.
+    (Point slot, double spine, Point vertex) CombSlot(FlowNode node, CombDirection comb, int i, double g)
+    {
+        var s = new Rect(node.X, node.Y, node.Width, node.Height);
+        int n = CombTines(node, comb).Count;
+        double off = node.CombShift * g + (i - (n - 1) / 2.0) * CombStep(node, comb, g);
+        double gap = Math.Max(1, node.CombGap) * g;
         if (comb == CombDirection.Right)
         {
-            var exit  = new Point(s.Right, s.Center.Y);
             double spineX = Snap(s.Right + gap);
-            double tineY  = Snap(s.Center.Y + off);
-            if (t is { } tr)
-            {
-                var entry = EdgeSlide(tr, new Point(tr.Left - g, tineY));
-                double jogX = Math.Max(spineX, entry.X - g);
-                pts = new() { exit, new(spineX, exit.Y), new(spineX, tineY), new(jogX, tineY), new(jogX, entry.Y), entry };
-            }
-            else
-                pts = new() { exit, new(spineX, exit.Y), new(spineX, tineY), new(spineX + stub, tineY) };
+            return (new Point(spineX, Snap(s.Center.Y + off)), spineX, new Point(s.Right, s.Center.Y));
         }
-        else
-        {
-            var exit  = new Point(s.Center.X, s.Bottom);
-            double spineY = Snap(s.Bottom + gap);
-            double tineX  = Snap(s.Center.X + off);
-            if (t is { } tr)
-            {
-                var entry = EdgeSlide(tr, new Point(tineX, tr.Top - g));
-                double jogY = Math.Max(spineY, entry.Y - g);
-                pts = new() { exit, new(exit.X, spineY), new(tineX, spineY), new(tineX, jogY), new(entry.X, jogY), entry };
-            }
-            else
-                pts = new() { exit, new(exit.X, spineY), new(tineX, spineY), new(tineX, spineY + stub) };
-        }
-        return Simplify(Orthogonalize(pts));
+        double spineY = Snap(s.Bottom + gap);
+        return (new Point(Snap(s.Center.X + off), spineY), spineY, new Point(s.Center.X, s.Bottom));
     }
 
     // Routes a tap as a clean L whose FINAL segment is perpendicular to the target line (a proper T): the
@@ -2458,9 +2453,9 @@ public class FlowChartWindow : Window
         var srcNode = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId);
         bool isMultiSrc = srcNode?.Kind == FlowNodeKind.MultiDecision;
         bool freeTine = string.IsNullOrEmpty(conn.ToId) && !toTap && isMultiSrc;
-        // A comb tooth sits on the shared spine — no DIN departure dot (it doesn't leave a node edge). An L
-        // (Both) tooth stays a tooth even when hand-routed (it still starts on the bar).
-        bool combTine = isMultiSrc && !toTap && (conn.Waypoints.Count == 0 || srcNode!.CombDir == CombDirection.Both);
+        // A comb tooth sits on the shared spine — no DIN departure dot (it doesn't leave a node edge), even
+        // when hand-routed (it still starts on the bar).
+        bool combTine = isMultiSrc && !toTap;
 
         _connPts[conn.Id] = pts;   // remembered for the optional crossover-bridge overlay
 
