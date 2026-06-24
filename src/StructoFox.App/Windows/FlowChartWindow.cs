@@ -2041,7 +2041,9 @@ public class FlowChartWindow : Window
                 // Span the bars to the actual teeth (incl. per-tooth offsets) so they reach a dragged tooth.
                 var bTeeth = CombTines(node, CombDirection.Bottom);
                 var rTeeth = CombTines(node, CombDirection.Right);
-                double barLeft = Math.Min(L.barStartX, L.stemX), barRight = L.cornerX, rTop = L.bottomY;
+                // The bar spans only stem ↔ actual teeth (and the elbow if a right arm exists) — no phantom
+                // overhang at the abstract bar origin, so moving the outer tooth inward shortens the bar.
+                double barLeft = L.stemX, barRight = rTeeth.Count > 0 ? L.cornerX : L.stemX, rTop = L.bottomY;
                 for (int k = 0; k < bTeeth.Count; k++)
                 { double x = CombSlot(node, CombDirection.Bottom, k, bTeeth[k].TineOffset, g).slot.X; barLeft = Math.Min(barLeft, x); barRight = Math.Max(barRight, x); }
                 for (int k = 0; k < rTeeth.Count; k++)
