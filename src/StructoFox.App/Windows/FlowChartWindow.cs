@@ -2021,20 +2021,35 @@ public class FlowChartWindow : Window
                 Point approach = vertical ? new(meet, spine - g) : new(spine - g, meet);   // perpendicular into the bar
                 var st = Simplify(Orthogonalize(new List<Point> { vtx, new(vtx.X + od.X * g, vtx.Y + od.Y * g), approach, meetPt }));
                 var capNode = node;
+                // The stem line slides the meeting along the bar (pos mode).
                 for (int k = 0; k < st.Count - 1; k++)
                 {
                     Spine(st[k], st[k + 1]);
-                    var sg = new Line { StartPoint = st[k], EndPoint = st[k + 1], Stroke = Brushes.Transparent, StrokeThickness = 16, ZIndex = 7, Cursor = new Cursor(StandardCursorType.SizeAll) };
-                    var pv = vtx; var pm = meetPt;
+                    var sg = new Line { StartPoint = st[k], EndPoint = st[k + 1], Stroke = Brushes.Transparent, StrokeThickness = 14, ZIndex = 6, Cursor = new Cursor(StandardCursorType.SizeAll) };
                     sg.PointerPressed += (_, e) =>
                     {
                         if (_mode == EditMode.Remove) return;
-                        var gp = e.GetPosition(_canvas);
-                        _stemDrag = capNode; _stemVertexMode = Dist(gp, pv) < Dist(gp, pm);   // near diamond → set vertex
+                        _stemDrag = capNode; _stemVertexMode = false;
                         e.Pointer.Capture(_canvas); e.Handled = true;
                     };
                     _canvas!.Children.Add(sg); _combHandles.Add(sg);
                 }
+                // The contact point at the diamond: a small visible departure dot, with a larger transparent
+                // grab that chooses which vertex the stem leaves from (drag it toward a side).
+                const double r = 3.5;
+                var dot = new Ellipse { Width = r * 2, Height = r * 2, Fill = brush, ZIndex = 7, IsHitTestVisible = false };
+                Canvas.SetLeft(dot, vtx.X - r); Canvas.SetTop(dot, vtx.Y - r);
+                _canvas!.Children.Add(dot); _combHandles.Add(dot);
+                const double gr = 9;
+                var dotGrab = new Ellipse { Width = gr * 2, Height = gr * 2, Fill = Brushes.Transparent, ZIndex = 8, Cursor = new Cursor(StandardCursorType.SizeAll) };
+                Canvas.SetLeft(dotGrab, vtx.X - gr); Canvas.SetTop(dotGrab, vtx.Y - gr);
+                dotGrab.PointerPressed += (_, e) =>
+                {
+                    if (_mode == EditMode.Remove) return;
+                    _stemDrag = capNode; _stemVertexMode = true;
+                    e.Pointer.Capture(_canvas); e.Handled = true;
+                };
+                _canvas!.Children.Add(dotGrab); _combHandles.Add(dotGrab);
                 return meet;
             }
             void Bar(CombDirection comb)
