@@ -111,6 +111,11 @@ public class FlowNode
     /// <summary>For a Both-mode L comb: grid steps the whole tine group / bar is shifted left/right,
     /// independently of the stem. Drag the L's bottom bar sideways to set it.</summary>
     public int           CombBarShift { get; set; } = 0;
+
+    /// <summary>For a Multi-Verzweigung comb: grid steps the STEM meets the bar away from the diamond
+    /// vertex's straight-down/across point — drag the stem along the bar to set it (a Z-stem). The meeting
+    /// stays fixed relative to the diamond, so it rides along when the bar shifts.</summary>
+    public int           CombStemPos { get; set; } = 0;
 }
 
 /// <summary>A directed arrow between two flow nodes.</summary>
