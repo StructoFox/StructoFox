@@ -2130,17 +2130,17 @@ public class FlowChartWindow : Window
                 var rTeeth = CombTines(node, CombDirection.Right);
                 // The bar spans only stem ↔ actual teeth (and the elbow if a right arm exists) — no phantom
                 // overhang at the abstract bar origin, so moving the outer tooth inward shortens the bar.
-                double barLeft = L.stemX, barRight = rTeeth.Count > 0 ? L.cornerX : L.stemX, rTop = L.bottomY;
+                double barLeft = L.stemX, barRight = rTeeth.Count > 0 ? L.cornerX : L.stemX, rTop = L.bottomY, rBot = L.bottomY;
                 for (int k = 0; k < bTeeth.Count; k++)
                 { double x = CombSlot(node, CombDirection.Bottom, k, bTeeth[k].TineOffset, g).slot.X; barLeft = Math.Min(barLeft, x); barRight = Math.Max(barRight, x); }
                 for (int k = 0; k < rTeeth.Count; k++)
-                { double y = CombSlot(node, CombDirection.Right, k, rTeeth[k].TineOffset, g).slot.Y; rTop = Math.Min(rTop, y); }
+                { double y = CombSlot(node, CombDirection.Right, k, rTeeth[k].TineOffset, g).slot.Y; rTop = Math.Min(rTop, y); rBot = Math.Max(rBot, y); }
                 var stemMp = Stem(true, L.bottomY);   // Z-stem to its meeting point on the bottom bar
                 barLeft = Math.Min(barLeft, stemMp.X); barRight = Math.Max(barRight, stemMp.X);
                 // Visible single L: bottom bar + right bar (the stem is drawn by Stem()).
                 Spine(new(barLeft, L.bottomY), new(barRight, L.bottomY));      // bottom bar
                 if (rTeeth.Count > 0)
-                    Spine(new(L.cornerX, L.bottomY), new(L.cornerX, rTop));    // right bar
+                    Spine(new(L.cornerX, rTop), new(L.cornerX, rBot));         // right bar (above + below the elbow)
 
                 var capNode = node;
                 // Grab the bottom bar → gap (down) + slide the bar left/right; the stem stays put.
