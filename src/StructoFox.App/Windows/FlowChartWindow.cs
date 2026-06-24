@@ -2036,7 +2036,10 @@ public class FlowChartWindow : Window
                 // the bar (min one grid), so it's long enough to grab comfortably.
                 double lastLen = Math.Max(g, (vertical ? spine - s.Bottom : spine - s.Right) / 3);
                 Point exit = new(vtx.X + od.X * g, vtx.Y + od.Y * g);
-                var wps = node.CombStemWaypoints.Select(w => new Point(w.X, w.Y)).ToList();
+                // The L stem is always auto-routed (its bar-following Z would otherwise expose a grabbable
+                // connector that snags); only single combs keep hand-routed stem bends.
+                bool bendable = node.CombDir != CombDirection.Both;
+                var wps = bendable ? node.CombStemWaypoints.Select(w => new Point(w.X, w.Y)).ToList() : new List<Point>();
                 Point meetPt = vertical ? new(along, spine) : new(spine, along);
                 Point approach = vertical ? new(along, spine - lastLen) : new(spine - lastLen, along);
                 bool opposite = vertical ? side == 0 /*Top*/ : side == 2 /*Left*/;
@@ -2055,6 +2058,7 @@ public class FlowChartWindow : Window
                     Spine(st[k], st[k + 1]);
                     int ki = k;
                     var baseRoute = st;
+                    if (ki != last && !bendable) continue;   // L: only the bar-touching segment is grabby (no bend footgun)
                     var sg = new Line { StartPoint = st[k], EndPoint = st[k + 1], Stroke = Brushes.Transparent, StrokeThickness = 14, ZIndex = 6, Cursor = new Cursor(StandardCursorType.SizeAll) };
                     sg.PointerPressed += (_, e) =>
                     {
