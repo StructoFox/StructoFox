@@ -1946,9 +1946,12 @@ public class FlowChartWindow : Window
     CombDirection TineComb(FlowNode node, FlowConnection c)
     {
         if (node.CombDir != CombDirection.Both) return node.CombDir;
-        var nc = new Rect(node.X, node.Y, node.Width, node.Height).Center;
-        var tc = RouteRect(c.ToId)?.Center ?? nc;
-        return (tc.X - nc.X) > (tc.Y - nc.Y) ? CombDirection.Right : CombDirection.Bottom;
+        // Both: alternate tines between the two arms by creation order (even → bottom, odd → right), so both
+        // bars of the L are populated and visible regardless of whether the tines are wired yet.
+        var all = _data.Connections.Where(x => x.FromId == node.Id && string.IsNullOrEmpty(x.ToTapConn)
+                                               && x.Waypoints.Count == 0).ToList();
+        int idx = all.FindIndex(x => x.Id == c.Id);
+        return idx % 2 == 0 ? CombDirection.Bottom : CombDirection.Right;
     }
 
     // All comb tines of a node on the same comb, in stable creation order (so a tooth keeps its slot as
@@ -2407,12 +2410,10 @@ public class FlowChartWindow : Window
         {
             var p0 = pts[i]; var p1 = pts[i + 1];
             // Any segment is draggable (not in diagonal mode): dragging perpendicular bends the line, even
-            // for a straight arrow at the same height as its target (it grows a fresh knick). A comb tine of
-            // a Multi-Verzweigung is laid out automatically (spacing/direction), so it isn't hand-draggable —
-            // bending it would give it waypoints, drop it out of the comb and (when still free) vanish it.
-            bool isCombTine = _data.Nodes.FirstOrDefault(n => n.Id == capConn.FromId)?.Kind == FlowNodeKind.MultiDecision
-                              && capConn.Waypoints.Count == 0;
-            bool draggable = !_data.DiagonalLines && !isCombTine;
+            // for a straight arrow at the same height as its target (it grows a fresh knick). Only a FREE
+            // comb tine is locked (its open tip handle is the interaction, and it has no target to route to —
+            // bending it would vanish it); a WIRED tine can be hand-routed, taking it out of the auto comb.
+            bool draggable = !_data.DiagonalLines && !freeTine;
             bool horiz = Math.Abs(p1.Y - p0.Y) < Math.Abs(p1.X - p0.X);
             var seg = new Line
             {
