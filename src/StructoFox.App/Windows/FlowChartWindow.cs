@@ -2437,6 +2437,9 @@ public class FlowChartWindow : Window
                 { e = new(dx >= 0 ? tr.Right : tr.Left, Math.Clamp(a.Y, tr.Top + inset, tr.Bottom - inset)); od = new(dx >= 0 ? 1 : -1, 0); }
                 else
                 { e = new(Math.Clamp(a.X, tr.Left + inset, tr.Right - inset), dy >= 0 ? tr.Bottom : tr.Top); od = new(0, dy >= 0 ? 1 : -1); }
+                // Leave the bar by one grid FIRST (right for a right comb, down for a bottom comb), so a tooth
+                // re-targeted to an inner side doesn't run back across the bar and leave a stub.
+                head.Add(comb == CombDirection.Right ? new(slot.X + g, slot.Y) : new(slot.X, slot.Y + g));
                 head.Add(new(e.X + od.X * g, e.Y + od.Y * g)); head.Add(e);   // one grid outside → perpendicular in
             }
             else if (comb == CombDirection.Right)
