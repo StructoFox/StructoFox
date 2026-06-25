@@ -2428,18 +2428,13 @@ public class FlowChartWindow : Window
         {
             if (anchor is { } a)
             {
-                // Pick the edge by the direction the anchor lies from the target centre, so dragging toward a
-                // side lands on THAT side (top/bottom OR left/right), then slide along it and enter perpendicular.
-                var c = tr.Center; double dx = a.X - c.X, dy = a.Y - c.Y;
-                double inset = Math.Max(0, Math.Min(6, Math.Min(tr.Width, tr.Height) / 2 - 1));
-                Point e, od;
-                if (Math.Abs(dx) >= Math.Abs(dy))
-                { e = new(dx >= 0 ? tr.Right : tr.Left, Math.Clamp(a.Y, tr.Top + inset, tr.Bottom - inset)); od = new(dx >= 0 ? 1 : -1, 0); }
-                else
-                { e = new(Math.Clamp(a.X, tr.Left + inset, tr.Right - inset), dy >= 0 ? tr.Bottom : tr.Top); od = new(0, dy >= 0 ? 1 : -1); }
-                // Entry on the comb's FACING edge (target's left for a right comb, top for a bottom comb): use
-                // the clean auto-route shape so the body stays put and only the tip slides (no U / stub). Other
-                // sides genuinely re-target, so step one grid off the bar then enter perpendicular.
+                // Entry = the anchor projected onto the target's NEAREST edge (slides along the facing edge,
+                // wraps to a neighbour only past a corner) — so dragging the tip along its edge keeps the body.
+                var e = EdgeSlide(tr, a);
+                var od = Outward(tr, e);
+                // On the comb's facing edge (target's left for a right comb, top for a bottom comb) use the
+                // clean auto-route shape (body stays, only the tip slides, no U/stub); other edges step one
+                // grid off the bar then enter perpendicular.
                 bool facing = comb == CombDirection.Right ? od.X < 0 : od.Y < 0;
                 if (facing && comb == CombDirection.Right)
                 { double j = Math.Max(slot.X + g, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
