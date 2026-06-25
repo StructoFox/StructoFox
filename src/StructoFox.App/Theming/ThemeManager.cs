@@ -101,6 +101,9 @@ public static class ThemeManager
         // Menu / context-menu items: Fluent flips the label to white on hover/press, unreadable on the
         // light hover highlight. Pin every state to the theme text colour and theme the popup chrome.
         Set(text, "MenuFlyoutItemForeground", "MenuFlyoutItemForegroundPointerOver", "MenuFlyoutItemForegroundPressed");
+        // The submenu (▸) chevron is drawn from its own Fluent brush, so theme it too (else it stays white).
+        Set(text, "MenuFlyoutSubItemChevron", "MenuFlyoutSubItemChevronPointerOver", "MenuFlyoutSubItemChevronPressed",
+                  "MenuFlyoutSubItemChevronDisabled");
         Set(surface, "MenuFlyoutPresenterBackground");
         Set(border,  "MenuFlyoutPresenterBorderBrush");
 
