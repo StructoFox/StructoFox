@@ -2449,10 +2449,17 @@ public class FlowChartWindow : Window
                              : (Dist(o, cA) + Dist(cA, ap) <= Dist(o, cB) + Dist(cB, ap) ? cA : cB);
                 head.Add(o); head.Add(corner); head.Add(ap); head.Add(e);
             }
-            else if (comb == CombDirection.Right)
-            { var e = EdgeSlide(tr, new(tr.Left - g, slot.Y)); double j = Math.Max(slot.X + g, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }   // leave the bar by 1 grid first
             else
-            { var e = EdgeSlide(tr, new(slot.X, tr.Top - g)); double j = Math.Max(slot.Y + g, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }   // leave the bar by 1 grid first
+            {
+                // Auto route: always enter the target's FACING edge (left for a right comb, top for a bottom
+                // comb), sliding to the slot's level — so teeth stay clean even when a target isn't aligned
+                // with its slot (no entering the top/bottom edge with a kink).
+                double inset = Math.Max(0, Math.Min(6, Math.Min(tr.Width, tr.Height) / 2 - 1));
+                if (comb == CombDirection.Right)
+                { var e = new Point(tr.Left, Math.Clamp(slot.Y, tr.Top + inset, tr.Bottom - inset)); double j = Math.Max(slot.X + g, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
+                else
+                { var e = new Point(Math.Clamp(slot.X, tr.Left + inset, tr.Right - inset), tr.Top); double j = Math.Max(slot.Y + g, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }
+            }
         }
         else head.Add(comb == CombDirection.Right ? new(slot.X + stub, slot.Y) : new(slot.X, slot.Y + stub));
         return Simplify(Orthogonalize(head));
