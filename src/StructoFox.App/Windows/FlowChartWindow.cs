@@ -2796,8 +2796,11 @@ public class FlowChartWindow : Window
                                  && _connPts.TryGetValue(capConn.Id, out var rp) && rp.Count >= 2;
                     if (wired)
                     {
+                        // Only the very arrowhead end re-targets to another side; the rest of the tooth slides
+                        // its slot along the bar (so the bar follows and no stub is left behind).
                         var gp = e.GetPosition(_canvas); var rpts = _connPts[capConn.Id];
-                        if (Dist(gp, rpts[^1]) < Dist(gp, rpts[0])) _toothEndDrag = capConn; else _toothDrag = capConn;
+                        double gg = _data.GridSize >= 4 ? _data.GridSize : 10;
+                        if (Dist(gp, rpts[^1]) < 1.6 * gg) _toothEndDrag = capConn; else _toothDrag = capConn;
                     }
                     else _toothDrag = capConn;
                     e.Pointer.Capture(_canvas); e.Handled = true; return;
