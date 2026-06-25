@@ -2287,6 +2287,12 @@ public class FlowChartWindow : Window
         double defAlong = comb == CombDirection.Right ? def.Y : def.X;
         int offset = (int)Math.Round((along - defAlong) / g);
         if (offset == _toothDrag.TineOffset) return;
+        // A re-targeted tip rides along with the slot, so sliding the shaft moves the WHOLE arrow.
+        if (_toothDrag.TineTargetSet)
+        {
+            double d = (offset - _toothDrag.TineOffset) * g;
+            if (comb == CombDirection.Right) _toothDrag.TineTargetY += d; else _toothDrag.TineTargetX += d;
+        }
         _toothDrag.TineOffset = offset;
         UpdateConnectionsFor(node.Id);
         RenderCombHandles();
@@ -2429,22 +2435,19 @@ public class FlowChartWindow : Window
             if (anchor is { } a)
             {
                 // Entry = the anchor projected onto the target's NEAREST edge (slides along the facing edge,
-                // wraps to a neighbour only past a corner) — so dragging the tip along its edge keeps the body.
+                // wraps around a corner to a neighbour). Route: leave the bar perpendicular, then an L whose
+                // corner is chosen to go AROUND the node (never back through it / no U), then enter perpendicular.
                 var e = EdgeSlide(tr, a);
                 var od = Outward(tr, e);
-                // On the comb's facing edge (target's left for a right comb, top for a bottom comb) use the
-                // clean auto-route shape (body stays, only the tip slides, no U/stub); other edges step one
-                // grid off the bar then enter perpendicular.
-                bool facing = comb == CombDirection.Right ? od.X < 0 : od.Y < 0;
-                if (facing && comb == CombDirection.Right)
-                { double j = Math.Max(slot.X + g, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
-                else if (facing)
-                { double j = Math.Max(slot.Y + g, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }
-                else
-                {
-                    head.Add(comb == CombDirection.Right ? new(slot.X + g, slot.Y) : new(slot.X, slot.Y + g));
-                    head.Add(new(e.X + od.X * g, e.Y + od.Y * g)); head.Add(e);
-                }
+                var bn = comb == CombDirection.Right ? new Point(1, 0) : new Point(0, 1);   // off-bar normal
+                var o  = new Point(slot.X + bn.X * g, slot.Y + bn.Y * g);
+                var ap = new Point(e.X + od.X * g, e.Y + od.Y * g);
+                var cA = new Point(o.X, ap.Y); var cB = new Point(ap.X, o.Y);
+                var infl = tr.Inflate(g * 0.5);
+                Point corner = infl.Contains(cA) && !infl.Contains(cB) ? cB
+                             : !infl.Contains(cA) && infl.Contains(cB) ? cA
+                             : (Dist(o, cA) + Dist(cA, ap) <= Dist(o, cB) + Dist(cB, ap) ? cA : cB);
+                head.Add(o); head.Add(corner); head.Add(ap); head.Add(e);
             }
             else if (comb == CombDirection.Right)
             { var e = EdgeSlide(tr, new(tr.Left - g, slot.Y)); double j = Math.Max(slot.X + g, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }   // leave the bar by 1 grid first
