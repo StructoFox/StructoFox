@@ -30,6 +30,9 @@ public class NsBlock
     public NsBlockKind   Kind  { get; set; } = NsBlockKind.Statement;
     /// <summary>Statement text, loop/if condition, or case expression.</summary>
     public string        Text  { get; set; } = "";
+    /// <summary>An attached comment (carried over from a PAP "Bemerkung" that was linked to this block's
+    /// source element). Shown as a small annotation on the block; empty = none.</summary>
+    public string        Note  { get; set; } = "";
     /// <summary>
     /// True when this block marks a region the flowchart→structogram converter
     /// could not structure. Rendered with a distinct warning style, not deleted.

@@ -44,6 +44,7 @@ public static class StructogramConverter
 
         private readonly Dictionary<string, FlowNode> _nodes;
         private readonly Dictionary<string, List<Edge>> _succ;
+        private readonly Dictionary<string, string> _ann = new();   // element id → its Bemerkung text(s)
         private static readonly List<Edge> _noEdges = new();
         private int _budget = 2000;   // overall block budget (guards against pathological graphs)
         public readonly HashSet<string> Flagged = new();   // flowchart node ids that could not be structured
@@ -67,8 +68,12 @@ public static class StructogramConverter
             foreach (var c in fc.Connections)
             {
                 if (!_succ.TryGetValue(c.FromId, out var list)) continue;
+                // A Bemerkung (Annotation) is documentary — its dashed links are not control flow, so drop any
+                // edge touching one; the converter never walks into or out of it.
+                if (_nodes.TryGetValue(c.FromId, out var fn) && fn.Kind == FlowNodeKind.Annotation) continue;
                 var to = Resolve(c, 0);
-                if (to is not null && _nodes.ContainsKey(to)) list.Add(new Edge(to, c.Label ?? ""));
+                if (to is null || !_nodes.TryGetValue(to, out var tn) || tn.Kind == FlowNodeKind.Annotation) continue;
+                list.Add(new Edge(to, c.Label ?? ""));
             }
 
             // Connector pairs (Sammelpunkte) replace a drawn line: a terminal connector "A" (a line goes IN,
@@ -85,7 +90,25 @@ public static class StructogramConverter
                         && _succ[d.Id].Count > 0).ToList();
                 if (entries.Count == 1) _succ[ex.Id].Add(new Edge(entries[0].Id, ""));
             }
+
+            // Map each Bemerkung (Annotation) to the element its dashed link touches, so its text can be
+            // re-attached as a comment on that element's structogram block.
+            foreach (var c in fc.Connections)
+            {
+                string? annId = null, elemId = null;
+                if (_nodes.TryGetValue(c.FromId, out var f) && f.Kind == FlowNodeKind.Annotation)
+                { annId = c.FromId; elemId = Resolve(c, 0); }
+                else if (Resolve(c, 0) is { } to && _nodes.TryGetValue(to, out var tn) && tn.Kind == FlowNodeKind.Annotation)
+                { annId = to; elemId = c.FromId; }
+                if (annId is null || elemId is null) continue;
+                if (!_nodes.TryGetValue(elemId, out var en) || en.Kind == FlowNodeKind.Annotation) continue;
+                var text = (_nodes[annId].Text ?? "").Trim();
+                if (text.Length == 0) continue;
+                _ann[elemId] = _ann.TryGetValue(elemId, out var prev) && prev.Length > 0 ? prev + "; " + text : text;
+            }
         }
+
+        private string Ann(string id) => _ann.TryGetValue(id, out var t) ? t : "";
 
         // Successors of a node id — never throws on an unknown id.
         private List<Edge> Succ(string id) => _succ.TryGetValue(id, out var l) ? l : _noEdges;
@@ -125,8 +148,8 @@ public static class StructogramConverter
                 // explicit switch/case, so even two labelled tines render as a Case rather than an if/else).
                 if (outs.Count >= 3 || (node.Kind == FlowNodeKind.MultiDecision && outs.Count >= 2))
                 {
-                    var join = FindJoinMulti(outs.Select(o => o.ToId).ToList(), cur);
-                    var caseBlock = new NsBlock { Kind = NsBlockKind.Case, Text = node.Text };
+                    var join = ImmediatePostDom(cur, stopId);
+                    var caseBlock = new NsBlock { Kind = NsBlockKind.Case, Text = node.Text, Note = Ann(node.Id) };
                     foreach (var o in outs)
                         caseBlock.Arms.Add(new NsArm
                         {
@@ -139,53 +162,45 @@ public static class StructogramConverter
                     continue;
                 }
 
-                // ── Two exits → if/else or loop ──
+                // ── Two exits → loop or if/else ──
                 var (tConn, fConn) = OrderTrueFalse(outs);
+                bool tBack = Reaches(tConn.ToId, cur);
+                bool fBack = Reaches(fConn.ToId, cur);
 
-                // 1) Reconverging branches → if/else (preferred interpretation).
-                var ifJoin = FindJoin(tConn.ToId, fConn.ToId, cur);
-                if (ifJoin is not null || (!Reaches(tConn.ToId, cur) && !Reaches(fConn.ToId, cur)))
+                // EXACTLY one branch loops back to the decision → pre-test while loop. The loop runs WHILE the
+                // back-edge branch is taken — labelled with that branch's own caption when it has one, keeping
+                // the decision's wording visible instead of a bare "condition" / "!(condition)".
+                if (tBack ^ fBack)
                 {
+                    var back = tBack ? tConn : fConn;
+                    var exit = tBack ? fConn : tConn;
+                    var cond = !string.IsNullOrWhiteSpace(back.Label) ? back.Label
+                             : tBack ? node.Text : $"!({node.Text})";
+                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Note = Ann(node.Id), Body = ParseRegion(back.ToId, cur, depth + 1) });
+                    cur = exit.ToId;
+                    continue;
+                }
+
+                // Otherwise (both branches go forward, or both re-join an enclosing loop) → if/else. The join is
+                // the decision's immediate post-dominator, so the code AFTER the if is emitted once — not
+                // duplicated at every nesting level (which made deep if-ladders explode exponentially).
+                {
+                    var ifJoin = ImmediatePostDom(cur, stopId);
                     var ifBlock = new NsBlock
                     {
                         Kind = NsBlockKind.If,
                         Text = node.Text,
+                        Note = Ann(node.Id),
                         TrueLabel  = tConn.Label,
                         FalseLabel = fConn.Label,
                         Body = ParseRegion(tConn.ToId, ifJoin, depth + 1),
                         Else = ParseRegion(fConn.ToId, ifJoin, depth + 1)
                     };
                     blocks.Add(ifBlock);
-                    if (ifJoin is null) break;   // both branches reached End
+                    if (ifJoin is null) break;   // branches don't reconverge before the region exit
                     cur = ifJoin;
                     continue;
                 }
-
-                // 2) One branch loops back to the decision → pre-test while loop.
-                bool tBack = Reaches(tConn.ToId, cur);
-                bool fBack = Reaches(fConn.ToId, cur);
-                // The loop runs WHILE the back-edge branch is taken — so label the loop with that branch's
-                // own caption (e.g. "!chicken") when it has one, which keeps the decision's wording visible
-                // instead of a bare "condition" / "!(condition)".
-                if (tBack && !fBack)
-                {
-                    var cond = string.IsNullOrWhiteSpace(tConn.Label) ? node.Text : tConn.Label;
-                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Body = ParseRegion(tConn.ToId, cur, depth + 1) });
-                    cur = fConn.ToId;
-                    continue;
-                }
-                if (fBack && !tBack)
-                {
-                    var cond = string.IsNullOrWhiteSpace(fConn.Label) ? $"!({node.Text})" : fConn.Label;
-                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Body = ParseRegion(fConn.ToId, cur, depth + 1) });
-                    cur = tConn.ToId;
-                    continue;
-                }
-
-                // 3) Anything else (both branches loop, irreducible) → flag and stop.
-                Flagged.Add(node.Id);
-                blocks.Add(Flag($"unstructured branch at: {Short(node.Text)}"));
-                break;
             }
 
             return blocks;
@@ -193,9 +208,42 @@ public static class StructogramConverter
 
         // ── Graph helpers ──────────────────────────────────────────────────
 
-        /// <summary>Forward-reachable node set from <paramref name="from"/>, never passing through
-        /// <paramref name="boundary"/> or beyond End nodes.</summary>
-        private HashSet<string> Reachable(string from, string boundary)
+        /// <summary>The decision's immediate post-dominator within the region: the NEAREST node that EVERY path
+        /// from <paramref name="from"/> must pass through before leaving the region (an End node, the
+        /// <paramref name="boundary"/>, or a dead end). Unlike "nearest common-reachable node", a post-dominator
+        /// is the TRUE reconvergence point — paths can't slip past it — so the code after a branch is emitted
+        /// once instead of being duplicated at every nesting level (which made deep if-ladders blow up
+        /// exponentially). Cycles back to <paramref name="from"/> are cut, so a loop header returns null here
+        /// (its post-dominator lies past the loop) and is handled as a loop, not an if/else. Null = no
+        /// single reconvergence before the region exit.</summary>
+        private string? ImmediatePostDom(string from, string? boundary)
+        {
+            // Candidate joins, nearest first (BFS from the decision; don't expand past End / the boundary).
+            var order = new List<string>();
+            var seen = new HashSet<string> { from };
+            var q = new Queue<string>();
+            q.Enqueue(from);
+            while (q.Count > 0)
+            {
+                var id = q.Dequeue();
+                if (id == boundary) continue;
+                if (_nodes.TryGetValue(id, out var n) && n.Kind == FlowNodeKind.End) continue;
+                foreach (var e in Succ(id)) if (seen.Add(e.ToId)) { order.Add(e.ToId); q.Enqueue(e.ToId); }
+            }
+            foreach (var cand in order)
+            {
+                if (cand == from) continue;
+                // The region boundary itself IS a valid reconvergence: a branch whose only join is the segment
+                // end must close THERE, not spill past it into the next segment (which exploded deep ladders).
+                if (!CanReachExitAvoiding(from, cand, boundary)) return cand;   // every exit path goes through cand
+            }
+            return null;
+        }
+
+        /// <summary>True if <paramref name="from"/> can reach a region exit (an End node, the
+        /// <paramref name="boundary"/>, or a dead end) WITHOUT passing through <paramref name="blocked"/>.
+        /// Cycles are cut by the visited set (a path that only loops never reaches an exit).</summary>
+        private bool CanReachExitAvoiding(string from, string blocked, string? boundary)
         {
             var seen = new HashSet<string>();
             var stack = new Stack<string>();
@@ -203,51 +251,15 @@ public static class StructogramConverter
             while (stack.Count > 0)
             {
                 var id = stack.Pop();
-                if (id == boundary || !seen.Add(id)) continue;
-                if (_nodes.TryGetValue(id, out var n) && n.Kind == FlowNodeKind.End) continue;
-                foreach (var c in Succ(id)) stack.Push(c.ToId);
+                if (id == blocked || !seen.Add(id)) continue;
+                if (id == boundary) return true;                       // left the region without `blocked`
+                if (!_nodes.TryGetValue(id, out var n)) return true;
+                if (n.Kind == FlowNodeKind.End) return true;
+                var outs = Succ(id);
+                if (outs.Count == 0) return true;                      // dead end = an exit
+                foreach (var e in outs) stack.Push(e.ToId);
             }
-            return seen;
-        }
-
-        /// <summary>Nearest node reachable from BOTH branches (the reconvergence point), or null.</summary>
-        private string? FindJoin(string a, string b, string boundary)
-        {
-            var reachA = Reachable(a, boundary);
-            // BFS from b for the nearest node also reachable from a.
-            var seen = new HashSet<string>();
-            var queue = new Queue<string>();
-            queue.Enqueue(b);
-            while (queue.Count > 0)
-            {
-                var id = queue.Dequeue();
-                if (id == boundary || !seen.Add(id)) continue;
-                if (reachA.Contains(id)) return id;
-                if (_nodes.TryGetValue(id, out var n) && n.Kind == FlowNodeKind.End) continue;
-                foreach (var c in Succ(id)) queue.Enqueue(c.ToId);
-            }
-            return null;
-        }
-
-        private string? FindJoinMulti(List<string> branches, string boundary)
-        {
-            if (branches.Count == 0) return null;
-            var common = Reachable(branches[0], boundary);
-            for (int i = 1; i < branches.Count; i++)
-                common.IntersectWith(Reachable(branches[i], boundary));
-            common.Remove(boundary);
-            // Pick the join nearest to the first branch (BFS order from branches[0]).
-            var seen = new HashSet<string>();
-            var queue = new Queue<string>();
-            queue.Enqueue(branches[0]);
-            while (queue.Count > 0)
-            {
-                var id = queue.Dequeue();
-                if (!seen.Add(id)) continue;
-                if (common.Contains(id)) return id;
-                foreach (var c in Succ(id)) queue.Enqueue(c.ToId);
-            }
-            return null;
+            return false;
         }
 
         /// <summary>True if <paramref name="target"/> is forward-reachable from <paramref name="from"/>.</summary>
@@ -279,7 +291,8 @@ public static class StructogramConverter
         private NsBlock Stmt(FlowNode n) => new()
         {
             Kind = NsBlockKind.Statement,
-            Text = string.IsNullOrWhiteSpace(n.Text) ? "…" : n.Text
+            Text = string.IsNullOrWhiteSpace(n.Text) ? "…" : n.Text,
+            Note = Ann(n.Id)
         };
 
         private static NsBlock Flag(string note) => new()
@@ -288,8 +301,5 @@ public static class StructogramConverter
             Flagged = true,
             Text    = note
         };
-
-        private static string Short(string s) =>
-            string.IsNullOrWhiteSpace(s) ? "(node)" : (s.Length > 40 ? s[..40] + "…" : s);
     }
 }

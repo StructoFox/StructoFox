@@ -257,10 +257,29 @@ public class StructogramWindow : Window
             _                     => StatementBox(b),
         };
 
+        // A carried-over PAP "Bemerkung" rides as a small italic comment chip in the block's top-right corner.
+        Control content = inner;
+        if (!string.IsNullOrWhiteSpace(b.Note))
+        {
+            var note = new Border
+            {
+                Background          = new SolidColorBrush(Color.FromArgb(0x30, 0xF5, 0x7F, 0x17)),
+                CornerRadius        = new(2),
+                Padding             = new(3, 1, 3, 1),
+                Margin              = new(0, 2, 2, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment   = VerticalAlignment.Top,
+                IsHitTestVisible    = false,
+                Child = new TextBlock { Text = "⌐ " + b.Note, FontStyle = FontStyle.Italic, FontSize = 10, Opacity = 0.85, Foreground = _textBrush },
+            };
+            ToolTip.SetTip(note, b.Note);
+            content = new Grid { Children = { inner, note } };
+        }
+
         var cell = new Border
         {
             BorderThickness = new(b.Flagged ? _style.LineThickness * 2 : _style.LineThickness),
-            Child           = inner,
+            Child           = content,
         };
         if (b.Flagged)
         {

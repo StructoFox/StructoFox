@@ -778,6 +778,7 @@ public class FlowChartWindow : Window
         RefreshConnHeader();
 
         shapeMenu.Items.Add(Act(Loc.S("Flow_Note"), FlowNodeKind.Comment));
+        shapeMenu.Items.Add(Act(Loc.S("Flow_Annotation"), FlowNodeKind.Annotation));
 
         row.Children.Add(shapeMenu);
 
@@ -1131,6 +1132,7 @@ public class FlowChartWindow : Window
         FlowNodeKind.InputOutput => Loc.S("Flow_DefIO"),
         FlowNodeKind.Subroutine  => Loc.S("Flow_DefCall"),
         FlowNodeKind.Comment     => Loc.S("Flow_DefNote"),
+        FlowNodeKind.Annotation  => Loc.S("Flow_DefAnnotation"),
         FlowNodeKind.Connector   => Loc.S("Flow_DefConnector"),
         FlowNodeKind.Junction    => "",
         _                        => Loc.S("Flow_DefStep"),
@@ -1157,6 +1159,7 @@ public class FlowChartWindow : Window
                 FlowNodeKind.InputOutput => ParallelogramShape(node.Width, node.Height, fill, stroke),
                 FlowNodeKind.Subroutine  => SubroutineShape(fill, stroke),
                 FlowNodeKind.Comment     => CommentShape(fill, stroke),
+                FlowNodeKind.Annotation  => AnnotationShape(fill, stroke),
                 FlowNodeKind.Connector   => new Ellipse { Fill = new SolidColorBrush(fill), Stroke = new SolidColorBrush(stroke), StrokeThickness = 1.5 },
                 FlowNodeKind.Junction    => new Ellipse { Fill = new SolidColorBrush(stroke) },
                 _                        => RoundedBox(4, fill, stroke),
@@ -2775,6 +2778,11 @@ public class FlowChartWindow : Window
         // when hand-routed (it still starts on the bar).
         bool combTine = isMultiSrc && !toTap;
 
+        // A link to/from a Bemerkung (Annotation) is a documentary tie, not control flow: drawn dashed and
+        // WITHOUT an arrowhead, per DIN 66001.
+        var dstNode = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId);
+        bool annotationLink = srcNode?.Kind == FlowNodeKind.Annotation || dstNode?.Kind == FlowNodeKind.Annotation;
+
         _connPts[conn.Id] = pts;   // remembered for the optional crossover-bridge overlay
 
         // All arrows share the diagram's arrow colour, so they stay uniform (and follow the Options picker).
@@ -2782,13 +2790,14 @@ public class FlowChartWindow : Window
         var visuals = new List<Control>();
 
         var line = new Polyline { Stroke = brush, StrokeThickness = conn.Thickness, IsHitTestVisible = false };
+        if (annotationLink) line.StrokeDashArray = new AvaloniaList<double> { 3, 2 };
         foreach (var p in pts) line.Points.Add(p);
         line.ZIndex = 1;
         _canvas!.Children.Add(line); visuals.Add(line);
 
         // Arrowhead: explicit per-connection override wins, else automatic (an arrow, except onto a line —
         // a T-piece carries no arrowhead, the meeting itself is the marker). A free tine gets a handle below.
-        if (!freeTine && (conn.Arrow ?? !toTap))
+        if (!freeTine && !annotationLink && (conn.Arrow ?? !toTap))
         {
             var arrow = BuildArrow(pts[^2], pts[^1], brush);
             arrow.ZIndex = 1;
@@ -3471,6 +3480,19 @@ public class FlowChartWindow : Window
         return g;
     }
 
+    // DIN 66001 comment / Bemerkung: an open square bracket "[" — a full-height vertical with short ticks at
+    // top and bottom — that hangs off an element via a dashed line. The label sits to the right of the bracket.
+    static Grid AnnotationShape(Color fill, Color stroke)
+    {
+        var sb = new SolidColorBrush(stroke);
+        const double tick = 14, t = 1.5;
+        var g = new Grid { Background = new SolidColorBrush(fill) };   // fill = hit-test surface for the whole area
+        g.Children.Add(new Rectangle { Width = t,    Fill = sb, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch });
+        g.Children.Add(new Rectangle { Width = tick, Height = t, Fill = sb, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top });
+        g.Children.Add(new Rectangle { Width = tick, Height = t, Fill = sb, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom });
+        return g;
+    }
+
     // The subroutine box: a rounded rectangle with the two vertical "predefined-process" bars.
     static Grid SubroutineShape(Color fill, Color stroke)
     {
@@ -3573,6 +3595,7 @@ public class FlowChartWindow : Window
         FlowNodeKind.InputOutput => (Color.FromRgb(0xBB, 0xDE, 0xFB), Color.FromRgb(0x15, 0x65, 0xC0)),
         FlowNodeKind.Subroutine  => (Color.FromRgb(0xD1, 0xC4, 0xE9), Color.FromRgb(0x51, 0x2D, 0xA8)),
         FlowNodeKind.Comment     => (Color.FromRgb(0xEC, 0xEF, 0xF1), Color.FromRgb(0x45, 0x5A, 0x64)),
+        FlowNodeKind.Annotation  => (Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), Color.FromRgb(0x45, 0x5A, 0x64)),
         FlowNodeKind.Connector   => (Color.FromRgb(0xFF, 0xFF, 0xFF), Color.FromRgb(0x42, 0x42, 0x42)),
         FlowNodeKind.Junction    => (Color.FromRgb(0x37, 0x47, 0x4F), Color.FromRgb(0x37, 0x47, 0x4F)),
         _                        => (Color.FromRgb(0xE3, 0xF2, 0xFD), Color.FromRgb(0x15, 0x65, 0xC0)),

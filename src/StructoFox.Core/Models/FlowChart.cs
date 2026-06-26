@@ -13,7 +13,8 @@ public enum FlowNodeKind
     Comment,      // free note
     Connector,    // on-page connector — a small labelled circle that continues the flow elsewhere
     Junction,     // merge/collector point (Sammelpunkt) — a small filled dot several lines join at
-    MultiDecision // diamond — a multi-way branch (switch/case): many labelled outgoing tines, drawn as a comb
+    MultiDecision, // diamond — a multi-way branch (switch/case): many labelled outgoing tines, drawn as a comb
+    Annotation    // comment/Bemerkung (DIN 66001) — an open bracket linked to an element by a dashed line; documentary only
 }
 
 /// <summary>Which comb(s) a <see cref="FlowNodeKind.MultiDecision"/> hangs its labelled tines on.</summary>
