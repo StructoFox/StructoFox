@@ -193,13 +193,17 @@ public static class StructogramConverter
 
                 // BOTH branches return here → cur is the header of an enclosing loop (e.g. a back-edge from far
                 // below, via a connector pair). Try to structure the whole natural loop as one While/DoWhile.
-                if (tBack && fBack && TryStructureLoop(cur, node, blocks, out var loopExit, depth))
+                if (tBack && fBack)
                 {
-                    cur = loopExit;
-                    continue;
+                    if (TryStructureLoop(cur, node, blocks, out var loopExit, depth)) { cur = loopExit; continue; }
+                    // An irreducible loop (e.g. it has several exits) can't be structured — flag it. Do NOT fall
+                    // through to the if/else path: that region is cyclic, so it would recurse without end.
+                    Flagged.Add(node.Id);
+                    blocks.Add(Flag("unstructured loop (several exits / irreducible)"));
+                    break;
                 }
 
-                // Otherwise (both branches go forward, or both re-join an enclosing loop) → if/else. The join is
+                // Otherwise (both branches go forward) → if/else. The join is
                 // the decision's immediate post-dominator, so the code AFTER the if is emitted once — not
                 // duplicated at every nesting level (which made deep if-ladders explode exponentially).
                 {
