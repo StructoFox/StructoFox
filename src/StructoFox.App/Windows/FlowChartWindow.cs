@@ -694,14 +694,6 @@ public class FlowChartWindow : Window
             top.PointerEntered += (_, _) => top.IsSubMenuOpen = true;
             return top;
         }
-        // A single-variant top-level item that just adds its node when chosen.
-        MenuItem Act(string label, FlowNodeKind kind)
-        {
-            var top = new MenuItem { Header = label };
-            Ui.Theme(top, MenuItem.ForegroundProperty, "SidebarTextBrush");
-            top.Click += (_, _) => AddNode(kind);
-            return top;
-        }
 
         var startEnd = Cat(Loc.S("Flow_CatStartEnd"));
         startEnd.Items.Add(MI(Loc.S("Flow_Start"), () => AddNode(FlowNodeKind.Start)));
@@ -777,8 +769,10 @@ public class FlowChartWindow : Window
         shapeMenu.Items.Add(_connMenu);
         RefreshConnHeader();
 
-        shapeMenu.Items.Add(Act(Loc.S("Flow_Note"), FlowNodeKind.Comment));
-        shapeMenu.Items.Add(Act(Loc.S("Flow_Annotation"), FlowNodeKind.Annotation));
+        var annCat = Cat(Loc.S("Flow_Annotation"));   // "Bemerkung" group — the standard sits first
+        annCat.Items.Add(MI(Loc.S("Flow_Annotation"), () => AddNode(FlowNodeKind.Annotation)));
+        annCat.Items.Add(MI(Loc.S("Flow_Note"),       () => AddNode(FlowNodeKind.Comment)));
+        shapeMenu.Items.Add(annCat);
 
         row.Children.Add(shapeMenu);
 
@@ -1982,6 +1976,21 @@ public class FlowChartWindow : Window
             return CombRoute(mds, a.Value, bn, conn);
 
         if (bn is null) return null;
+
+        // A Bemerkung (Annotation) link always attaches at the annotation's LEFT edge (the bracket's spine) —
+        // a short dashed leader from the element, never snapping to its right/other sides.
+        var fromN = _data.Nodes.FirstOrDefault(n => n.Id == conn.FromId);
+        var toN   = _data.Nodes.FirstOrDefault(n => n.Id == conn.ToId);
+        if (fromN?.Kind == FlowNodeKind.Annotation || toN?.Kind == FlowNodeKind.Annotation)
+        {
+            bool fromAnn = fromN?.Kind == FlowNodeKind.Annotation;
+            var annR = fromAnn ? a.Value : bn.Value;
+            var othR = fromAnn ? bn.Value : a.Value;
+            var annPt = new Point(annR.Left, annR.Center.Y);     // left-edge centre = the bracket's spine
+            var othPt = RectBorderPoint(othR, annPt);            // element edge facing the annotation
+            return fromAnn ? new List<Point> { annPt, othPt } : new List<Point> { othPt, annPt };
+        }
+
         if (_data.DiagonalLines)
             return new List<Point> { RectBorderPoint(a.Value, bn.Value.Center), RectBorderPoint(bn.Value, a.Value.Center) };
         if (conn.Waypoints.Count > 0) return ManualRoute(a.Value, bn.Value, conn);
