@@ -1153,7 +1153,7 @@ public class FlowChartWindow : Window
                 FlowNodeKind.InputOutput => ParallelogramShape(node.Width, node.Height, fill, stroke),
                 FlowNodeKind.Subroutine  => SubroutineShape(fill, stroke),
                 FlowNodeKind.Comment     => CommentShape(fill, stroke),
-                FlowNodeKind.Annotation  => AnnotationShape(fill, stroke),
+                FlowNodeKind.Annotation  => AnnotationShape(fill, stroke, node.Mirrored),
                 FlowNodeKind.Connector   => new Ellipse { Fill = new SolidColorBrush(fill), Stroke = new SolidColorBrush(stroke), StrokeThickness = 1.5 },
                 FlowNodeKind.Junction    => new Ellipse { Fill = new SolidColorBrush(stroke) },
                 _                        => RoundedBox(4, fill, stroke),
@@ -1573,6 +1573,15 @@ public class FlowChartWindow : Window
             cm.Items.Add(symMenu);
         }
 
+        // A Bemerkung can be mirrored: bracket + connection point flip to the other side.
+        if (node.Kind == FlowNodeKind.Annotation)
+        {
+            var flip = new MenuItem { Header = Loc.S("Flow_MirrorAnnotation") };
+            Ui.Theme(flip, MenuItem.ForegroundProperty, "SidebarTextBrush");
+            flip.Click += (_, _) => FlipAnnotation(node);
+            cm.Items.Add(flip);
+        }
+
         // Multi-Verzweigung: choose which comb(s) the tines hang on and how far apart they sit.
         if (node.Kind == FlowNodeKind.MultiDecision)
         {
@@ -1649,6 +1658,16 @@ public class FlowChartWindow : Window
     void SetNodeSymbol(FlowNode node, FlowSymbol s)
     {
         node.Symbol = s;
+        if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
+        RenderNode(node);
+        UpdateConnectionsFor(node.Id);
+        Save();
+    }
+
+    // Mirrors a Bemerkung (Annotation): bracket spine + its connection point flip to the other side.
+    void FlipAnnotation(FlowNode node)
+    {
+        node.Mirrored = !node.Mirrored;
         if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
         RenderNode(node);
         UpdateConnectionsFor(node.Id);
@@ -1984,9 +2003,11 @@ public class FlowChartWindow : Window
         if (fromN?.Kind == FlowNodeKind.Annotation || toN?.Kind == FlowNodeKind.Annotation)
         {
             bool fromAnn = fromN?.Kind == FlowNodeKind.Annotation;
+            var annNode = fromAnn ? fromN : toN;
             var annR = fromAnn ? a.Value : bn.Value;
             var othR = fromAnn ? bn.Value : a.Value;
-            var annPt = new Point(annR.Left, annR.Center.Y);     // left-edge centre = the bracket's spine
+            // Attach at the bracket's spine: right edge when mirrored, else left edge.
+            var annPt = new Point(annNode!.Mirrored ? annR.Right : annR.Left, annR.Center.Y);
             var othPt = RectBorderPoint(othR, annPt);            // element edge facing the annotation
             return fromAnn ? new List<Point> { annPt, othPt } : new List<Point> { othPt, annPt };
         }
@@ -3490,15 +3511,17 @@ public class FlowChartWindow : Window
     }
 
     // DIN 66001 comment / Bemerkung: an open square bracket "[" — a full-height vertical with short ticks at
-    // top and bottom — that hangs off an element via a dashed line. The label sits to the right of the bracket.
-    static Grid AnnotationShape(Color fill, Color stroke)
+    // top and bottom — that hangs off an element via a dashed line. Mirrored = "]" (spine on the right), so the
+    // bracket and its connection point face an element on the other side.
+    static Grid AnnotationShape(Color fill, Color stroke, bool mirrored)
     {
         var sb = new SolidColorBrush(stroke);
         const double tick = 14, t = 1.5;
+        var side = mirrored ? HorizontalAlignment.Right : HorizontalAlignment.Left;
         var g = new Grid { Background = new SolidColorBrush(fill) };   // fill = hit-test surface for the whole area
-        g.Children.Add(new Rectangle { Width = t,    Fill = sb, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch });
-        g.Children.Add(new Rectangle { Width = tick, Height = t, Fill = sb, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top });
-        g.Children.Add(new Rectangle { Width = tick, Height = t, Fill = sb, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom });
+        g.Children.Add(new Rectangle { Width = t,    Fill = sb, HorizontalAlignment = side, VerticalAlignment = VerticalAlignment.Stretch });
+        g.Children.Add(new Rectangle { Width = tick, Height = t, Fill = sb, HorizontalAlignment = side, VerticalAlignment = VerticalAlignment.Top });
+        g.Children.Add(new Rectangle { Width = tick, Height = t, Fill = sb, HorizontalAlignment = side, VerticalAlignment = VerticalAlignment.Bottom });
         return g;
     }
 

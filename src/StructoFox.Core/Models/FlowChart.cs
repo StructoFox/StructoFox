@@ -92,6 +92,10 @@ public class FlowNode
     /// colours, which stay the default for every newly placed node. Purely presentational.</summary>
     public ElementStyle? Style { get; set; }
 
+    /// <summary>For a <see cref="FlowNodeKind.Annotation"/> (Bemerkung): mirror the bracket and its connection
+    /// point to the RIGHT side (default false = bracket spine + leader on the left).</summary>
+    public bool Mirrored { get; set; }
+
     // ── Multi-Verzweigung (switch/case) only — ignored by every other kind ──
     /// <summary>For a <see cref="FlowNodeKind.MultiDecision"/>: which comb(s) its tines hang on.</summary>
     public CombDirection CombDir { get; set; } = CombDirection.Bottom;
