@@ -176,8 +176,19 @@ public static class StructogramConverter
                     var exit = tBack ? fConn : tConn;
                     var cond = !string.IsNullOrWhiteSpace(back.Label) ? back.Label
                              : tBack ? node.Text : $"!({node.Text})";
-                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Note = Ann(node.Id), Body = ParseRegion(back.ToId, cur, depth + 1) });
+                    var hdr = cur;   // cut the back-edge while parsing the body, so nodes inside don't read the
+                                     // loop's own cycle as their own loop (which duplicated inner ifs).
+                    var body = WithLoopCut(hdr, () => ParseRegion(back.ToId, hdr, depth + 1));
+                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Note = Ann(node.Id), Body = body });
                     cur = exit.ToId;
+                    continue;
+                }
+
+                // BOTH branches return here → cur is the header of an enclosing loop (e.g. a back-edge from far
+                // below, via a connector pair). Try to structure the whole natural loop as one While/DoWhile.
+                if (tBack && fBack && TryStructureLoop(cur, node, blocks, out var loopExit, depth))
+                {
+                    cur = loopExit;
                     continue;
                 }
 
@@ -277,6 +288,58 @@ public static class StructogramConverter
                 foreach (var c in Succ(id)) stack.Push(c.ToId);
             }
             return false;
+        }
+
+        // Structures a natural loop whose header is `header` — a back-edge target where BOTH branches return
+        // (e.g. a back-edge from far below via a connector pair). Works for a single-entry / single-exit loop:
+        // it cuts the back-edge(s) so the body parses acyclically (re-using the normal segmentation), then emits
+        // a DoWhile, or — when the exit sits in the MIDDLE of the body ("loop-and-a-half") — a While with the
+        // pre-exit part emitted once before and once inside (a single, bounded duplication). Returns false when
+        // the loop isn't cleanly single-exit (caller falls back), so an irreducible tangle still gets flagged.
+        private bool TryStructureLoop(string header, FlowNode node, List<NsBlock> blocks, out string? exit, int depth)
+        {
+            exit = null;
+            var L = _nodes.Keys.Where(n => n == header || (Reaches(header, n) && Reaches(n, header))).ToHashSet();
+            var exitEdges = new List<(string from, string to)>();
+            foreach (var n in L) foreach (var e in Succ(n)) if (!L.Contains(e.ToId)) exitEdges.Add((n, e.ToId));
+            if (exitEdges.Select(x => x.to).Distinct().Count() != 1) return false;   // not single exit-target
+            if (exitEdges.Select(x => x.from).Distinct().Count() != 1) return false; // not single exit-test
+            var exitTo = exitEdges[0].to;
+            exit = exitTo;
+            var xt = exitEdges[0].from;
+
+            WithLoopCut(header, () =>   // cut back-edge(s) into the header so the body parses acyclically
+            {
+                var A = ParseRegion(header, xt, depth + 1);                         // header … exit test
+                var contEdge = Succ(xt).FirstOrDefault(e => e.ToId != exitTo);      // branch that stays in the loop
+                var B = contEdge.ToId is null ? new List<NsBlock>() : ParseRegion(contEdge.ToId, header, depth + 1);
+                var cond = !string.IsNullOrWhiteSpace(contEdge.Label) ? contEdge.Label : _nodes[xt].Text;
+                if (B.Count == 0)
+                    blocks.Add(new NsBlock { Kind = NsBlockKind.DoWhile, Text = cond, Note = Ann(node.Id), Body = A });
+                else
+                {
+                    blocks.AddRange(A);                                             // pre-exit part, run once
+                    var body = new List<NsBlock>(B);
+                    body.AddRange(ParseRegion(header, xt, depth + 1));              // … then repeated in the loop
+                    blocks.Add(new NsBlock { Kind = NsBlockKind.While, Text = cond, Note = Ann(node.Id), Body = body });
+                }
+                return true;
+            });
+            return true;
+        }
+
+        // Runs <paramref name="body"/> with every back-edge into <paramref name="header"/> (an edge from a node
+        // the header can reach) temporarily removed, so the loop body parses as an acyclic region. Restores the
+        // edges afterwards.
+        private T WithLoopCut<T>(string header, Func<T> body)
+        {
+            var backSrcs = _succ.Keys.Where(p => Reaches(header, p) && _succ[p].Any(e => e.ToId == header)).ToList();
+            var removed = new List<(string p, Edge e)>();
+            foreach (var p in backSrcs)
+                for (int i = _succ[p].Count - 1; i >= 0; i--)
+                    if (_succ[p][i].ToId == header) { removed.Add((p, _succ[p][i])); _succ[p].RemoveAt(i); }
+            try { return body(); }
+            finally { foreach (var (p, e) in removed) _succ[p].Add(e); }
         }
 
         private static (Edge t, Edge f) OrderTrueFalse(List<Edge> outs)
