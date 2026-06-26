@@ -312,11 +312,12 @@ public class FlowChartWindow : Window
             if (_tapDrag is not null) { Save(); _tapDrag = null; e.Pointer.Capture(null); return; }
             if (_segConn is not null)
             {
-                // A comb tooth is re-anchored to the bar by CombRoute; normalising via ManualRoute would
-                // re-anchor it to the node, so skip it for any comb tooth.
-                bool combTooth = string.IsNullOrEmpty(_segConn.ToTapConn)
-                    && _data.Nodes.FirstOrDefault(n => n.Id == _segConn.FromId)?.Kind == FlowNodeKind.MultiDecision;
-                if (!combTooth) NormalizeWaypoints(_segConn);
+                // A comb tooth (re-anchored to the bar) and a Bemerkung leader (re-anchored to the bracket
+                // spine) have a fixed, non-node-edge end, so skip ManualRoute normalisation for them.
+                bool fixedEnd = string.IsNullOrEmpty(_segConn.ToTapConn)
+                    && (_data.Nodes.FirstOrDefault(n => n.Id == _segConn.FromId)?.Kind is FlowNodeKind.MultiDecision or FlowNodeKind.Annotation
+                        || _data.Nodes.FirstOrDefault(n => n.Id == _segConn.ToId)?.Kind == FlowNodeKind.Annotation);
+                if (!fixedEnd) NormalizeWaypoints(_segConn);
                 RenderConnection(_segConn);
                 RenderTapsOnto(_segConn.Id);   // T-pieces on this line settle with it
                 RenderCrossovers(); Save();
@@ -2006,10 +2007,17 @@ public class FlowChartWindow : Window
             var annNode = fromAnn ? fromN : toN;
             var annR = fromAnn ? a.Value : bn.Value;
             var othR = fromAnn ? bn.Value : a.Value;
-            // Attach at the bracket's spine: right edge when mirrored, else left edge.
+            double g = _data.GridSize >= 4 ? _data.GridSize : 10;
+            // Attach at the bracket's spine (right edge when mirrored, else left) and leave it HORIZONTALLY.
             var annPt = new Point(annNode!.Mirrored ? annR.Right : annR.Left, annR.Center.Y);
-            var othPt = RectBorderPoint(othR, annPt);            // element edge facing the annotation
-            return fromAnn ? new List<Point> { annPt, othPt } : new List<Point> { othPt, annPt };
+            var stub   = new Point(annPt.X + (annNode.Mirrored ? g : -g), annPt.Y);
+            var wps = conn.Waypoints.Select(w => new Point(w.X, w.Y)).ToList();
+            var elemNeighbor = wps.Count > 0 ? (fromAnn ? wps[^1] : wps[0]) : stub;
+            var othPt = EdgeSlide(othR, elemNeighbor);           // element edge facing the leader, perpendicular
+            var seq = new List<Point>();
+            if (fromAnn) { seq.Add(annPt); seq.Add(stub); seq.AddRange(wps); seq.Add(othPt); }
+            else         { seq.Add(othPt); seq.AddRange(wps); seq.Add(stub); seq.Add(annPt); }
+            return Orthogonalize(seq);   // straight, right-angled leader with movable bends
         }
 
         if (_data.DiagonalLines)
