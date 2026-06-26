@@ -174,7 +174,9 @@ public static class StructogramConverter
                 {
                     var back = tBack ? tConn : fConn;
                     var exit = tBack ? fConn : tConn;
-                    var cond = !string.IsNullOrWhiteSpace(back.Label) ? back.Label
+                    // Keep the decision's wording AND which branch loops: "getroffen? = nein".
+                    var cond = !string.IsNullOrWhiteSpace(back.Label)
+                             ? (string.IsNullOrWhiteSpace(node.Text) ? back.Label : $"{node.Text} = {back.Label}")
                              : tBack ? node.Text : $"!({node.Text})";
                     var hdr = cur;   // cut the back-edge while parsing the body, so nodes inside don't read the
                                      // loop's own cycle as their own loop (which duplicated inner ifs).
@@ -313,7 +315,10 @@ public static class StructogramConverter
                 var A = ParseRegion(header, xt, depth + 1);                         // header … exit test
                 var contEdge = Succ(xt).FirstOrDefault(e => e.ToId != exitTo);      // branch that stays in the loop
                 var B = contEdge.ToId is null ? new List<NsBlock>() : ParseRegion(contEdge.ToId, header, depth + 1);
-                var cond = !string.IsNullOrWhiteSpace(contEdge.Label) ? contEdge.Label : _nodes[xt].Text;
+                var xtText = _nodes[xt].Text;
+                var cond = !string.IsNullOrWhiteSpace(contEdge.Label)
+                         ? (string.IsNullOrWhiteSpace(xtText) ? contEdge.Label : $"{xtText} = {contEdge.Label}")
+                         : xtText;
                 if (B.Count == 0)
                     blocks.Add(new NsBlock { Kind = NsBlockKind.DoWhile, Text = cond, Note = Ann(node.Id), Body = A });
                 else
