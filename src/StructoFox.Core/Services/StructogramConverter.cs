@@ -46,7 +46,11 @@ public static class StructogramConverter
         private readonly Dictionary<string, List<Edge>> _succ;
         private readonly Dictionary<string, string> _ann = new();   // element id → its Bemerkung text(s)
         private static readonly List<Edge> _noEdges = new();
-        private int _budget = 2000;   // overall block budget (guards against pathological graphs)
+        // Runaway guards. Segmentation made conversion LINEAR in node count, so the block budget / per-region
+        // iteration cap can be generous (large well-formed PAPs convert). The DEPTH cap stays modest on purpose:
+        // it is the recursion / stack-overflow guard, and a well-formed PAP — even a huge one — only nests a
+        // few levels deep (sequential segments are iterated, not recursed).
+        private int _budget = 500_000;   // overall block budget
         public readonly HashSet<string> Flagged = new();   // flowchart node ids that could not be structured
 
         public Ctx(FlowChartData fc)
@@ -124,7 +128,7 @@ public static class StructogramConverter
 
             while (cur is not null && cur != stopId)
             {
-                if (--_budget <= 0 || ++localGuard > 1000 || depth > 200)
+                if (--_budget <= 0 || ++localGuard > 500_000 || depth > 200)
                 {
                     if (cur is not null) Flagged.Add(cur);
                     blocks.Add(Flag("diagram too complex or cyclic to structure here"));
