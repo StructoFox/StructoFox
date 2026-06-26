@@ -366,34 +366,33 @@ public class StructogramWindow : Window
         _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, b.RefId, f?.Name ?? b.Text, _themePath);
     }
 
-    // The classic if/else box: centered condition, T/F labels, then two side-by-side branches.
+    // The classic if/else box (DIN 66261): the condition sits in a triangle formed by two diagonals running
+    // from the top corners to the bottom centre; the then/else captions sit in the two lower corners. Then the
+    // two side-by-side branches, split at the centre under the apex.
     Control IfBox(NsBlock b)
     {
         var grid = new Grid();
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // condition header
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // branch labels
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // triangle header
         grid.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // branches
 
         var cond = PrimaryLabel(string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhCondition") : b.Text, b);
         cond.TextAlignment = TextAlignment.Center;
-        cond.Margin = new(8, 6, 8, 6);
         cond.DoubleTapped += (_, _) => EditText(b);
-        Grid.SetRow(cond, 0);
-        grid.Children.Add(cond);
 
-        // Branch label row (true | false).
-        var labelRow = new Grid();
-        labelRow.ColumnDefinitions.Add(new ColumnDefinition());
-        labelRow.ColumnDefinitions.Add(new ColumnDefinition());
         var trueCap  = string.IsNullOrWhiteSpace(b.TrueLabel)  ? Loc.S("Struct_True")  : b.TrueLabel;
         var falseCap = string.IsNullOrWhiteSpace(b.FalseLabel) ? Loc.S("Struct_False") : b.FalseLabel;
-        var tl = LabelText(trueCap);  tl.FontSize = 10; tl.Opacity = 0.7; tl.HorizontalAlignment = HorizontalAlignment.Center;
-        var fl = LabelText(falseCap); fl.FontSize = 10; fl.Opacity = 0.7; fl.HorizontalAlignment = HorizontalAlignment.Center; Grid.SetColumn(fl, 1);
-        labelRow.Children.Add(tl); labelRow.Children.Add(fl);
-        var labelWrap = TopBorder(labelRow); Grid.SetRow(labelWrap, 1);
-        grid.Children.Add(labelWrap);
+        var tl = LabelText(trueCap);  tl.FontSize = 10; tl.Opacity = 0.7;
+        var fl = LabelText(falseCap); fl.FontSize = 10; fl.Opacity = 0.7;
 
-        // Two branch columns.
+        var layout = new IfHeaderPanel();
+        layout.Children.Add(cond); layout.Children.Add(tl); layout.Children.Add(fl);
+        var header = new Grid();
+        header.Children.Add(layout);
+        header.Children.Add(new HeaderDiagonals { Stroke = _lineBrush, StrokeThickness = _style.LineThickness, TwoLines = true });
+        Grid.SetRow(header, 0);
+        grid.Children.Add(header);
+
+        // Two branch columns (split at the centre, under the apex).
         var cols = new Grid();
         cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
         cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
@@ -403,7 +402,7 @@ public class StructogramWindow : Window
         var elseWrap = LeftBorder(elseCol); Grid.SetColumn(elseWrap, 1);
         cols.Children.Add(thenCol);
         cols.Children.Add(elseWrap);
-        var colsWrap = TopBorder(cols); Grid.SetRow(colsWrap, 2);
+        var colsWrap = TopBorder(cols); Grid.SetRow(colsWrap, 1);
         grid.Children.Add(colsWrap);
 
         return grid;
@@ -435,33 +434,40 @@ public class StructogramWindow : Window
         return outer;
     }
 
-    // A multi-way case box: a selector header over N equal columns, each with a label and a body.
+    // A multi-way case box (DIN 66261): the selector sits in a triangle above a single diagonal that slants
+    // down to the case labels; below it, N equal columns each with its label and body.
     Control CaseBox(NsBlock b)
     {
         var outer = new StackPanel();
-        var head = PrimaryLabel(string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSelector") : b.Text, b);
-        head.TextAlignment = TextAlignment.Center;
-        head.Margin = new(8, 5, 8, 5);
-        head.DoubleTapped += (_, _) => EditText(b);
-        outer.Children.Add(head);
-
-        var cols = new Grid();
         if (b.Arms.Count == 0) b.Arms.Add(new NsArm());
-        for (int i = 0; i < b.Arms.Count; i++)
-            cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
 
+        // Diagonal header: selector in the upper-left triangle, the case labels along the bottom of each column.
+        var head = PrimaryLabel(string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSelector") : b.Text, b);
+        head.DoubleTapped += (_, _) => EditText(b);
+        var layout = new CaseHeaderPanel { Arms = b.Arms.Count };
+        layout.Children.Add(head);
         for (int i = 0; i < b.Arms.Count; i++)
         {
             var arm = b.Arms[i];
-            var col = new StackPanel();
             var lbl = LabelText(string.IsNullOrWhiteSpace(arm.Label) ? Loc.S("Struct_Case") : arm.Label);
-            lbl.FontSize = 10; lbl.Opacity = 0.8; lbl.TextAlignment = TextAlignment.Center; lbl.Margin = new(4, 3, 4, 3);
+            lbl.FontSize = 10; lbl.Opacity = 0.8; lbl.TextAlignment = TextAlignment.Center;
             var capArm = arm;
             lbl.DoubleTapped += (_, _) => EditArmLabel(capArm);
-            col.Children.Add(lbl);
-            col.Children.Add(TopBorder(RenderSequence(arm.Body)));
+            layout.Children.Add(lbl);
+        }
+        var header = new Grid();
+        header.Children.Add(layout);
+        header.Children.Add(new HeaderDiagonals { Stroke = _lineBrush, StrokeThickness = _style.LineThickness, TwoLines = false });
+        outer.Children.Add(header);
 
-            var colWrap = i == 0 ? (Control)col : LeftBorder(col);
+        // Body columns under the labels, split by vertical dividers.
+        var cols = new Grid();
+        for (int i = 0; i < b.Arms.Count; i++)
+            cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        for (int i = 0; i < b.Arms.Count; i++)
+        {
+            var body = RenderSequence(b.Arms[i].Body);
+            var colWrap = i == 0 ? body : LeftBorder(body);
             Grid.SetColumn(colWrap, i);
             cols.Children.Add(colWrap);
         }
@@ -662,4 +668,89 @@ public class StructogramWindow : Window
     // Draws a left divider line beside the child — how NS boxes separate side-by-side columns.
     Border LeftBorder(Control child) =>
         new() { Child = child, BorderThickness = new(_style.LineThickness, 0, 0, 0), BorderBrush = _lineBrush };
+}
+
+/// <summary>DIN 66261 IF header layout: the condition centred at the top (in the downward triangle), with the
+/// then/else captions in the two lower corners. Children: [0]=condition, [1]=true caption, [2]=false caption.
+/// The diagonals themselves are drawn by an overlaid <see cref="HeaderDiagonals"/>.</summary>
+internal class IfHeaderPanel : Panel
+{
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        foreach (var c in Children) c.Measure(availableSize);
+        var cond = Children[0].DesiredSize; var tl = Children[1].DesiredSize; var fl = Children[2].DesiredSize;
+        double w = Math.Max(cond.Width + 24, tl.Width + fl.Width + 28);
+        double h = cond.Height + 8 + Math.Max(tl.Height, fl.Height) + 6;
+        return new Size(w, h);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        double W = finalSize.Width, H = finalSize.Height;
+        var cond = Children[0]; var tl = Children[1]; var fl = Children[2];
+        var cs = cond.DesiredSize; cond.Arrange(new Rect((W - cs.Width) / 2, 3, cs.Width, cs.Height));
+        var ts = tl.DesiredSize; tl.Arrange(new Rect(Math.Max(4, W * 0.25 - ts.Width / 2), H - ts.Height - 3, ts.Width, ts.Height));
+        var fs = fl.DesiredSize; fl.Arrange(new Rect(Math.Min(W - fs.Width - 4, W * 0.75 - fs.Width / 2), H - fs.Height - 3, fs.Width, fs.Height));
+        return finalSize;
+    }
+}
+
+/// <summary>DIN 66261 CASE header layout: the selector in the upper-left triangle, the case labels along the
+/// bottom of each column. Children: [0]=selector, [1..N]=labels. The slant is drawn by <see cref="HeaderDiagonals"/>.</summary>
+internal class CaseHeaderPanel : Panel
+{
+    public int Arms { get; set; } = 1;
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        foreach (var c in Children) c.Measure(availableSize);
+        var sel = Children[0].DesiredSize;
+        double labelW = 0, labelH = 0;
+        for (int i = 1; i < Children.Count; i++) { labelW += Children[i].DesiredSize.Width + 10; labelH = Math.Max(labelH, Children[i].DesiredSize.Height); }
+        double w = Math.Max(sel.Width + 30, labelW);
+        double h = sel.Height + 10 + labelH + 6;
+        return new Size(w, h);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        double W = finalSize.Width, H = finalSize.Height;
+        var sel = Children[0]; var ss = sel.DesiredSize;
+        sel.Arrange(new Rect(6, 3, ss.Width, ss.Height));   // selector top-left, in the upper triangle
+        int n = Math.Max(1, Arms);
+        double cw = W / n;
+        for (int i = 1; i < Children.Count; i++)
+        {
+            var ls = Children[i].DesiredSize;
+            double x = (i - 1) * cw + (cw - ls.Width) / 2;
+            Children[i].Arrange(new Rect(x, H - ls.Height - 3, ls.Width, ls.Height));
+        }
+        return finalSize;
+    }
+}
+
+/// <summary>Transparent overlay that draws the DIN branch-header diagonals over a header panel: two lines from
+/// the top corners to the bottom centre (IF), or one slant from the top-right to the bottom-left (CASE).</summary>
+internal class HeaderDiagonals : Control
+{
+    public HeaderDiagonals() => IsHitTestVisible = false;   // clicks pass through to the text below (edit on dbl-tap)
+
+    public IBrush Stroke { get; set; } = Brushes.Black;
+    public double StrokeThickness { get; set; } = 1;
+    public bool   TwoLines { get; set; }   // true = IF triangle, false = CASE single slant
+
+    public override void Render(DrawingContext ctx)
+    {
+        var pen = new Pen(Stroke, StrokeThickness);
+        double W = Bounds.Width, H = Bounds.Height;
+        if (TwoLines)
+        {
+            ctx.DrawLine(pen, new Point(0, 0), new Point(W / 2, H));
+            ctx.DrawLine(pen, new Point(W, 0), new Point(W / 2, H));
+        }
+        else
+        {
+            ctx.DrawLine(pen, new Point(W, 0), new Point(0, H));
+        }
+    }
 }
