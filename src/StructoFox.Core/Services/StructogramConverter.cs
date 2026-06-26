@@ -196,9 +196,9 @@ public static class StructogramConverter
                 if (tBack && fBack)
                 {
                     if (TryStructureLoop(cur, node, blocks, out var loopExit, depth)) { cur = loopExit; continue; }
-                    // An irreducible loop (e.g. it has several exits) can't be structured — flag it. Do NOT fall
-                    // through to the if/else path: that region is cyclic, so it would recurse without end.
-                    Flagged.Add(node.Id);
+                    // An irreducible loop (e.g. it has several exits) can't be structured. TryStructureLoop has
+                    // already flagged the offending exit decisions; just emit a marker and stop the region. Do
+                    // NOT fall through to the if/else path: that region is cyclic, so it would recurse forever.
                     blocks.Add(Flag("unstructured loop (several exits / irreducible)"));
                     break;
                 }
@@ -313,8 +313,16 @@ public static class StructogramConverter
             var L = _nodes.Keys.Where(n => n == header || (Reaches(header, n) && Reaches(n, header))).ToHashSet();
             var exitEdges = new List<(string from, string to)>();
             foreach (var n in L) foreach (var e in Succ(n)) if (!L.Contains(e.ToId)) exitEdges.Add((n, e.ToId));
-            if (exitEdges.Select(x => x.to).Distinct().Count() != 1) return false;   // not single exit-target
-            if (exitEdges.Select(x => x.from).Distinct().Count() != 1) return false; // not single exit-test
+            var exitTests = exitEdges.Select(x => x.from).Distinct().ToList();
+            // A clean loop has exactly one exit (one decision leaving to one target). Otherwise it's
+            // irreducible — mark the offending exit DECISIONS (or the header if the loop never exits), so the
+            // flag points at where the loop actually leaks, not at the loop header.
+            if (exitEdges.Select(x => x.to).Distinct().Count() != 1 || exitTests.Count != 1)
+            {
+                if (exitTests.Count > 0) foreach (var f in exitTests) Flagged.Add(f);
+                else Flagged.Add(header);
+                return false;
+            }
             var exitTo = exitEdges[0].to;
             exit = exitTo;
             var xt = exitEdges[0].from;
