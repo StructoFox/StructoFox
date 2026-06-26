@@ -83,9 +83,11 @@ public class FlowChartWindow : Window
     FlowConnection? _tapDrag;  // a tap line being slid along its target
     FlowConnection? _tineDrag; // a free comb tine whose open tip is being dragged onto a target
     FlowConnection? _toothDrag; // a wired comb tooth being slid along its bar (sets TineOffset)
+    Point _toothGrabCur;  int _toothGrabOffset;   // tooth-slide grab anchor (relative drag, no jump)
     FlowConnection? _toothEndDrag; // a wired comb tooth whose target end is being dragged to another side
     FlowConnection? _armedTine; // in connect mode: the specific free tine clicked, to wire on the next target click
     FlowNode? _combDrag;  bool _combVert;   // a Multi-Verzweigung whose comb spine is being pushed nearer/further
+    Point _combGrabCur;  int _combGrabGap, _combGrabShift, _combGrabBarShift;   // bar grab anchor (relative drag, no jump)
     FlowNode? _stemDrag;  bool _stemVertexMode;   // stem drag: near diamond = pick vertex, near bar = slide pos
     FlowNode? _stemSegNode; List<Point>? _stemSegBase; int _stemSegIdx; bool _stemSegHoriz; Point _stemSegStart;  // stem bend
     bool _combGapOnly;      // the L bottom-bar grab moves gap + bar-shift; a single comb's bar grab is 2D
@@ -2136,6 +2138,8 @@ public class FlowChartWindow : Window
                 {
                     if (_mode == EditMode.Remove) return;
                     _combDrag = capNode; _combVert = capVert; _combGapOnly = false;
+                    _combGrabCur = e.GetPosition(_canvas);
+                    _combGrabGap = capNode.CombGap; _combGrabShift = capNode.CombShift; _combGrabBarShift = capNode.CombBarShift;
                     e.Pointer.Capture(_canvas); e.Handled = true;
                 };
                 _canvas!.Children.Add(bar); _combHandles.Add(bar);
@@ -2174,6 +2178,8 @@ public class FlowChartWindow : Window
                 {
                     if (_mode == EditMode.Remove) return;
                     _combDrag = capNode; _combVert = true; _combGapOnly = true;
+                    _combGrabCur = e.GetPosition(_canvas);
+                    _combGrabGap = capNode.CombGap; _combGrabShift = capNode.CombShift; _combGrabBarShift = capNode.CombBarShift;
                     e.Pointer.Capture(_canvas); e.Handled = true;
                 };
                 _canvas!.Children.Add(barGrab); _combHandles.Add(barGrab);
@@ -2186,34 +2192,38 @@ public class FlowChartWindow : Window
     }
 
     // Drags a Multi-Verzweigung's spine bar in 2D: perpendicular to the diamond sets the gap (min 1), along
-    // the bar the shift. Hand-routed teeth are carried by the SAME slot delta, so their custom shape stays
-    // attached to the bar instead of kinking when the whole comb moves.
+    // the bar the shift. A hand-routed tooth's bends + target stay FIXED in space — only the bar-side segment
+    // re-stretches to the moved slot (the user's principle: what's held stays held, touched lines just stretch).
     void DragComb(Point cur)
     {
         if (_combDrag is null) return;
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var s = new Rect(_combDrag.X, _combDrag.Y, _combDrag.Width, _combDrag.Height);
-        double dx, dy;
+        // Relative drag: deltas are measured from the grab point, never the absolute cursor — so the bar
+        // doesn't jump to centre under the mouse on grab. A hand-routed tooth stays attached to the bar and
+        // rides along with it (BOTH axes) — its tip re-glues to the target via re-projection — so it can't
+        // split off or fold into a loop. Straight teeth just re-route from their moved slot.
         if (_combGapOnly)   // L bottom bar: gap (down) + bar slide left/right
         {
-            int gap = Math.Max(1, (int)Math.Round((cur.Y - s.Bottom) / g));
-            int barShift = (int)Math.Round((cur.X - s.Center.X) / g);
+            int gap = Math.Max(1, _combGrabGap + (int)Math.Round((cur.Y - _combGrabCur.Y) / g));
+            int barShift = _combGrabBarShift + (int)Math.Round((cur.X - _combGrabCur.X) / g);
             if (gap == _combDrag.CombGap && barShift == _combDrag.CombBarShift) return;
-            dx = (barShift - _combDrag.CombBarShift) * g; dy = (gap - _combDrag.CombGap) * g;
+            double dx = (barShift - _combDrag.CombBarShift) * g, dy = (gap - _combDrag.CombGap) * g;
             _combDrag.CombGap = gap; _combDrag.CombBarShift = barShift;
+            TranslateTeeth(_combDrag, dx, dy);
         }
         else   // single comb bar: 2D — gap (perpendicular) + shift (along)
         {
             int gap, shift;
-            if (_combVert) { gap = (int)Math.Round((cur.Y - s.Bottom) / g); shift = (int)Math.Round((cur.X - s.Center.X) / g); }
-            else           { gap = (int)Math.Round((cur.X - s.Right)  / g); shift = (int)Math.Round((cur.Y - s.Center.Y) / g); }
+            if (_combVert) { gap = _combGrabGap + (int)Math.Round((cur.Y - _combGrabCur.Y) / g); shift = _combGrabShift + (int)Math.Round((cur.X - _combGrabCur.X) / g); }
+            else           { gap = _combGrabGap + (int)Math.Round((cur.X - _combGrabCur.X) / g); shift = _combGrabShift + (int)Math.Round((cur.Y - _combGrabCur.Y) / g); }
             gap = Math.Max(1, gap);
             if (gap == _combDrag.CombGap && shift == _combDrag.CombShift) return;
-            if (_combVert) { dx = (shift - _combDrag.CombShift) * g; dy = (gap - _combDrag.CombGap) * g; }
-            else           { dy = (shift - _combDrag.CombShift) * g; dx = (gap - _combDrag.CombGap) * g; }
+            double dGap = (gap - _combDrag.CombGap) * g, dShift = (shift - _combDrag.CombShift) * g;
             _combDrag.CombGap = gap; _combDrag.CombShift = shift;
+            // Map gap (perpendicular) + shift (along bar) onto X/Y for this comb's orientation.
+            if (_combVert) TranslateTeeth(_combDrag, dShift, dGap); else TranslateTeeth(_combDrag, dGap, dShift);
         }
-        TranslateCombTeeth(_combDrag, dx, dy);
         UpdateConnectionsFor(_combDrag.Id);
         RenderCombHandles();
     }
@@ -2272,8 +2282,9 @@ public class FlowChartWindow : Window
         RenderCombHandles();
     }
 
-    // Slides a single comb tooth along its bar: sets its TineOffset so its slot follows the cursor (the bar
-    // grows/shrinks to include it). Grid-stepped; the tooth stays a straight branch.
+    // Slides a single comb tooth along its bar: sets its TineOffset so its slot follows the cursor MOVEMENT
+    // (relative to the grab point — no jump). Grid-stepped; the whole tooth (re-targeted tip + hand bends)
+    // rides along, so a bent tooth slides cleanly instead of skewing.
     void DragTooth(Point cur)
     {
         if (_toothDrag is null) return;
@@ -2281,18 +2292,13 @@ public class FlowChartWindow : Window
         if (node is null) return;
         double g = _data.GridSize >= 4 ? _data.GridSize : 10;
         var comb = TineComb(node, _toothDrag);
-        int i = Math.Max(0, CombTines(node, comb).FindIndex(c => c.Id == _toothDrag.Id));
-        var def = CombSlot(node, comb, i, 0, g).slot;   // slot WITHOUT this tooth's offset
-        double along = comb == CombDirection.Right ? cur.Y : cur.X;
-        double defAlong = comb == CombDirection.Right ? def.Y : def.X;
-        int offset = (int)Math.Round((along - defAlong) / g);
+        double along     = comb == CombDirection.Right ? cur.Y : cur.X;
+        double grabAlong = comb == CombDirection.Right ? _toothGrabCur.Y : _toothGrabCur.X;
+        int offset = _toothGrabOffset + (int)Math.Round((along - grabAlong) / g);
         if (offset == _toothDrag.TineOffset) return;
-        // A re-targeted tip rides along with the slot, so sliding the shaft moves the WHOLE arrow.
-        if (_toothDrag.TineTargetSet)
-        {
-            double d = (offset - _toothDrag.TineOffset) * g;
-            if (comb == CombDirection.Right) _toothDrag.TineTargetY += d; else _toothDrag.TineTargetX += d;
-        }
+        double d = (offset - _toothDrag.TineOffset) * g;   // along-bar delta
+        if (_toothDrag.TineTargetSet) { if (comb == CombDirection.Right) _toothDrag.TineTargetY += d; else _toothDrag.TineTargetX += d; }
+        if (_toothDrag.Waypoints.Count > 0) foreach (var w in _toothDrag.Waypoints) { if (comb == CombDirection.Right) w.Y += d; else w.X += d; }
         _toothDrag.TineOffset = offset;
         UpdateConnectionsFor(node.Id);
         RenderCombHandles();
@@ -2325,9 +2331,9 @@ public class FlowChartWindow : Window
         if (auto.Count > 0 && here.Count > 0 && Dist(auto[^1], here[^1]) < g) conn.TineTargetSet = false;
     }
 
-    // Shifts the stored waypoints of a node's hand-routed comb teeth by (dx,dy) — used so a manual tooth
-    // tail rides along when the whole comb is moved (its slot moves by the same delta).
-    void TranslateCombTeeth(FlowNode node, double dx, double dy)
+    // Slides the stored waypoints of a node's hand-routed comb teeth by (dx,dy). Used by the bar drag to carry
+    // bent teeth ALONG the bar (one axis only), so their shape stays attached without skewing.
+    void TranslateTeeth(FlowNode node, double dx, double dy)
     {
         if (Math.Abs(dx) < 0.01 && Math.Abs(dy) < 0.01) return;
         foreach (var c in _data.Connections)
@@ -2418,6 +2424,18 @@ public class FlowChartWindow : Window
         var comb = TineComb(node, conn);
         int i = Math.Max(0, CombTines(node, comb).FindIndex(c => c.Id == conn.Id));
         var slot = CombSlot(node, comb, i, conn.TineOffset, g).slot;
+        // Hand-routed tooth: the user grabbed a segment, so honour the bends — slot → waypoints → a clean
+        // perpendicular entry into the target. The tooth still STARTS on the bar (no stray line at the node).
+        if (conn.Waypoints.Count > 0 && t is { } tr)
+        {
+            // The tooth rides with the bar (DragComb translates its waypoints), so the slot↔bend relationship
+            // is fixed — no culling needed. Route: slot → bends → a clean perpendicular entry into the target.
+            var wps = conn.Waypoints.Select(w => new Point(w.X, w.Y)).ToList();
+            var pts = new List<Point> { slot };
+            pts.AddRange(wps);
+            pts.Add(EdgeSlide(tr, wps[^1]));   // entry projected onto the nearest edge (perpendicular, outside)
+            return Simplify(Orthogonalize(pts));
+        }
         Point? anchor = conn.TineTargetSet ? new Point(conn.TineTargetX, conn.TineTargetY) : null;
         return RouteToothFromSlot(slot, comb, t, g, anchor);
     }
@@ -2440,14 +2458,12 @@ public class FlowChartWindow : Window
                 var e = EdgeSlide(tr, a);
                 var od = Outward(tr, e);
                 var bn = comb == CombDirection.Right ? new Point(1, 0) : new Point(0, 1);   // off-bar normal
-                var o  = new Point(slot.X + bn.X * g, slot.Y + bn.Y * g);
-                var ap = new Point(e.X + od.X * g, e.Y + od.Y * g);
-                var cA = new Point(o.X, ap.Y); var cB = new Point(ap.X, o.Y);
-                var infl = tr.Inflate(g * 0.5);
-                Point corner = infl.Contains(cA) && !infl.Contains(cB) ? cB
-                             : !infl.Contains(cA) && infl.Contains(cB) ? cA
-                             : (Dist(o, cA) + Dist(cA, ap) <= Dist(o, cB) + Dist(cB, ap) ? cA : cB);
-                head.Add(o); head.Add(corner); head.Add(ap); head.Add(e);
+                var o  = new Point(slot.X + bn.X * g, slot.Y + bn.Y * g);   // leave the bar perpendicular
+                var ap = new Point(e.X + od.X * g, e.Y + od.Y * g);         // stand-off one grid outside the entry edge
+                // Route o → ap AROUND the node (identical algorithm for both combs), then perpendicular into e.
+                // The old corner pick could send the right comb's wrap straight THROUGH the node; this can't.
+                foreach (var p in AroundNode(o, ap, tr.Inflate(g * 0.5), g, bn)) head.Add(p);
+                head.Add(e);
             }
             else
             {
@@ -2455,14 +2471,66 @@ public class FlowChartWindow : Window
                 // comb), sliding to the slot's level — so teeth stay clean even when a target isn't aligned
                 // with its slot (no entering the top/bottom edge with a kink).
                 double inset = Math.Max(0, Math.Min(6, Math.Min(tr.Width, tr.Height) / 2 - 1));
+                // The jog (knick) sits at the MIDPOINT between bar and target — never hard against the bar — so
+                // an off-level target gets a clean centred Z whose segments the user can still grab and nudge.
                 if (comb == CombDirection.Right)
-                { var e = new Point(tr.Left, Math.Clamp(slot.Y, tr.Top + inset, tr.Bottom - inset)); double j = Math.Max(slot.X + g, e.X - g); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
+                { var e = new Point(tr.Left, Math.Clamp(slot.Y, tr.Top + inset, tr.Bottom - inset)); double j = Math.Max(slot.X + g, Math.Min(e.X - g, Snap((slot.X + e.X) / 2))); head.Add(new(j, slot.Y)); head.Add(new(j, e.Y)); head.Add(e); }
                 else
-                { var e = new Point(Math.Clamp(slot.X, tr.Left + inset, tr.Right - inset), tr.Top); double j = Math.Max(slot.Y + g, e.Y - g); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }
+                { var e = new Point(Math.Clamp(slot.X, tr.Left + inset, tr.Right - inset), tr.Top); double j = Math.Max(slot.Y + g, Math.Min(e.Y - g, Snap((slot.Y + e.Y) / 2))); head.Add(new(slot.X, j)); head.Add(new(e.X, j)); head.Add(e); }
             }
         }
         else head.Add(comb == CombDirection.Right ? new(slot.X + stub, slot.Y) : new(slot.X, slot.Y + stub));
         return Simplify(Orthogonalize(head));
+    }
+
+    // An orthogonal path from o to ap (both already OUTSIDE box) that never crosses the box. The tooth ALWAYS
+    // leaves the bar along the off-bar axis (bn), so every fallback prefers the route that heads AWAY from the
+    // bar first — never the bar-hugging corner. Centred Z when clear, else an L, else a detour around the node.
+    List<Point> AroundNode(Point o, Point ap, Rect box, double g, Point bn)
+    {
+        bool offH = Math.Abs(bn.X) > Math.Abs(bn.Y);   // tooth leaves the bar horizontally (right comb)
+        // Centred Z: first segment runs along the off-bar axis (away from the bar), knick in the middle.
+        var z = offH
+            ? new List<Point> { o, new(Snap((o.X + ap.X) / 2), o.Y), new(Snap((o.X + ap.X) / 2), ap.Y), ap }
+            : new List<Point> { o, new(o.X, Snap((o.Y + ap.Y) / 2)), new(ap.X, Snap((o.Y + ap.Y) / 2)), ap };
+        if (!HitsBox(z, box)) return z;
+
+        // L fallback: try the corner whose FIRST segment leaves along the off-bar axis first (target-side, not
+        // bar-hugging); only fall back to the other corner if that one is blocked.
+        var first = offH ? new Point(ap.X, o.Y) : new Point(o.X, ap.Y);
+        var other = offH ? new Point(o.X, ap.Y) : new Point(ap.X, o.Y);
+        if (!SegHitsRect(o, first, box) && !SegHitsRect(first, ap, box)) return new() { o, first, ap };
+        if (!SegHitsRect(o, other, box) && !SegHitsRect(other, ap, box)) return new() { o, other, ap };
+
+        // Detour around the node, perpendicular to the off-bar axis (over top/bottom for a horizontal tooth).
+        double yTop = box.Top - g, yBot = box.Bottom + g, xL = box.Left - g, xR = box.Right + g;
+        if (offH)
+        { double y = Math.Abs(o.Y - yTop) + Math.Abs(ap.Y - yTop) <= Math.Abs(o.Y - yBot) + Math.Abs(ap.Y - yBot) ? yTop : yBot; return new() { o, new(o.X, y), new(ap.X, y), ap }; }
+        double x = Math.Abs(o.X - xL) + Math.Abs(ap.X - xL) <= Math.Abs(o.X - xR) + Math.Abs(ap.X - xR) ? xL : xR;
+        return new() { o, new(x, o.Y), new(x, ap.Y), ap };
+    }
+
+    // Whether any segment of a polyline crosses the interior of box.
+    bool HitsBox(List<Point> pts, Rect box)
+    {
+        for (int i = 0; i < pts.Count - 1; i++) if (SegHitsRect(pts[i], pts[i + 1], box)) return true;
+        return false;
+    }
+
+    // Whether an axis-aligned segment a→b crosses the interior of rect r (touching an edge doesn't count).
+    static bool SegHitsRect(Point a, Point b, Rect r)
+    {
+        if (Math.Abs(a.Y - b.Y) < 0.01)   // horizontal
+        {
+            if (a.Y <= r.Top || a.Y >= r.Bottom) return false;
+            return Math.Min(a.X, b.X) < r.Right && Math.Max(a.X, b.X) > r.Left;
+        }
+        if (Math.Abs(a.X - b.X) < 0.01)   // vertical
+        {
+            if (a.X <= r.Left || a.X >= r.Right) return false;
+            return Math.Min(a.Y, b.Y) < r.Bottom && Math.Max(a.Y, b.Y) > r.Top;
+        }
+        return false;
     }
 
     // The slot point on the bar for tine index i (nudged by its per-tooth TineOffset along the bar), plus the
@@ -2805,21 +2873,22 @@ public class FlowChartWindow : Window
                 if (_mode != EditMode.Remove && !string.IsNullOrEmpty(capConn.ToTapConn)
                     && _connPts.TryGetValue(capConn.Id, out var tpts) && segIdx == tpts.Count - 2)
                 { _tapDrag = capConn; e.Pointer.Capture(_canvas); e.Handled = true; return; }
-                // A wired comb tooth: grabbing nearer the TARGET drags its end onto another side (perpendicular);
-                // grabbing nearer the BAR slides its slot along the bar (TineOffset).
+                // A wired comb tooth has three grab zones: the arrowhead END re-targets onto another side;
+                // the FIRST segment (touching the bar) slides the slot along the bar; everything in between —
+                // the knick and the second half toward the tip — bends freely (stored as the tine's waypoints).
                 if (combTine && !freeTine)
                 {
                     bool wired = !string.IsNullOrEmpty(capConn.ToId)
                                  && _connPts.TryGetValue(capConn.Id, out var rp) && rp.Count >= 2;
                     if (wired)
                     {
-                        // Only the very arrowhead end re-targets to another side; the rest of the tooth slides
-                        // its slot along the bar (so the bar follows and no stub is left behind).
                         var gp = e.GetPosition(_canvas); var rpts = _connPts[capConn.Id];
                         double gg = _data.GridSize >= 4 ? _data.GridSize : 10;
-                        if (Dist(gp, rpts[^1]) < 1.6 * gg) _toothEndDrag = capConn; else _toothDrag = capConn;
+                        if (Dist(gp, rpts[^1]) < 1.6 * gg) _toothEndDrag = capConn;   // arrowhead → re-target
+                        else if (segIdx == 0) { _toothDrag = capConn; _toothGrabCur = gp; _toothGrabOffset = capConn.TineOffset; }   // bar segment → slide slot
+                        else { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; return; }   // middle/tip half → bend
                     }
-                    else _toothDrag = capConn;
+                    else { _toothDrag = capConn; _toothGrabCur = e.GetPosition(_canvas); _toothGrabOffset = capConn.TineOffset; }
                     e.Pointer.Capture(_canvas); e.Handled = true; return;
                 }
                 if (draggable) { BeginSegmentDrag(capConn, segIdx, e); e.Handled = true; }   // Select or Connect mode
@@ -2882,8 +2951,7 @@ public class FlowChartWindow : Window
         // A comb tine (free or wired) labels its case at the TOP of its own tooth — so each label sits over
         // its tine, spread along the comb, and stays put when the tine gets wired (instead of piling up at
         // the shared spine or jumping to the target end).
-        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mnode
-            && conn.Waypoints.Count == 0)
+        if (_data.Nodes.FirstOrDefault(n => n.Id == conn.FromId) is { Kind: FlowNodeKind.MultiDecision } mnode)
         {
             double g = _data.GridSize >= 4 ? _data.GridSize : 10;
             var comb = TineComb(mnode, conn);
