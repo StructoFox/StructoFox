@@ -174,9 +174,10 @@ public static class StructogramConverter
                 {
                     var back = tBack ? tConn : fConn;
                     var exit = tBack ? fConn : tConn;
-                    // Keep the decision's wording AND which branch loops: "getroffen? = nein".
+                    // Keep the decision's wording AND which branch loops ("getroffen? = nein"); an expression
+                    // label like "!chicken" stands on its own.
                     var cond = !string.IsNullOrWhiteSpace(back.Label)
-                             ? (string.IsNullOrWhiteSpace(node.Text) ? back.Label : $"{node.Text} = {back.Label}")
+                             ? LoopCond(node.Text, back.Label)
                              : tBack ? node.Text : $"!({node.Text})";
                     var hdr = cur;   // cut the back-edge while parsing the body, so nodes inside don't read the
                                      // loop's own cycle as their own loop (which duplicated inner ifs).
@@ -315,10 +316,7 @@ public static class StructogramConverter
                 var A = ParseRegion(header, xt, depth + 1);                         // header … exit test
                 var contEdge = Succ(xt).FirstOrDefault(e => e.ToId != exitTo);      // branch that stays in the loop
                 var B = contEdge.ToId is null ? new List<NsBlock>() : ParseRegion(contEdge.ToId, header, depth + 1);
-                var xtText = _nodes[xt].Text;
-                var cond = !string.IsNullOrWhiteSpace(contEdge.Label)
-                         ? (string.IsNullOrWhiteSpace(xtText) ? contEdge.Label : $"{xtText} = {contEdge.Label}")
-                         : xtText;
+                var cond = LoopCond(_nodes[xt].Text, contEdge.Label);
                 if (B.Count == 0)
                     blocks.Add(new NsBlock { Kind = NsBlockKind.DoWhile, Text = cond, Note = Ann(node.Id), Body = A });
                 else
@@ -345,6 +343,18 @@ public static class StructogramConverter
                     if (_succ[p][i].ToId == header) { removed.Add((p, _succ[p][i])); _succ[p].RemoveAt(i); }
             try { return body(); }
             finally { foreach (var (p, e) in removed) _succ[p].Add(e); }
+        }
+
+        // The loop condition text from a decision + the looping branch's label. A plain yes/no caption gets
+        // combined with the decision wording ("getroffen? = nein"); a label that is ALREADY a boolean
+        // expression (e.g. "!chicken") is used on its own — combining would be redundant.
+        private static readonly string[] _yesNo =
+            { "yes", "true", "ja", "y", "1", "wahr", "no", "false", "nein", "n", "0", "falsch" };
+        private static string LoopCond(string decisionText, string label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return decisionText;
+            if (string.IsNullOrWhiteSpace(decisionText)) return label;
+            return _yesNo.Contains(label.Trim().ToLowerInvariant()) ? $"{decisionText} = {label}" : label;
         }
 
         private static (Edge t, Edge f) OrderTrueFalse(List<Edge> outs)
