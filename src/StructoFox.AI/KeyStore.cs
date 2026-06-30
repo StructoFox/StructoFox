@@ -58,6 +58,49 @@ public static class KeyStore
 
     public static bool Has(string provider) => !string.IsNullOrWhiteSpace(Load(provider));
 
+    /// <summary>Maps a StructoFox provider id → the credential name ClaudetRelay used for the same provider
+    /// (only the providers both apps share; ids differ in wording so a plain rename wouldn't match).</summary>
+    public static readonly IReadOnlyDictionary<string, string> ClaudetRelayNames = new Dictionary<string, string>
+    {
+        ["Anthropic"]           = "Anthropic",
+        ["OpenAI"]              = "OpenAI ChatGPT",
+        ["Google"]              = "Google AI",
+        ["Groq"]                = "Groq",
+        ["Mistral"]             = "Mistral",
+        ["OpenRouter"]          = "OpenRouter",
+        ["xAI (Grok)"]          = "xAI Grok",
+        ["Cerebras"]            = "Cerebras",
+        ["DeepInfra"]           = "DeepInfra",
+        ["DeepSeek"]            = "DeepSeek",
+        ["Fireworks"]           = "Fireworks AI",
+        ["Nvidia NIM"]          = "Nvidia NIM",
+        ["Perplexity"]          = "Perplexity AI",
+        ["Together"]            = "Together AI",
+        ["Ollama (OpenAI API)"] = "Ollama ☁",
+    };
+
+    /// <summary>Windows only: copies API keys ClaudetRelay stored in the Credential Manager into StructoFox's
+    /// own entries (mapping the differing provider ids). Existing StructoFox keys are NOT overwritten.
+    /// Returns the provider ids that were imported. Throws on non-Windows.</summary>
+    public static List<string> ImportFromClaudetRelay()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new KeyStoreException("Import nur unter Windows verfügbar.",
+                "Die Übernahme aus ClaudetRelay liest die Windows-Anmeldeinformationsverwaltung und ist daher "
+              + "nur unter Windows möglich.");
+
+        var imported = new List<string>();
+        foreach (var (sfId, crName) in ClaudetRelayNames)
+        {
+            if (Has(sfId)) continue;                       // never clobber a key the user already set here
+            var value = Win.LoadRaw($"ClaudetRelay:{crName}");
+            if (string.IsNullOrEmpty(value)) continue;
+            Save(sfId, value);
+            imported.Add(sfId);
+        }
+        return imported;
+    }
+
     /// <summary>Checks the native store is reachable. Returns (true, null) if OK, otherwise (false, details)
     /// with a copy-able explanation + install hint. Used to warn the user before they enter keys.</summary>
     public static (bool ok, string? details) Probe()
@@ -133,9 +176,13 @@ public static class KeyStore
             finally { handle.Free(); }
         }
 
-        public static string? Load(string provider)
+        public static string? Load(string provider) => LoadRaw(Target(provider));
+
+        /// <summary>Reads a credential by its FULL target name (e.g. "ClaudetRelay:Anthropic"), so we can also
+        /// read another app's generic credentials for import.</summary>
+        public static string? LoadRaw(string fullTarget)
         {
-            if (!CredRead(Target(provider), CRED_TYPE_GENERIC, 0, out var ptr)) return null;
+            if (!CredRead(fullTarget, CRED_TYPE_GENERIC, 0, out var ptr)) return null;
             try
             {
                 var cred = Marshal.PtrToStructure<CREDENTIAL>(ptr);

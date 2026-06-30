@@ -51,6 +51,28 @@ internal static class ApiKeysWindow
             panel.Children.Add(warn);
         }
 
+        // Windows: offer to copy keys ClaudetRelay already stored in the Credential Manager.
+        if (OperatingSystem.IsWindows())
+        {
+            var import = PluginUi.Btn("↧  Keys aus ClaudetRelay übernehmen");
+            import.Margin = new(0, 0, 0, 12);
+            import.Click += (_, _) =>
+            {
+                try
+                {
+                    var got = KeyStore.ImportFromClaudetRelay();
+                    ctx.Notify(got.Count == 0
+                        ? "Keine neuen Keys gefunden (ClaudetRelay hat keine gespeichert, oder sie sind hier schon vorhanden)."
+                        : $"{got.Count} Key(s) übernommen: {string.Join(", ", got)}");
+                    win.Close();
+                    Show(ctx);   // reopen to refresh the status dots
+                }
+                catch (KeyStoreException ex) { ErrorDialog.Show(ctx, ex.Message, ex.Details); }
+                catch (Exception ex)         { ErrorDialog.Show(ctx, "Import fehlgeschlagen.", ex.ToString()); }
+            };
+            panel.Children.Add(import);
+        }
+
         foreach (var p in AiProviders.All.Where(p => p.Kind == AiProviderKind.Cloud))
         {
             var prov = p;
