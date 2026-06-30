@@ -31,7 +31,7 @@ public static class DiagramDecor
         if (BuildBand(items, false, title, style, onEditTitle)  is { } botBand) { DockPanel.SetDock(botBand, Dock.Bottom); dock.Children.Add(botBand); }
         dock.Children.Add(diagram);
 
-        var overlay = new Panel { IsHitTestVisible = false };
+        var overlay = new OverlayHost { IsHitTestVisible = false };
         AddWatermark(overlay, style);
 
         var outer = new Grid { Background = new SolidColorBrush(ParseOr(style.BackgroundColor, Colors.White)) };
@@ -273,5 +273,22 @@ public static class DiagramDecor
     static Color ParseOr(string hex, Color fallback)
     {
         try { return Color.Parse(hex); } catch { return fallback; }
+    }
+}
+
+/// <summary>An overlay layer that draws its children (e.g. the watermark) but contributes ZERO to layout size —
+/// so it can never enlarge the canvas or stop it shrinking back. It simply fills whatever space the page has.</summary>
+internal sealed class OverlayHost : Panel
+{
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        foreach (var c in Children) c.Measure(availableSize);
+        return default;   // contribute nothing to the parent's desired size
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        foreach (var c in Children) c.Arrange(new Rect(finalSize));
+        return finalSize;
     }
 }
