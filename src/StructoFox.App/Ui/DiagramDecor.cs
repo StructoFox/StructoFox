@@ -54,8 +54,13 @@ public static class DiagramDecor
         var here = items.Where(i => IsTop(i.pos) == top).ToList();
         if (here.Count == 0) return null;
 
+        // Auto | Star | Auto: the left and right slots take only the width they need (so a right-aligned block
+        // doesn't force the band — and the canvas — three times wider); the centre star absorbs the slack and
+        // pins the right slot to the canvas edge. The band only grows the canvas when content is genuinely wider.
         var grid = new Grid { Margin = new(12, 8, 12, 8) };
-        for (int i = 0; i < 3; i++) grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
 
         foreach (var (h, col) in new[] { (HorizontalAlignment.Left, 0), (HorizontalAlignment.Center, 1), (HorizontalAlignment.Right, 2) })
         {
