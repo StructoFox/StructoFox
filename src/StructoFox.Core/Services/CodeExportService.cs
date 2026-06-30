@@ -192,6 +192,7 @@ public static class CodeExportService
         {
             case Models.NsBlockKind.Statement:
             case Models.NsBlockKind.Subroutine:
+            case Models.NsBlockKind.Jump:
                 var s = StTerm(b.Text);
                 if (s.Length > 0) sb.AppendLine($"{ind}{s}");
                 break;
@@ -278,6 +279,7 @@ public static class CodeExportService
         {
             case Models.NsBlockKind.Statement:
             case Models.NsBlockKind.Subroutine:
+            case Models.NsBlockKind.Jump:
                 var s = (b.Text ?? "").Trim();
                 if (s.Length > 0) sb.AppendLine($"{ind}{s}");
                 break;
@@ -363,6 +365,7 @@ public static class CodeExportService
         {
             case Models.NsBlockKind.Statement:
             case Models.NsBlockKind.Subroutine:
+            case Models.NsBlockKind.Jump:
                 var s = (b.Text ?? "").Trim();
                 if (s.Length > 0) sb.AppendLine($"{ind}{s}");
                 break;
@@ -429,6 +432,7 @@ public static class CodeExportService
         {
             case Models.NsBlockKind.Statement:
             case Models.NsBlockKind.Subroutine:
+            case Models.NsBlockKind.Jump:
                 var s = StTerm(b.Text);
                 if (s.Length > 0) sb.AppendLine($"{ind}{s}");
                 break;
@@ -1281,6 +1285,7 @@ public static class CodeExportService
         {
             case Models.NsBlockKind.Statement:
             case Models.NsBlockKind.Subroutine:
+            case Models.NsBlockKind.Jump:
                 var s = (b.Text ?? "").Trim();
                 if (s.Length > 0) sb.AppendLine($"{ind}{s}");
                 break;

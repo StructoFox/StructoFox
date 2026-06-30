@@ -8,7 +8,8 @@ public enum NsBlockKind
     While,      // pre-test loop (kopfgesteuert)
     DoWhile,    // post-test loop (fußgesteuert)
     Case,       // multi-way selection
-    Subroutine  // call to a sub-program drawn elsewhere (double-bar box, links to its own diagram)
+    Subroutine, // call to a sub-program drawn elsewhere (double-bar box, links to its own diagram)
+    Jump        // early exit (DIN 66261): left-pointing arrow with a keyword — return / break / continue / exit
 }
 
 /// <summary>One arm of a Case block (a label + its body sequence).</summary>

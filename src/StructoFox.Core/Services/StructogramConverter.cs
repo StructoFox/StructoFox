@@ -120,6 +120,14 @@ public static class StructogramConverter
         /// <summary>The single successor of a node (or null).</summary>
         public string? One(string id) { var l = Succ(id); return l.Count > 0 ? l[0].ToId : null; }
 
+        // An End node counts as an explicit early-exit (→ DIN exit arrow) when it carries a real keyword
+        // rather than the default end label; a plain/empty "End"/"Ende"/"Stop" stays an implicit fall-through.
+        static bool IsExplicitExit(string? text)
+        {
+            var t = (text ?? "").Trim();
+            return t.Length > 0 && t.ToLowerInvariant() is not ("end" or "ende" or "stop" or "exit point" or "🔚");
+        }
+
         public List<NsBlock> ParseRegion(string? startId, string? stopId, int depth)
         {
             var blocks = new List<NsBlock>();
@@ -135,7 +143,14 @@ public static class StructogramConverter
                     break;
                 }
                 if (!_nodes.TryGetValue(cur, out var node)) break;
-                if (node.Kind == FlowNodeKind.End) break;
+                if (node.Kind == FlowNodeKind.End)
+                {
+                    // An End node carrying an explicit keyword (the user typed "break"/"return x"/… instead of
+                    // the default "End") becomes a DIN early-exit arrow; a plain End stays implicit.
+                    if (IsExplicitExit(node.Text))
+                        blocks.Add(new NsBlock { Kind = NsBlockKind.Jump, Text = node.Text.Trim() });
+                    break;
+                }
                 if (node.Kind == FlowNodeKind.Start) { cur = One(cur); continue; }
                 // Collector points / junctions carry no statement of their own. With one (or no) exit they
                 // are transparent — the flow passes straight through. But with several exits they ARE the

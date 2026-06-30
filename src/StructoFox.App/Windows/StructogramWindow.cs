@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -254,6 +255,7 @@ public class StructogramWindow : Window
             NsBlockKind.DoWhile   => LoopBox(b, preTest: false),
             NsBlockKind.Case      => CaseBox(b),
             NsBlockKind.Subroutine => SubroutineBox(b),
+            NsBlockKind.Jump      => JumpBox(b),
             _                     => StatementBox(b),
         };
 
@@ -348,6 +350,30 @@ public class StructogramWindow : Window
         }
         t.DoubleTapped += (_, _) => EditText(b);
         return t;
+    }
+
+    // The DIN 66261 early-exit symbol: a left-pointing arrow (drawn from lines) with the keyword inside
+    // (return / break / continue / exit, or whatever text the user's End node carried).
+    Control JumpBox(NsBlock b)
+    {
+        var word = string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_DefJump") : b.Text;
+        var t = PrimaryLabel(word, b);
+        t.Margin = new(4, 6, 8, 6);
+        t.VerticalAlignment = VerticalAlignment.Center;
+        t.FontWeight = FontWeight.SemiBold;
+
+        var stroke = Solid(b.Style?.LineColor) ?? _lineBrush;
+        var th     = _style.LineThickness;
+        var arrow  = new Canvas { Width = 22, Height = 16, Margin = new(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        // shaft (right→left) + arrowhead pointing left, so the exit "leaves" the diagram to the left.
+        arrow.Children.Add(new Polyline { Points = { new(20, 8), new(3, 8) }, Stroke = stroke, StrokeThickness = th });
+        arrow.Children.Add(new Polyline { Points = { new(9, 3), new(3, 8), new(9, 13) }, Stroke = stroke, StrokeThickness = th });
+
+        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        Grid.SetColumn(arrow, 0); g.Children.Add(arrow);
+        Grid.SetColumn(t, 1);     g.Children.Add(t);
+        g.DoubleTapped += (_, _) => EditText(b);
+        return g;
     }
 
     // The subroutine (predefined-process) box: a centred name with the two vertical inner bars,
@@ -579,6 +605,7 @@ public class StructogramWindow : Window
         Add(Loc.S("Struct_KDoWhile"), NsBlockKind.DoWhile);
         Add(Loc.S("Struct_KCase"), NsBlockKind.Case);
         Add(Loc.S("Struct_KSubroutine"), NsBlockKind.Subroutine);
+        Add(Loc.S("Struct_KJump"), NsBlockKind.Jump);
         return mi;
     }
 
@@ -615,6 +642,7 @@ public class StructogramWindow : Window
             Add(Loc.S("Struct_KDoWhile"), NsBlockKind.DoWhile);
             Add(Loc.S("Struct_KCase"), NsBlockKind.Case);
             Add(Loc.S("Struct_KSubroutine"), NsBlockKind.Subroutine);
+            Add(Loc.S("Struct_KJump"), NsBlockKind.Jump);
             OpenMenu(cm, b);
         };
         return b;
@@ -624,7 +652,7 @@ public class StructogramWindow : Window
     async void EditText(NsBlock b)
     {
         var t = await PromptDialog.Show(this,
-            b.Kind == NsBlockKind.Statement ? Loc.S("Struct_PromptStatement") : Loc.S("Struct_PromptCondition"),
+            b.Kind is NsBlockKind.Statement or NsBlockKind.Jump ? Loc.S("Struct_PromptStatement") : Loc.S("Struct_PromptCondition"),
             b.Text);
         if (t is null) return;
         b.Text = t; Save(); Rebuild();
@@ -646,6 +674,7 @@ public class StructogramWindow : Window
         NsBlockKind.DoWhile => Loc.S("Struct_DefDoWhile"),
         NsBlockKind.Case    => Loc.S("Struct_DefSelector"),
         NsBlockKind.Subroutine => Loc.S("Struct_DefSubroutine"),
+        NsBlockKind.Jump    => Loc.S("Struct_DefJump"),
         _                   => Loc.S("Struct_DefStatement"),
     };
 
