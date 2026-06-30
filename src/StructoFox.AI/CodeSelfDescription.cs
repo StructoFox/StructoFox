@@ -83,10 +83,23 @@ public static class CodeSelfDescription
         {
             var t = line.Trim();
             if (t.StartsWith(keyA, StringComparison.OrdinalIgnoreCase))
-                a = t[keyA.Length..].Trim().Trim('[', ']');
+                a = Clean(t[keyA.Length..]);
             else if (t.StartsWith(keyB, StringComparison.OrdinalIgnoreCase))
-                b = t[keyB.Length..].Trim().Trim('[', ']');
+                b = Clean(t[keyB.Length..]);
         }
         return (a, b);
+    }
+
+    // Trims brackets/quotes and treats a non-answer (dashes, "n/a", "none", empty) as empty — base models
+    // that don't follow the format often emit a bare "-" or placeholder rather than a real list.
+    static string Clean(string s)
+    {
+        s = s.Trim().Trim('[', ']', '"', '\'', ' ');
+        var bare = s.Replace("-", "").Replace("–", "").Replace("—", "").Trim();
+        if (bare.Length == 0) return "";
+        if (bare.Equals("n/a", StringComparison.OrdinalIgnoreCase) ||
+            bare.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+            bare.Equals("keine", StringComparison.OrdinalIgnoreCase)) return "";
+        return s;
     }
 }

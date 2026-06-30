@@ -1,7 +1,7 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Threading;
 using StructoFox.AI;
 using StructoFox.Core;
 
@@ -158,12 +158,27 @@ internal static class AiConfigWindow
 
         // Model + fetch
         panel.Children.Add(PluginUi.Label("Modell"));
+        var currentModels = new List<string>();   // the models currently offered (defaults or fetched)
         var modelBox = new AutoCompleteBox
         {
             Text = card.Model, PlaceholderText = "Modellname eingeben oder ↻ klicken",
-            FilterMode = AutoCompleteFilterMode.Contains, MinimumPrefixLength = 0,
+            FilterMode = AutoCompleteFilterMode.Custom, MinimumPrefixLength = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        PluginUi.Theme(modelBox, TemplatedControl.ForegroundProperty, "SidebarTextBrush");
+        PluginUi.Theme(modelBox, TemplatedControl.BackgroundProperty,  "ControlBgBrush");
+        PluginUi.Theme(modelBox, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
+        // Custom filter: empty text or a text that already equals a full model name → show the WHOLE list
+        // (so the dropdown stays browsable after a pick); otherwise narrow by substring.
+        modelBox.ItemFilter = (search, item) =>
+        {
+            var s = (search ?? "").Trim();
+            if (s.Length == 0) return true;
+            if (currentModels.Any(m => string.Equals(m, s, StringComparison.OrdinalIgnoreCase))) return true;
+            return (item?.ToString() ?? "").Contains(s, StringComparison.OrdinalIgnoreCase);
+        };
+        // Always pop the dropdown open on focus, so the user can browse without clearing the field first.
+        modelBox.GotFocus += (_, _) => { if (currentModels.Count > 0) modelBox.IsDropDownOpen = true; };
         var fetch  = PluginUi.Btn("↻"); fetch.Margin = new(6, 0, 0, 0);
         var status = PluginUi.Dim("");
         var modelRow = new Grid { ColumnDefinitions = new("*,Auto") };
@@ -189,11 +204,13 @@ internal static class AiConfigWindow
         SyncProviderUi();
         provCombo.SelectionChanged += (_, _) => SyncProviderUi();
 
-        void PopulateDefaults()
+        void SetModels(IEnumerable<string> models)
         {
-            var p = Prov();
-            modelBox.ItemsSource = p is null ? null : DefaultModels(p.Id);
+            currentModels.Clear();
+            currentModels.AddRange(models);
+            modelBox.ItemsSource = currentModels.ToList();
         }
+        void PopulateDefaults() => SetModels(Prov() is { } p ? DefaultModels(p.Id) : []);
         PopulateDefaults();
         provCombo.SelectionChanged += (_, _) => PopulateDefaults();
 
@@ -213,10 +230,10 @@ internal static class AiConfigWindow
             {
                 using var svc = AiProviders.Create(probe);
                 var models = await svc.GetModelsAsync(cts.Token);
-                var cur = modelBox.Text;
-                modelBox.ItemsSource = models;
-                modelBox.Text = !string.IsNullOrEmpty(cur) ? cur : models.FirstOrDefault() ?? "";
-                status.Text = $"✓ {models.Count} Modell(e) gefunden";
+                SetModels(models);
+                // Keep what the user already had; do NOT auto-pick the first model (let the dropdown show all).
+                status.Text = $"✓ {models.Count} Modell(e) gefunden — Liste aufklappen zum Wählen";
+                if (currentModels.Count > 0) modelBox.IsDropDownOpen = true;
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { status.Text = "⚠ " + ex.Message; }
@@ -230,23 +247,27 @@ internal static class AiConfigWindow
 
         // Self-describe
         var describe = PluginUi.Btn("🔍  Selbstbeschreibung holen"); describe.Margin = new(0, 14, 0, 0);
+        var spinner  = new ProgressBar { IsIndeterminate = true, IsVisible = false, Height = 4, Margin = new(0, 6, 0, 0) };
         var descStatus = PluginUi.Dim("");
+        var busy = false;   // guard re-entry WITHOUT disabling the button (disabled state would grey the label)
         describe.Click += async (_, _) =>
         {
+            if (busy) return;
             ApplyTo(card); // capture current selections first
             if (string.IsNullOrWhiteSpace(card.Model)) { descStatus.Text = "Erst ein Modell wählen."; return; }
-            describe.IsEnabled = false; descStatus.Text = "Frage das Modell…";
+            busy = true; spinner.IsVisible = true; descStatus.Text = "Frage das Modell…";
             try
             {
                 await CodeSelfDescription.FetchAsync(card, cts.Token);
                 descStatus.Text = string.IsNullOrWhiteSpace(card.LastApiError)
-                    ? $"✓ {card.Role}  ·  💪 {card.Strengths}  ·  🚫 {card.Weaknesses}"
+                    ? $"✓ {card.Role}\n💪 {card.Strengths}\n🚫 {card.Weaknesses}"
                     : "⚠ " + card.LastApiError;
             }
             catch (Exception ex) { descStatus.Text = "⚠ " + ex.Message; }
-            finally { describe.IsEnabled = true; }
+            finally { busy = false; spinner.IsVisible = false; }
         };
         panel.Children.Add(describe);
+        panel.Children.Add(spinner);
         panel.Children.Add(descStatus);
 
         // Buttons
