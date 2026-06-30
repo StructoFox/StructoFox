@@ -1,5 +1,8 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using StructoFox.Core;
 
@@ -38,10 +41,34 @@ internal static class PluginUi
         Text = text, Opacity = 0.7, FontSize = 11, TextWrapping = TextWrapping.Wrap,
     };
 
-    public static Button Btn(string text) => new()
+    /// <summary>Binds a control property to an OXSUIT theme brush (resolved app-wide via DynamicResource),
+    /// mirroring the host's Ui.Theme so plugin chrome tints from the same palette.</summary>
+    public static void Theme(Control c, AvaloniaProperty prop, string key) =>
+        c.Bind(prop, new DynamicResourceExtension(key));
+
+    /// <summary>A push button themed like the rest of the app (Fluent's own foreground doesn't follow the
+    /// inherited window text colour, so buttons need explicit brushes or their label stays white).</summary>
+    public static Button Btn(string text)
     {
-        Content = text, Padding = new(14, 7), Margin = new(0, 0, 8, 0),
-    };
+        var b = new Button
+        {
+            Content = text, Padding = new(14, 7), Margin = new(0, 0, 8, 0), CornerRadius = new(4),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+        };
+        Theme(b, TemplatedControl.BackgroundProperty, "ControlBgBrush");
+        Theme(b, TemplatedControl.ForegroundProperty, "SidebarTextBrush");
+        return b;
+    }
+
+    /// <summary>A combo box wired to the OXSUIT brushes (background/foreground/border).</summary>
+    public static ComboBox Combo()
+    {
+        var c = new ComboBox { MinHeight = 32, CornerRadius = new(4), HorizontalAlignment = HorizontalAlignment.Stretch };
+        Theme(c, TemplatedControl.BackgroundProperty,  "ControlBgBrush");
+        Theme(c, TemplatedControl.ForegroundProperty,  "SidebarTextBrush");
+        Theme(c, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
+        return c;
+    }
 
     public static StackPanel Row(params Control[] kids)
     {

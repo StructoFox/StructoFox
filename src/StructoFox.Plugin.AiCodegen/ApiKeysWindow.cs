@@ -44,7 +44,7 @@ internal static class ApiKeysWindow
                     },
                 },
             };
-            var showDetails = new Button { Content = "Details anzeigen" };
+            var showDetails = PluginUi.Btn("Details anzeigen");
             showDetails.Click += (_, _) => ErrorDialog.Show(ctx, "Schlüsselspeicher nicht verfügbar",
                 backendDetails ?? "(keine Details)");
             ((StackPanel)warn.Child).Children.Add(showDetails);
@@ -77,7 +77,7 @@ internal static class ApiKeysWindow
             Grid.SetColumn(box, 1);
             row.Children.Add(box);
 
-            var save = new Button { Content = "Speichern", Margin = new(0, 0, 6, 0) };
+            var save = PluginUi.Btn("Speichern"); save.Margin = new(0, 0, 6, 0);
             save.Click += (_, _) =>
             {
                 if (string.IsNullOrWhiteSpace(box.Text)) return;
@@ -93,7 +93,7 @@ internal static class ApiKeysWindow
             Grid.SetColumn(save, 2);
             row.Children.Add(save);
 
-            var del = new Button { Content = "✕" };
+            var del = PluginUi.Btn("✕");
             del.Click += (_, _) =>
             {
                 try { KeyStore.Delete(prov.Id); box.Text = ""; box.PlaceholderText = "API-Key…"; Refresh(); }

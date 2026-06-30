@@ -31,7 +31,7 @@ internal static class AiConfigWindow
                 cards.Children.Add(PluginUi.Dim("Noch keine Modelle. „Modell hinzufügen“ klicken."));
         }
 
-        var add = new Button { Content = "➕  Modell hinzufügen", Padding = new(14, 7) };
+        var add = PluginUi.Btn("➕  Modell hinzufügen");
         add.Click += async (_, _) =>
         {
             var card = new AiModelCard();
@@ -44,7 +44,7 @@ internal static class AiConfigWindow
             }
         };
 
-        var keys = new Button { Content = "🔑  API-Keys…", Padding = new(14, 7), Margin = new(8, 0, 0, 0) };
+        var keys = PluginUi.Btn("🔑  API-Keys…");
         keys.Click += (_, _) => ApiKeysWindow.Show(ctx);
 
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 0, 0, 12) };
@@ -139,7 +139,7 @@ internal static class AiConfigWindow
         // Provider — only selectable (local, or cloud with a key)
         panel.Children.Add(PluginUi.Label("Anbieter"));
         var selectable = AiProviders.Selectable();
-        var provCombo  = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        var provCombo  = PluginUi.Combo();
         foreach (var p in selectable)
             provCombo.Items.Add(new ComboBoxItem { Content = p.Display + (p.Kind == AiProviderKind.Local ? "  (lokal)" : ""), Tag = p });
         provCombo.SelectedIndex = Math.Max(0, selectable.ToList().FindIndex(p => p.Id == card.Provider));
@@ -164,7 +164,7 @@ internal static class AiConfigWindow
             FilterMode = AutoCompleteFilterMode.Contains, MinimumPrefixLength = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
-        var fetch  = new Button { Content = "↻", Margin = new(6, 0, 0, 0) };
+        var fetch  = PluginUi.Btn("↻"); fetch.Margin = new(6, 0, 0, 0);
         var status = PluginUi.Dim("");
         var modelRow = new Grid { ColumnDefinitions = new("*,Auto") };
         Grid.SetColumn(modelBox, 0); modelRow.Children.Add(modelBox);
@@ -172,11 +172,19 @@ internal static class AiConfigWindow
         panel.Children.Add(modelRow);
         panel.Children.Add(status);
 
+        // Default URLs of all local providers — so when we pre-fill we only overwrite a still-default value
+        // (never a URL the user typed themselves).
+        var localDefaults = AiProviders.All
+            .Where(p => p.Kind == AiProviderKind.Local).Select(p => p.DefaultUrl).ToHashSet();
+
         void SyncProviderUi()
         {
-            var local = Prov()?.Kind == AiProviderKind.Local;
+            var p     = Prov();
+            var local = p?.Kind == AiProviderKind.Local;
             urlLabel.IsVisible = local;
             urlBox.IsVisible   = local;
+            if (local && (string.IsNullOrWhiteSpace(urlBox.Text) || localDefaults.Contains(urlBox.Text.Trim())))
+                urlBox.Text = p!.DefaultUrl;   // pre-fill the provider's default URL as an editable value
         }
         SyncProviderUi();
         provCombo.SelectionChanged += (_, _) => SyncProviderUi();
@@ -221,7 +229,7 @@ internal static class AiConfigWindow
         panel.Children.Add(maxBox);
 
         // Self-describe
-        var describe = new Button { Content = "🔍  Selbstbeschreibung holen", Margin = new(0, 14, 0, 0) };
+        var describe = PluginUi.Btn("🔍  Selbstbeschreibung holen"); describe.Margin = new(0, 14, 0, 0);
         var descStatus = PluginUi.Dim("");
         describe.Click += async (_, _) =>
         {

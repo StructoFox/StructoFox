@@ -3,8 +3,13 @@ namespace StructoFox.AI;
 /// <summary>Whether a provider authenticates with an API key (cloud) or points at a local endpoint URL.</summary>
 public enum AiProviderKind { Cloud, Local }
 
-/// <summary>A selectable provider: its id/display name, kind, and how to build the service from a config.</summary>
-public sealed record AiProviderInfo(string Id, string Display, AiProviderKind Kind, Func<AiConfig, ICloudAIService> Create);
+/// <summary>A selectable provider: its id/display name, kind, how to build the service, and (for local
+/// providers) the default server URL to pre-fill into the config UI.</summary>
+public sealed record AiProviderInfo(string Id, string Display, AiProviderKind Kind, Func<AiConfig, ICloudAIService> Create)
+{
+    /// <summary>Default server URL for local providers (empty for cloud).</summary>
+    public string DefaultUrl { get; init; } = "";
+}
 
 /// <summary>The catalogue of AI providers (the full set ported from ClaudetRelay) and a factory that builds the
 /// configured one. Cloud providers take an API key; local ones take a base URL.</summary>
@@ -28,17 +33,18 @@ public static class AiProviders
         Cloud("Perplexity",          k => new PerplexityAIService(k)),
         Cloud("Together",            k => new TogetherAIService(k)),
         Cloud("Ollama (OpenAI API)", k => new OllamaOpenAIService(k)),
-        // ── Local (endpoint URL) ── (for native Ollama use "Ollama (OpenAI API)" above, endpoint /v1)
-        Local("LM Studio",      (b, k) => new LmStudioService(b, k)),
-        Local("llama.cpp",      (b, k) => new LlamaCppService(b, k)),
-        Local("Jan",            (b, k) => new JanService(b, k)),
-        Local("GPT4All",        (b, k) => new GPT4AllService(b, k)),
-        Local("KoboldCpp",      (b, k) => new KoboldCppService(b, k)),
-        Local("Llamafile",      (b, k) => new LlamafileService(b, k)),
-        Local("LocalAI",        (b, k) => new LocalAIService(b, k)),
-        Local("TabbyAPI",       (b, k) => new TabbyAPIService(b, k)),
-        Local("text-gen-webui", (b, k) => new TextGenWebUIService(b, k)),
-        Local("vLLM",           (b, k) => new VllmService(b, k)),
+        // ── Local (endpoint URL) ──
+        Local("Ollama",         OllamaLocalService.DefaultUrl,    (b, k) => new OllamaLocalService(b, k)),
+        Local("LM Studio",      LmStudioService.DefaultLocalUrl,  (b, k) => new LmStudioService(b, k)),
+        Local("llama.cpp",      LlamaCppService.DefaultUrl,       (b, k) => new LlamaCppService(b, k)),
+        Local("Jan",            JanService.DefaultUrl,            (b, k) => new JanService(b, k)),
+        Local("GPT4All",        GPT4AllService.DefaultUrl,        (b, k) => new GPT4AllService(b, k)),
+        Local("KoboldCpp",      KoboldCppService.DefaultUrl,      (b, k) => new KoboldCppService(b, k)),
+        Local("Llamafile",      LlamafileService.DefaultUrl,      (b, k) => new LlamafileService(b, k)),
+        Local("LocalAI",        LocalAIService.DefaultUrl,        (b, k) => new LocalAIService(b, k)),
+        Local("TabbyAPI",       TabbyAPIService.DefaultUrl,       (b, k) => new TabbyAPIService(b, k)),
+        Local("text-gen-webui", TextGenWebUIService.DefaultUrl,   (b, k) => new TextGenWebUIService(b, k)),
+        Local("vLLM",           VllmService.DefaultUrl,           (b, k) => new VllmService(b, k)),
     ];
 
     /// <summary>Builds the service for the configured provider (falls back to the first if the id is unknown).</summary>
@@ -75,8 +81,8 @@ public static class AiProviders
     static AiProviderInfo Cloud(string id, Func<string, ICloudAIService> ctor) =>
         new(id, id, AiProviderKind.Cloud, c => Apply(ctor(c.ApiKey), c));
 
-    static AiProviderInfo Local(string id, Func<string, string, ICloudAIService> ctor) =>
-        new(id, id, AiProviderKind.Local, c => Apply(ctor(c.BaseUrl, c.ApiKey), c));
+    static AiProviderInfo Local(string id, string defaultUrl, Func<string, string, ICloudAIService> ctor) =>
+        new(id, id, AiProviderKind.Local, c => Apply(ctor(c.BaseUrl, c.ApiKey), c)) { DefaultUrl = defaultUrl };
 
     static ICloudAIService Apply(ICloudAIService s, AiConfig c)
     {

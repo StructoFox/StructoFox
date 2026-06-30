@@ -22,14 +22,14 @@ internal static class ErrorDialog
         ScrollViewer.SetHorizontalScrollBarVisibility(detailsBox, Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
         ScrollViewer.SetVerticalScrollBarVisibility(detailsBox, Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
 
-        var copy = new Button { Content = "📋  Details kopieren" };
+        var copy = PluginUi.Btn("📋  Details kopieren");
         copy.Click += async (_, _) =>
         {
             var cb = TopLevel.GetTopLevel(win)?.Clipboard;
             if (cb is not null) { await cb.SetTextAsync(summary + "\n\n" + details); copy.Content = "✓ Kopiert"; }
         };
 
-        var close = new Button { Content = "Schließen", IsCancel = true, Margin = new(8, 0, 0, 0) };
+        var close = PluginUi.Btn("Schließen"); close.IsCancel = true; close.Margin = new(8, 0, 0, 0);
         close.Click += (_, _) => win.Close();
 
         var panel = new StackPanel { Margin = new(20), Spacing = 8 };

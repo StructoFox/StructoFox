@@ -35,7 +35,7 @@ internal static class CodegenRunner
         var panel = new StackPanel { Margin = new(20) };
 
         panel.Children.Add(PluginUi.Label("Modell"));
-        var cardCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        var cardCombo = PluginUi.Combo();
         foreach (var c in cards)
             cardCombo.Items.Add(new ComboBoxItem
             {
@@ -46,7 +46,7 @@ internal static class CodegenRunner
         panel.Children.Add(cardCombo);
 
         panel.Children.Add(PluginUi.Label("Zielsprache"));
-        var langCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        var langCombo = PluginUi.Combo();
         foreach (var (_, label) in Languages) langCombo.Items.Add(label);
         langCombo.SelectedIndex = 0;
         panel.Children.Add(langCombo);
