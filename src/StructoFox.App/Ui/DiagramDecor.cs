@@ -80,17 +80,24 @@ public static class DiagramDecor
         if (kinds.Contains(Kind.Info) && kinds.Count > 1)
         {
             // One continuous title block: logo / title as bordered cells, then the info table inner.
+            var info = InfoInner(style, text, line);
             var rowp = new StackPanel { Orientation = Orientation.Horizontal };
             foreach (var k in kinds)
             {
-                if (k == Kind.Logo && BuildLogo(style) is { } lg)
+                if (k == Kind.Logo && LogoImage(style) is { } lg)
+                {
+                    lg.VerticalAlignment = VerticalAlignment.Center;
+                    // Scale the logo to the title-block height: track the info table's actual height.
+                    info.PropertyChanged += (_, e) =>
+                    { if (e.Property == Visual.BoundsProperty) lg.Height = info.Bounds.Height > 0 ? info.Bounds.Height : double.NaN; };
                     rowp.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
-                        Padding = new(8), Child = lg, VerticalAlignment = VerticalAlignment.Stretch });
+                        Padding = new(6, 0), Child = lg, VerticalAlignment = VerticalAlignment.Stretch });
+                }
                 else if (k == Kind.Title && BuildTitle(title, style, onEdit) is { } tt)
                     rowp.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
                         Padding = new(10, 6), Child = tt, VerticalAlignment = VerticalAlignment.Stretch });
                 else if (k == Kind.Info)
-                    rowp.Children.Add(InfoInner(style, text, line));
+                    rowp.Children.Add(info);
             }
             return new Border { BorderBrush = line, BorderThickness = new(1), Child = rowp,
                 Background = new SolidColorBrush(Color.FromArgb(0x14, 0x80, 0x80, 0x80)) };
@@ -138,15 +145,23 @@ public static class DiagramDecor
 
     static bool HasLogo(DiagramStyle s) => !string.IsNullOrWhiteSpace(s.LogoPath) && File.Exists(s.LogoPath);
 
-    static Control? BuildLogo(DiagramStyle style)
+    /// <summary>Standard standalone logo height (also the size logos are generally scaled to).</summary>
+    const double LogoHeight = 64;
+
+    static Image? LogoImage(DiagramStyle style)
     {
         if (!HasLogo(style)) return null;
-        try
-        {
-            return new Image { Source = new Bitmap(style.LogoPath), Width = 96, Stretch = Stretch.Uniform,
-                IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center };
-        }
+        try { return new Image { Source = new Bitmap(style.LogoPath), Stretch = Stretch.Uniform, IsHitTestVisible = false }; }
         catch { return null; }
+    }
+
+    static Control? BuildLogo(DiagramStyle style)
+    {
+        var img = LogoImage(style);
+        if (img is null) return null;
+        img.Height = LogoHeight;                 // scaled to the standard height; width follows the aspect ratio
+        img.VerticalAlignment = VerticalAlignment.Center;
+        return img;
     }
 
     static bool HasInfo(DiagramStyle s) => s.ShowInfo && (
