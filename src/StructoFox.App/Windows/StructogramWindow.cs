@@ -287,14 +287,12 @@ public class StructogramWindow : Window
     Grid? _root;
     Control? _decor;
 
-    // Rebuilds the title/watermark/logo overlay over the canvas from the current diagram style.
+    // Rebuilds the title/watermark/logo decoration. It lives INSIDE the canvas content (not over the viewport),
+    // so it scrolls and zooms with the diagram and travels into print / PDF / image exports.
     void RefreshDecor()
     {
-        if (_root is null) return;
-        if (_decor is not null) _root.Children.Remove(_decor);
         _decor = DiagramDecor.Build(_data.Title, _style, () => _ = OpenDecor());
-        Grid.SetRow(_decor, 1);
-        _root.Children.Add(_decor);
+        Rebuild();   // recompose the canvas with the new decoration overlay
     }
 
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
@@ -308,11 +306,18 @@ public class StructogramWindow : Window
         Title = string.Format(Loc.S("Struct_Title"), string.IsNullOrEmpty(newTitle) ? Loc.S("Common_Untitled") : newTitle);
     }
 
-    // Re-renders the whole tree from the model — cheap enough to do on every change.
+    // Re-renders the whole tree from the model — cheap enough to do on every change. The decoration overlay
+    // (title/watermark/logo) is composited on top, INSIDE the canvas, so it travels with the diagram.
     void Rebuild()
     {
         if (_hostBorder is null) return;
-        _hostBorder.Child = RenderSequence(_data.Root, isRoot: true);
+        var diagram = RenderSequence(_data.Root, isRoot: true);
+        if (_decor is null) { _hostBorder.Child = diagram; return; }
+        (_decor.Parent as Panel)?.Children.Remove(_decor);   // a control can have only one parent
+        var grid = new Grid();
+        grid.Children.Add(diagram);
+        grid.Children.Add(_decor);
+        _hostBorder.Child = grid;
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────

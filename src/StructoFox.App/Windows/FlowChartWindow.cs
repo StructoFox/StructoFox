@@ -229,12 +229,16 @@ public class FlowChartWindow : Window
             Width = 3000, Height = 2000, ClipToBounds = false,
             Background = new SolidColorBrush(Color.Parse(_style.BackgroundColor)),  // diagram surface, not app theme
         };
+        // Decoration (title/watermark/logo) overlays the canvas IN the scrollable+zoomable content, so it
+        // travels with the diagram into print / PDF / image exports instead of floating over the viewport.
+        _canvasHost = new Grid();
+        _canvasHost.Children.Add(_canvas);
         // Wrap the canvas so zoom can use a LayoutTransform (scales the scrollable extent too). Pin it
         // top-left so that when it's zoomed smaller than the viewport it stays at the top-left corner
         // instead of drifting to the right/bottom.
         _zoomHost = new LayoutTransformControl
         {
-            Child = _canvas,
+            Child = _canvasHost,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment   = VerticalAlignment.Top,
         };
@@ -650,16 +654,17 @@ public class FlowChartWindow : Window
     }
 
     Grid? _root;
+    Grid? _canvasHost;   // wraps the canvas so the decoration can overlay it inside the zoom/scroll content
     Control? _decor;
 
-    // Rebuilds the title/watermark/logo overlay over the canvas from the current diagram style.
+    // Rebuilds the title/watermark/logo decoration. It overlays the canvas INSIDE the scroll/zoom content, so
+    // it scrolls and zooms with the diagram and travels into print / PDF / image exports.
     void RefreshDecor()
     {
-        if (_root is null) return;
-        if (_decor is not null) _root.Children.Remove(_decor);
+        if (_canvasHost is null) return;
+        if (_decor is not null) _canvasHost.Children.Remove(_decor);
         _decor = DiagramDecor.Build(_data.Title, _style, () => _ = OpenDecor());
-        Grid.SetRow(_decor, 1);
-        _root.Children.Add(_decor);
+        _canvasHost.Children.Add(_decor);
     }
 
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
