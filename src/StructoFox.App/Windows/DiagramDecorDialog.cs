@@ -34,7 +34,7 @@ public class DiagramDecorDialog : Window
     {
         _style = style;
         Title                 = Loc.S("Decor_Title");
-        Width                 = 460;
+        Width                 = 560;
         SizeToContent         = SizeToContent.Height;
         CanResize             = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -75,6 +75,22 @@ public class DiagramDecorDialog : Window
         var ok = Ui.Btn(Loc.S("Common_OK")); ok.IsDefault = true; ok.Click += (_, _) => Apply();
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true; cancel.Click += (_, _) => Close(null);
 
+        // A text field followed by its action buttons: the field fills, the buttons keep their full width
+        // (a plain horizontal StackPanel squeezed the buttons in the fixed-width window — "Durchsuchen" → "L").
+        static Grid FieldRow(Control field, params Control[] buttons)
+        {
+            var g = new Grid { ColumnSpacing = 8 };
+            g.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+            field.SetValue(Grid.ColumnProperty, 0); g.Children.Add(field);
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                g.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+                buttons[i].SetValue(Grid.ColumnProperty, i + 1);
+                g.Children.Add(buttons[i]);
+            }
+            return g;
+        }
+
         Content = new StackPanel
         {
             Margin = new(18), Spacing = 10,
@@ -89,9 +105,9 @@ public class DiagramDecorDialog : Window
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
                     Children = { Label(Loc.S("Decor_WmAngle")), _wmAngle } },
                 Label(Loc.S("Decor_WatermarkImg")),
-                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _watermarkImg, browseWm, clearWm } },
+                FieldRow(_watermarkImg, browseWm, clearWm),
                 Label(Loc.S("Decor_Logo")),
-                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _logo, browse, clear } },
+                FieldRow(_logo, browse, clear),
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
                     Children = { Label(Loc.S("Decor_Corner")), _corner } },
                 new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new(0, 6, 0, 0), Children = { cancel, ok } },
