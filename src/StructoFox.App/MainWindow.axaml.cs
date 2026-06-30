@@ -199,6 +199,21 @@ public partial class MainWindow : Window
         }
         cm.Items.Add(options);
 
+        // Extensions: every command contributed by a loaded plugin. Empty (or no Plugins/ folder) → just a hint.
+        var ext = new MenuItem { Header = Loc.S("Menu_Extensions") };
+        if (PluginHost.Plugins.Count == 0)
+            ext.Items.Add(new MenuItem { Header = Loc.S("Menu_NoExtensions"), IsEnabled = false });
+        else
+            foreach (var plugin in PluginHost.Plugins)
+                foreach (var cmd in plugin.Commands)
+                {
+                    var c = cmd;
+                    var mi = new MenuItem { Header = cmd.Title };
+                    mi.Click += (_, _) => CrashHandler.Safe(() => c.Run(new PluginCtx(this)), "Plugin:" + c.Title);
+                    ext.Items.Add(mi);
+                }
+        cm.Items.Add(ext);
+
         cm.Items.Add(new Separator());
 
         var about = new MenuItem { Header = string.Format(Loc.S("Menu_About"), Version) };
@@ -217,6 +232,33 @@ public partial class MainWindow : Window
         Content = BuildShell();
         if (_project is null) ShowHome(); else ShowSection(_section);
     }, "SetLanguage");
+
+    // Read-only text panel a plugin can pop up (generated code, a lookup result, a message).
+    internal void ShowPluginText(string title, string content)
+    {
+        var box = new TextBox
+        {
+            Text = content, IsReadOnly = true, AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap, BorderThickness = new(0),
+            FontFamily = new FontFamily("Consolas, Menlo, monospace"),
+        };
+        var win = new Window
+        {
+            Title = string.IsNullOrWhiteSpace(title) ? "StructoFox" : title,
+            Width = 620, Height = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new ScrollViewer { Content = box, Padding = new(12) },
+        };
+        Ui.ThemeWindow(win);
+        win.Show(this);
+    }
+
+    // The context handed to a plugin command: the open project + UI helpers (so Core stays UI-free).
+    sealed class PluginCtx(MainWindow w) : IPluginContext
+    {
+        public string? ProjectFolder => w._project;
+        public void ShowText(string title, string content) => w.ShowPluginText(title, content);
+        public void Notify(string message) => w.ShowPluginText("", message);
+    }
 
     // A small themed About box: fox, name, version and tagline (à la Theminator / ClaudetRelay).
     void ShowAbout() => CrashHandler.Safe(() =>

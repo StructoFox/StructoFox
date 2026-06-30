@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Plugin assembly: loaded dynamically, must not drag its own copy of shared deps. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The contract only. Private=false so StructoFox.Core.dll is NOT copied next to the plugin —
+         at runtime the plugin binds to the host's already-loaded Core (same types). -->
+    <ProjectReference Include="..\StructoFox.Core\StructoFox.Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <!-- Drop the built plugin into the app's Plugins/ folder so it's discovered on the next run. -->
+  <Target Name="CopyToAppPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <AppPlugins>$(MSBuildProjectDirectory)\..\StructoFox.App\bin\$(Configuration)\net10.0\Plugins</AppPlugins>
+    </PropertyGroup>
+    <MakeDir Directories="$(AppPlugins)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(AppPlugins)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

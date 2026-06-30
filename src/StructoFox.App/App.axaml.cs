@@ -16,6 +16,9 @@ public partial class App : Application
         // Load translations (and export the English/German starter files) before any UI is built.
         Loc.Init();
 
+        // Discover optional plugins from the Plugins/ folder (none = fine, e.g. a school build without them).
+        PluginHost.Load();
+
         // Dress the app in a default OXSUIT theme before any window appears, so every
         // DynamicResource brush resolves and windows render with real colours.
         ThemeManager.ApplyDefault(this);
