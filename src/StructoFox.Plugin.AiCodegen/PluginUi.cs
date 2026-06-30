@@ -31,10 +31,6 @@ internal static class PluginUi
         else                                win.Show();
     }
 
-    /// <summary>Picks the German or English string based on the host's current UI language.</summary>
-    public static string L(IPluginContext ctx, string de, string en) =>
-        ctx.Language.StartsWith("de", System.StringComparison.OrdinalIgnoreCase) ? de : en;
-
     public static TextBlock Label(string text) => new()
     {
         Text = text, FontWeight = FontWeight.SemiBold, Margin = new(0, 10, 0, 3),

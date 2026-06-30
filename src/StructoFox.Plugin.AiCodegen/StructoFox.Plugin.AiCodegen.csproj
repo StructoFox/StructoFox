@@ -29,15 +29,23 @@
     </PackageReference>
   </ItemGroup>
 
-  <!-- Drop the built plugin (and its bundled StructoFox.AI) into the app's Plugins/ folder. -->
+  <!-- Translation packs shipped with the plugin (translators add more Languages/<lang>.json). -->
+  <ItemGroup>
+    <Content Include="Languages\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Each plugin lives in its OWN folder under Plugins/ (so its Languages/ and bundled deps stay together).
+       Drop the built plugin, its bundled StructoFox.AI, the deps.json and the language packs into it. -->
   <Target Name="CopyToAppPlugins" AfterTargets="Build">
     <PropertyGroup>
-      <AppPlugins>$(MSBuildProjectDirectory)\..\StructoFox.App\bin\$(Configuration)\net10.0\Plugins</AppPlugins>
+      <AppPlugins>$(MSBuildProjectDirectory)\..\StructoFox.App\bin\$(Configuration)\net10.0\Plugins\AiCodegen</AppPlugins>
     </PropertyGroup>
     <MakeDir Directories="$(AppPlugins)" />
+    <MakeDir Directories="$(AppPlugins)\Languages" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(AppPlugins)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(TargetDir)StructoFox.AI.dll" DestinationFolder="$(AppPlugins)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(TargetDir)$(AssemblyName).deps.json" DestinationFolder="$(AppPlugins)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(Content)" DestinationFolder="$(AppPlugins)\Languages" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

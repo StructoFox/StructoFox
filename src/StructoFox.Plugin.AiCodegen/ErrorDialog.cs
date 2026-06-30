@@ -12,7 +12,8 @@ internal static class ErrorDialog
 {
     public static void Show(IPluginContext ctx, string summary, string details)
     {
-        var win = PluginUi.NewWindow(ctx, "Fehler", 560, 420);
+        PluginLoc.Use(ctx);
+        var win = PluginUi.NewWindow(ctx, PluginLoc.T("err_title"), 560, 420);
 
         var detailsBox = new TextBox
         {
@@ -22,14 +23,14 @@ internal static class ErrorDialog
         ScrollViewer.SetHorizontalScrollBarVisibility(detailsBox, Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
         ScrollViewer.SetVerticalScrollBarVisibility(detailsBox, Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
 
-        var copy = PluginUi.Btn("📋  Details kopieren");
+        var copy = PluginUi.Btn(PluginLoc.T("err_copy"));
         copy.Click += async (_, _) =>
         {
             var cb = TopLevel.GetTopLevel(win)?.Clipboard;
-            if (cb is not null) { await cb.SetTextAsync(summary + "\n\n" + details); copy.Content = "✓ Kopiert"; }
+            if (cb is not null) { await cb.SetTextAsync(summary + "\n\n" + details); copy.Content = PluginLoc.T("err_copied"); }
         };
 
-        var close = PluginUi.Btn("Schließen"); close.IsCancel = true; close.Margin = new(8, 0, 0, 0);
+        var close = PluginUi.Btn(PluginLoc.T("err_close")); close.IsCancel = true; close.Margin = new(8, 0, 0, 0);
         close.Click += (_, _) => win.Close();
 
         var panel = new StackPanel { Margin = new(20), Spacing = 8 };
@@ -40,7 +41,7 @@ internal static class ErrorDialog
         });
         panel.Children.Add(new Expander
         {
-            Header = "Technische Details", IsExpanded = true,
+            Header = PluginLoc.T("err_details"), IsExpanded = true,
             Content = detailsBox, Margin = new(0, 6, 0, 0),
         });
         panel.Children.Add(new StackPanel

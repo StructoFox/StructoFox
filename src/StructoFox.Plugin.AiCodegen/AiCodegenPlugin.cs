@@ -18,12 +18,13 @@ public sealed class AiCodegenPlugin : IStructoFoxPlugin
     public string Name    => "KI-Codegen";
     public string Version => "1.0";
 
-    // API-key management lives inside KI-Konfiguration (a 🔑 button there), not as its own menu entry.
-    public IReadOnlyList<PluginCommand> Commands { get; } = new[]
-    {
-        new PluginCommand { Title = "🤖  KI: Code generieren", Run = CodegenRunner.Run },
-        new PluginCommand { Title = "⚙  KI-Konfiguration",     Run = AiConfigWindow.Show },
-    };
+    // API-key management lives inside the configuration (a 🔑 button there), not as its own menu entry.
+    // Built fresh each read so the titles reflect the current UI language.
+    public IReadOnlyList<PluginCommand> Commands =>
+    [
+        new PluginCommand { Title = PluginLoc.T("cmd_generate"), Run = CodegenRunner.Run },
+        new PluginCommand { Title = PluginLoc.T("cmd_config"),   Run = AiConfigWindow.Show },
+    ];
 
     /// <summary>Loads every code entity of the project, keyed by id (mirrors the app's exporter gathering).</summary>
     internal static List<CodeEntity> GatherEntities(string projFolder)

@@ -18,7 +18,8 @@ internal static class AiConfigWindow
 {
     public static void Show(IPluginContext ctx)
     {
-        var win = PluginUi.NewWindow(ctx, "KI-Konfiguration", 720, 640);
+        PluginLoc.Use(ctx);
+        var win = PluginUi.NewWindow(ctx, PluginLoc.T("cfg_title"), 720, 640);
 
         var cards = new WrapPanel { Orientation = Orientation.Horizontal };
 
@@ -28,10 +29,10 @@ internal static class AiConfigWindow
             var s = AiSettings.Load();
             foreach (var card in s.Cards) cards.Children.Add(BuildCard(ctx, card, Rebuild));
             if (s.Cards.Count == 0)
-                cards.Children.Add(PluginUi.Dim("Noch keine Modelle. „Modell hinzufügen“ klicken."));
+                cards.Children.Add(PluginUi.Dim(PluginLoc.T("cfg_empty")));
         }
 
-        var add = PluginUi.Btn("➕  Modell hinzufügen");
+        var add = PluginUi.Btn(PluginLoc.T("cfg_add"));
         add.Click += async (_, _) =>
         {
             var card = new AiModelCard();
@@ -44,7 +45,7 @@ internal static class AiConfigWindow
             }
         };
 
-        var keys = PluginUi.Btn("🔑  API-Keys…");
+        var keys = PluginUi.Btn(PluginLoc.T("cfg_keys"));
         keys.Click += (_, _) => ApiKeysWindow.Show(ctx);
 
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 0, 0, 12) };
@@ -67,7 +68,7 @@ internal static class AiConfigWindow
 
         var title = new TextBlock
         {
-            Text = string.IsNullOrWhiteSpace(card.Name) ? (string.IsNullOrWhiteSpace(card.Model) ? "(neu)" : card.Model) : card.Name,
+            Text = string.IsNullOrWhiteSpace(card.Name) ? (string.IsNullOrWhiteSpace(card.Model) ? PluginLoc.T("cfg_new") : card.Model) : card.Name,
             FontWeight = FontWeight.SemiBold, FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis,
         };
         inner.Children.Add(title);
@@ -102,11 +103,11 @@ internal static class AiConfigWindow
         };
 
         var menu = new ContextMenu();
-        var edit = new MenuItem { Header = "Bearbeiten" };
+        var edit = new MenuItem { Header = PluginLoc.T("menu_edit") };
         edit.Click += async (_, _) => { if (await EditDialog(ctx, card, isNew: false)) { Persist(card); rebuild(); } };
-        var toggle = new MenuItem { Header = card.Enabled ? "Deaktivieren" : "Aktivieren" };
+        var toggle = new MenuItem { Header = PluginLoc.T(card.Enabled ? "menu_disable" : "menu_enable") };
         toggle.Click += (_, _) => { card.Enabled = !card.Enabled; Persist(card); rebuild(); };
-        var del = new MenuItem { Header = "Entfernen" };
+        var del = new MenuItem { Header = PluginLoc.T("menu_remove") };
         del.Click += (_, _) =>
         {
             var s = AiSettings.Load();
@@ -127,41 +128,40 @@ internal static class AiConfigWindow
 
     static async Task<bool> EditDialog(IPluginContext ctx, AiModelCard card, bool isNew)
     {
-        var dlg = PluginUi.NewWindow(ctx, isNew ? "Modell hinzufügen" : "Modell bearbeiten", 460, 600);
+        var dlg = PluginUi.NewWindow(ctx, PluginLoc.T(isNew ? "edit_add" : "edit_edit"), 460, 600);
 
         var panel = new StackPanel { Margin = new(20) };
 
         // Name
-        panel.Children.Add(PluginUi.Label("Name (optional)"));
-        var nameBox = new TextBox { Text = card.Name, PlaceholderText = "Anzeigename" };
+        panel.Children.Add(PluginUi.Label(PluginLoc.T("f_name")));
+        var nameBox = new TextBox { Text = card.Name, PlaceholderText = PluginLoc.T("f_name_ph") };
         panel.Children.Add(nameBox);
 
         // Provider — only selectable (local, or cloud with a key)
-        panel.Children.Add(PluginUi.Label("Anbieter"));
+        panel.Children.Add(PluginUi.Label(PluginLoc.T("f_provider")));
         var selectable = AiProviders.Selectable();
         var provCombo  = PluginUi.Combo();
         foreach (var p in selectable)
-            provCombo.Items.Add(new ComboBoxItem { Content = p.Display + (p.Kind == AiProviderKind.Local ? "  (lokal)" : ""), Tag = p });
+            provCombo.Items.Add(new ComboBoxItem { Content = p.Display + (p.Kind == AiProviderKind.Local ? PluginLoc.T("local_suffix") : ""), Tag = p });
         provCombo.SelectedIndex = Math.Max(0, selectable.ToList().FindIndex(p => p.Id == card.Provider));
         panel.Children.Add(provCombo);
         if (selectable.Count == 0)
-            panel.Children.Add(PluginUi.Dim("Keine Anbieter verfügbar – zuerst unter „API-Keys…“ einen Schlüssel hinterlegen "
-                + "oder einen lokalen Anbieter wählen."));
+            panel.Children.Add(PluginUi.Dim(PluginLoc.T("no_providers")));
 
         AiProviderInfo? Prov() => (provCombo.SelectedItem as ComboBoxItem)?.Tag as AiProviderInfo;
 
         // Server URL — local providers only
-        var urlLabel = PluginUi.Label("Server-URL (lokaler Anbieter)");
+        var urlLabel = PluginUi.Label(PluginLoc.T("f_serverurl"));
         var urlBox   = new TextBox { Text = card.ServerUrl, PlaceholderText = "http://localhost:11434/v1" };
         panel.Children.Add(urlLabel);
         panel.Children.Add(urlBox);
 
         // Model + fetch
-        panel.Children.Add(PluginUi.Label("Modell"));
+        panel.Children.Add(PluginUi.Label(PluginLoc.T("f_model")));
         var currentModels = new List<string>();   // the models currently offered (defaults or fetched)
         var modelBox = new AutoCompleteBox
         {
-            Text = card.Model, PlaceholderText = "Modellname eingeben oder ↻ klicken",
+            Text = card.Model, PlaceholderText = PluginLoc.T("model_ph"),
             FilterMode = AutoCompleteFilterMode.Custom, MinimumPrefixLength = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
@@ -224,15 +224,15 @@ internal static class AiConfigWindow
             // build a temp card to construct the service with the current url
             var probe = new AiModelCard { Provider = p.Id, ServerUrl = urlBox.Text?.Trim() ?? "" };
             if (p.Kind == AiProviderKind.Cloud && !KeyStore.Has(p.Id))
-            { status.Text = "⚠ Kein API-Key für diesen Anbieter."; return; }
-            fetch.IsEnabled = false; status.Text = "Lade Modelle…";
+            { status.Text = PluginLoc.T("st_nokey"); return; }
+            fetch.IsEnabled = false; status.Text = PluginLoc.T("st_loading");
             try
             {
                 using var svc = AiProviders.Create(probe);
                 var models = await svc.GetModelsAsync(cts.Token);
                 SetModels(models);
                 // Keep what the user already had; do NOT auto-pick the first model (let the dropdown show all).
-                status.Text = $"✓ {models.Count} Modell(e) gefunden — Liste aufklappen zum Wählen";
+                status.Text = PluginLoc.Tf("st_found", models.Count);
                 if (currentModels.Count > 0) modelBox.IsDropDownOpen = true;
             }
             catch (OperationCanceledException) { }
@@ -241,27 +241,19 @@ internal static class AiConfigWindow
         };
 
         // Max tokens
-        panel.Children.Add(PluginUi.Label("Max. Tokens (0 = Standard)"));
+        panel.Children.Add(PluginUi.Label(PluginLoc.T("f_maxtokens")));
         var maxBox = new TextBox { Text = card.MaxTokens.ToString() };
         panel.Children.Add(maxBox);
 
         // Max continuations — the safety cap on "continue the cut-off reply" rounds (matters most for local
         // models with a small context window). Localized mouse-over explains it.
-        panel.Children.Add(PluginUi.Label(PluginUi.L(ctx,
-            "Max. Fortsetzungen (0 = Standard 8)", "Max. continuations (0 = default 8)")));
+        panel.Children.Add(PluginUi.Label(PluginLoc.T("f_maxcont")));
         var contBox = new TextBox { Text = card.MaxContinuations.ToString() };
-        ToolTip.SetTip(contBox, PluginUi.L(ctx,
-            "Wie oft die KI eine wegen des Token-Limits abgeschnittene Antwort fortsetzen darf, bevor eine "
-          + "Datei als unvollständig gilt. Höher hilft bei längeren Programmen auf lokalen Modellen mit "
-          + "kleinem Kontextfenster (die brauchen mehr Runden). Sehr hohe Werte kosten mehr Zeit/Tokens. "
-          + "0 = Standardwert (8).",
-            "How many times the AI may continue a reply that was cut off by the token limit before a file "
-          + "counts as incomplete. Higher helps with longer programs on local models that have a small "
-          + "context window (they need more rounds). Very high values cost more time/tokens. 0 = default (8)."));
+        ToolTip.SetTip(contBox, PluginLoc.T("tip_maxcont"));
         panel.Children.Add(contBox);
 
         // Self-describe
-        var describe = PluginUi.Btn("🔍  Selbstbeschreibung holen"); describe.Margin = new(0, 14, 0, 0);
+        var describe = PluginUi.Btn(PluginLoc.T("btn_describe")); describe.Margin = new(0, 14, 0, 0);
         var spinner  = new ProgressBar { IsIndeterminate = true, IsVisible = false, Height = 4, Margin = new(0, 6, 0, 0) };
         var descStatus = PluginUi.Dim("");
         var busy = false;   // guard re-entry WITHOUT disabling the button (disabled state would grey the label)
@@ -269,8 +261,8 @@ internal static class AiConfigWindow
         {
             if (busy) return;
             ApplyTo(card); // capture current selections first
-            if (string.IsNullOrWhiteSpace(card.Model)) { descStatus.Text = "Erst ein Modell wählen."; return; }
-            busy = true; spinner.IsVisible = true; descStatus.Text = "Frage das Modell…";
+            if (string.IsNullOrWhiteSpace(card.Model)) { descStatus.Text = PluginLoc.T("st_pickmodel"); return; }
+            busy = true; spinner.IsVisible = true; descStatus.Text = PluginLoc.T("st_asking");
             try
             {
                 await CodeSelfDescription.FetchAsync(card, cts.Token);
@@ -286,12 +278,12 @@ internal static class AiConfigWindow
         panel.Children.Add(descStatus);
 
         // Buttons
-        var save   = PluginUi.Btn("Speichern");
-        var cancel = PluginUi.Btn("Abbrechen");
+        var save   = PluginUi.Btn(PluginLoc.T("btn_save"));
+        var cancel = PluginUi.Btn(PluginLoc.T("btn_cancel"));
         save.Click += (_, _) =>
         {
-            if (Prov() is null) { status.Text = "⚠ Kein Anbieter gewählt."; return; }
-            if (string.IsNullOrWhiteSpace(modelBox.Text)) { status.Text = "⚠ Bitte ein Modell angeben."; return; }
+            if (Prov() is null) { status.Text = PluginLoc.T("st_noprovider"); return; }
+            if (string.IsNullOrWhiteSpace(modelBox.Text)) { status.Text = PluginLoc.T("st_nomodel"); return; }
             ApplyTo(card);
             dlg.Close(true);
         };

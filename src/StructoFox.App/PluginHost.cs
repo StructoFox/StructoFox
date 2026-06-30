@@ -25,7 +25,9 @@ public static class PluginHost
         _plugins.Clear();
         if (!Directory.Exists(PluginsDir)) return;
 
-        foreach (var dll in Directory.EnumerateFiles(PluginsDir, "*.dll"))
+        // Each plugin lives in its own subfolder (Plugins/<name>/ with its DLL, deps and Languages/);
+        // loose DLLs directly in Plugins/ are also accepted for simple single-file plugins.
+        foreach (var dll in Directory.EnumerateFiles(PluginsDir, "*.dll", SearchOption.AllDirectories))
         {
             try
             {

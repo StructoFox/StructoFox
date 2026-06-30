@@ -14,13 +14,13 @@ internal static class ApiKeysWindow
 {
     public static void Show(IPluginContext ctx)
     {
-        var win   = PluginUi.NewWindow(ctx, "API-Keys verwalten", 560, 620);
+        PluginLoc.Use(ctx);
+        var win   = PluginUi.NewWindow(ctx, PluginLoc.T("keys_title"), 560, 620);
         var panel = new StackPanel { Margin = new(18) };
 
         panel.Children.Add(new TextBlock
         {
-            Text = $"API-Schlüssel werden ausschließlich im Schlüsselspeicher des Betriebssystems abgelegt "
-                 + $"({KeyStore.BackendName}) — niemals in einer Datei.",
+            Text = PluginLoc.Tf("keys_intro", KeyStore.BackendName),
             TextWrapping = TextWrapping.Wrap, Opacity = 0.75, Margin = new(0, 0, 0, 12),
         });
 
@@ -38,15 +38,14 @@ internal static class ApiKeysWindow
                     Spacing = 6,
                     Children =
                     {
-                        new TextBlock { Text = "⚠  Der Schlüsselspeicher ist nicht verfügbar. "
-                            + "Bis er eingerichtet ist, können keine API-Keys gespeichert werden.",
+                        new TextBlock { Text = PluginLoc.T("keys_unavail"),
                             TextWrapping = TextWrapping.Wrap, FontWeight = FontWeight.SemiBold },
                     },
                 },
             };
-            var showDetails = PluginUi.Btn("Details anzeigen");
-            showDetails.Click += (_, _) => ErrorDialog.Show(ctx, "Schlüsselspeicher nicht verfügbar",
-                backendDetails ?? "(keine Details)");
+            var showDetails = PluginUi.Btn(PluginLoc.T("keys_details"));
+            showDetails.Click += (_, _) => ErrorDialog.Show(ctx, PluginLoc.T("keys_unavail_t"),
+                backendDetails ?? "—");
             ((StackPanel)warn.Child).Children.Add(showDetails);
             panel.Children.Add(warn);
         }
@@ -54,7 +53,7 @@ internal static class ApiKeysWindow
         // Windows: offer to copy keys ClaudetRelay already stored in the Credential Manager.
         if (OperatingSystem.IsWindows())
         {
-            var import = PluginUi.Btn("↧  Keys aus ClaudetRelay übernehmen");
+            var import = PluginUi.Btn(PluginLoc.T("keys_import"));
             import.Margin = new(0, 0, 0, 12);
             import.Click += (_, _) =>
             {
@@ -62,13 +61,13 @@ internal static class ApiKeysWindow
                 {
                     var got = KeyStore.ImportFromClaudetRelay();
                     ctx.Notify(got.Count == 0
-                        ? "Keine neuen Keys gefunden (ClaudetRelay hat keine gespeichert, oder sie sind hier schon vorhanden)."
-                        : $"{got.Count} Key(s) übernommen: {string.Join(", ", got)}");
+                        ? PluginLoc.T("keys_import_none")
+                        : PluginLoc.Tf("keys_import_done", got.Count, string.Join(", ", got)));
                     win.Close();
                     Show(ctx);   // reopen to refresh the status dots
                 }
                 catch (KeyStoreException ex) { ErrorDialog.Show(ctx, ex.Message, ex.Details); }
-                catch (Exception ex)         { ErrorDialog.Show(ctx, "Import fehlgeschlagen.", ex.ToString()); }
+                catch (Exception ex)         { ErrorDialog.Show(ctx, PluginLoc.T("keys_import_err"), ex.ToString()); }
             };
             panel.Children.Add(import);
         }
@@ -93,24 +92,24 @@ internal static class ApiKeysWindow
 
             var box = new TextBox
             {
-                PasswordChar = '•', PlaceholderText = KeyStore.Has(prov.Id) ? "•••• gespeichert" : "API-Key…",
+                PasswordChar = '•', PlaceholderText = KeyStore.Has(prov.Id) ? PluginLoc.T("keys_saved_ph") : PluginLoc.T("keys_ph"),
                 Margin = new(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center,
             };
             Grid.SetColumn(box, 1);
             row.Children.Add(box);
 
-            var save = PluginUi.Btn("Speichern"); save.Margin = new(0, 0, 6, 0);
+            var save = PluginUi.Btn(PluginLoc.T("keys_save")); save.Margin = new(0, 0, 6, 0);
             save.Click += (_, _) =>
             {
                 if (string.IsNullOrWhiteSpace(box.Text)) return;
                 try
                 {
                     KeyStore.Save(prov.Id, box.Text.Trim());
-                    box.Text = ""; box.PlaceholderText = "•••• gespeichert";
+                    box.Text = ""; box.PlaceholderText = PluginLoc.T("keys_saved_ph");
                     Refresh();
                 }
                 catch (KeyStoreException ex) { ErrorDialog.Show(ctx, ex.Message, ex.Details); }
-                catch (Exception ex)         { ErrorDialog.Show(ctx, "Unerwarteter Fehler beim Speichern.", ex.ToString()); }
+                catch (Exception ex)         { ErrorDialog.Show(ctx, PluginLoc.T("keys_save_err"), ex.ToString()); }
             };
             Grid.SetColumn(save, 2);
             row.Children.Add(save);
@@ -118,9 +117,9 @@ internal static class ApiKeysWindow
             var del = PluginUi.Btn("✕");
             del.Click += (_, _) =>
             {
-                try { KeyStore.Delete(prov.Id); box.Text = ""; box.PlaceholderText = "API-Key…"; Refresh(); }
+                try { KeyStore.Delete(prov.Id); box.Text = ""; box.PlaceholderText = PluginLoc.T("keys_ph"); Refresh(); }
                 catch (KeyStoreException ex) { ErrorDialog.Show(ctx, ex.Message, ex.Details); }
-                catch (Exception ex)         { ErrorDialog.Show(ctx, "Unerwarteter Fehler beim Entfernen.", ex.ToString()); }
+                catch (Exception ex)         { ErrorDialog.Show(ctx, PluginLoc.T("keys_del_err"), ex.ToString()); }
             };
             Grid.SetColumn(del, 3);
             row.Children.Add(del);

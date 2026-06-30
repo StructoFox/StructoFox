@@ -23,19 +23,20 @@ internal static class CodegenRunner
 
     public static void Run(IPluginContext ctx)
     {
-        if (ctx.ProjectFolder is null) { ctx.Notify("Kein Projekt geöffnet."); return; }
+        PluginLoc.Use(ctx);
+        if (ctx.ProjectFolder is null) { ctx.Notify(PluginLoc.T("gen_noproject")); return; }
 
         var cards = AiSettings.Load().Cards.Where(c => c.Enabled).ToList();
         if (cards.Count == 0)
         {
-            ctx.Notify("Kein KI-Modell konfiguriert. Erst „KI-Konfiguration“ öffnen und ein Modell anlegen.");
+            ctx.Notify(PluginLoc.T("gen_nomodel"));
             return;
         }
 
-        var win   = PluginUi.NewWindow(ctx, "KI: Code generieren", 560, 520);
+        var win   = PluginUi.NewWindow(ctx, PluginLoc.T("gen_title"), 560, 520);
         var panel = new StackPanel { Margin = new(20) };
 
-        panel.Children.Add(PluginUi.Label("Modell"));
+        panel.Children.Add(PluginUi.Label(PluginLoc.T("gen_model")));
         var cardCombo = PluginUi.Combo();
         foreach (var c in cards)
             cardCombo.Items.Add(new ComboBoxItem
@@ -46,17 +47,15 @@ internal static class CodegenRunner
         cardCombo.SelectedIndex = 0;
         panel.Children.Add(cardCombo);
 
-        panel.Children.Add(PluginUi.Label("Zielsprache"));
+        panel.Children.Add(PluginUi.Label(PluginLoc.T("gen_lang")));
         var langCombo = PluginUi.Combo();
         foreach (var (_, label) in Languages) langCombo.Items.Add(label);
         langCombo.SelectedIndex = 0;
         panel.Children.Add(langCombo);
 
-        panel.Children.Add(PluginUi.Dim(
-            "Das Gerüst (Typen, Signaturen) wird deterministisch aus dem Diagramm erzeugt; das gewählte Modell "
-            + "füllt die Rümpfe. Anschließend wählst du einen Zielordner, in den ein baubares Projekt geschrieben wird."));
+        panel.Children.Add(PluginUi.Dim(PluginLoc.T("gen_expl")));
 
-        var go     = PluginUi.Btn("Generieren…");
+        var go     = PluginUi.Btn(PluginLoc.T("gen_go"));
         var status = PluginUi.Dim("");
         panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 14, 0, 0),
             Children = { go } });
@@ -67,15 +66,15 @@ internal static class CodegenRunner
             var card = (cardCombo.SelectedItem as ComboBoxItem)?.Tag as AiModelCard ?? cards[0];
             var lang = Languages[Math.Max(0, langCombo.SelectedIndex)].Lang;
 
-            if (ctx.OwnerWindow is not Window owner) { status.Text = "Kein Fenster-Kontext."; return; }
+            if (ctx.OwnerWindow is not Window owner) { status.Text = PluginLoc.T("gen_nowin"); return; }
             var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
-                Title = "Zielordner für das generierte Projekt", AllowMultiple = false,
+                Title = PluginLoc.T("gen_folder"), AllowMultiple = false,
             });
             var outDir = folders.FirstOrDefault()?.TryGetLocalPath();
             if (string.IsNullOrEmpty(outDir)) return;
 
-            go.IsEnabled = false; status.Text = "Erzeuge Gerüst…";
+            go.IsEnabled = false; status.Text = PluginLoc.T("gen_skeleton");
             try
             {
                 // report runs on a worker thread → marshal status updates back to the UI thread.
@@ -83,17 +82,13 @@ internal static class CodegenRunner
                 var (written, incomplete) = await Task.Run(() =>
                     Generate(ctx.ProjectFolder!, card, lang, outDir, Report));
 
-                var warn = incomplete.Count == 0 ? "" :
-                    $"\n\n⚠ {incomplete.Count} Datei(en) wurden trotz Fortsetzungs-Versuchen vom Modell nicht "
-                  + "vollständig beendet (Token-/Kontextgrenze):\n  • " + string.Join("\n  • ", incomplete)
-                  + "\nTipp: Max. Tokens auf der Modell-Karte erhöhen oder das Diagramm in kleinere "
-                  + "Funktionen aufteilen.";
+                var warn = incomplete.Count == 0 ? ""
+                    : PluginLoc.Tf("gen_incomplete", incomplete.Count, string.Join("\n  • ", incomplete));
                 status.Text = incomplete.Count == 0
-                    ? $"✓ Fertig. {written} Datei(en) geschrieben."
-                    : $"⚠ Fertig mit {incomplete.Count} unvollständigen Datei(en).";
-                ctx.ShowText("Generiertes Projekt",
-                    $"Geschrieben nach:\n{outDir}\n\n{written} Datei(en).{warn}\n\n"
-                    + "C#: dotnet build   ·   C++: cmake . && cmake --build .");
+                    ? PluginLoc.Tf("gen_done", written)
+                    : PluginLoc.Tf("gen_done_warn", incomplete.Count);
+                ctx.ShowText(PluginLoc.T("gen_result_t"),
+                    PluginLoc.Tf("gen_written", outDir, written, warn));
             }
             catch (Exception ex) { status.Text = "⚠ " + ex.Message; }
             finally { go.IsEnabled = true; }
@@ -127,7 +122,7 @@ internal static class CodegenRunner
             var finalContent = content;
             if (IsSource(path))
             {
-                report($"KI füllt {Path.GetFileName(path)} …");
+                report(PluginLoc.Tf("gen_filling", Path.GetFileName(path)));
                 try
                 {
                     var (text, complete) = FillBodies(svc, lang, content, report, Path.GetFileName(path), maxCont)
@@ -176,7 +171,7 @@ internal static class CodegenRunner
         int rounds = 0;
         while (svc.LastFinishReason == FinishReason.Length && rounds++ < maxCont)
         {
-            report($"KI setzt {fileName} fort … ({rounds})");
+            report(PluginLoc.Tf("gen_continuing", fileName, rounds));
             messages.Add(new CloudAIMessage("assistant", reply));
             messages.Add(new CloudAIMessage("user",
                 "Continue the source code EXACTLY where you left off. Do not repeat anything already written, "
