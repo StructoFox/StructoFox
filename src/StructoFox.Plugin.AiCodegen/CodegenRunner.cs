@@ -115,6 +115,7 @@ internal static class CodegenRunner
         using var svc = AiProviders.Create(card);
         // A generous per-reply budget so most files finish in one call; the continuation loop covers the rest.
         svc.MaxTokens = card.MaxTokens > 0 ? card.MaxTokens : 8192;
+        var maxCont = card.MaxContinuations > 0 ? card.MaxContinuations : DefaultContinuations;
 
         int count = 0;
         var incomplete = new List<string>();
@@ -129,7 +130,7 @@ internal static class CodegenRunner
                 report($"KI füllt {Path.GetFileName(path)} …");
                 try
                 {
-                    var (text, complete) = FillBodies(svc, lang, content, report, Path.GetFileName(path))
+                    var (text, complete) = FillBodies(svc, lang, content, report, Path.GetFileName(path), maxCont)
                         .GetAwaiter().GetResult();
                     finalContent = text;
                     if (!complete) incomplete.Add(path);
@@ -142,8 +143,8 @@ internal static class CodegenRunner
         return (count, incomplete);
     }
 
-    // Hard cap on continuation rounds, so a runaway model can't loop forever.
-    const int MaxContinuations = 8;
+    // Default continuation rounds when a card doesn't override it (0 = use this).
+    const int DefaultContinuations = 8;
 
     // A project/build file we never send to the AI; everything else is source to complete.
     static bool IsSource(string path)
@@ -158,7 +159,7 @@ internal static class CodegenRunner
     // hit the output-token cap (finish_reason "length"), we ask it to continue from where it left off and
     // concatenate, until it finishes naturally or we reach MaxContinuations. Returns (source, wasCompleted).
     static async Task<(string content, bool complete)> FillBodies(
-        ICloudAIService svc, ExportLanguage lang, string skeleton, Action<string> report, string fileName)
+        ICloudAIService svc, ExportLanguage lang, string skeleton, Action<string> report, string fileName, int maxCont)
     {
         var system =
             $"You are a senior {lang} programmer. You complete code skeletons generated from program-flow "
@@ -173,7 +174,7 @@ internal static class CodegenRunner
         sb.Append(reply);
 
         int rounds = 0;
-        while (svc.LastFinishReason == FinishReason.Length && rounds++ < MaxContinuations)
+        while (svc.LastFinishReason == FinishReason.Length && rounds++ < maxCont)
         {
             report($"KI setzt {fileName} fort … ({rounds})");
             messages.Add(new CloudAIMessage("assistant", reply));

@@ -37,6 +37,9 @@ public interface IPluginContext
     /// <summary>The open project's folder, or null if none is open.</summary>
     string? ProjectFolder { get; }
 
+    /// <summary>The host's current UI language code (e.g. "de", "en"), so a plugin can localize its own UI.</summary>
+    string Language { get; }
+
     /// <summary>The host's main window as an opaque handle (an Avalonia <c>Window</c>), so a plugin that
     /// references a UI framework can parent and theme its own dialogs. Null if unavailable. Core stays UI-free
     /// by typing this as <see cref="object"/>; the plugin casts it.</summary>

@@ -245,6 +245,21 @@ internal static class AiConfigWindow
         var maxBox = new TextBox { Text = card.MaxTokens.ToString() };
         panel.Children.Add(maxBox);
 
+        // Max continuations — the safety cap on "continue the cut-off reply" rounds (matters most for local
+        // models with a small context window). Localized mouse-over explains it.
+        panel.Children.Add(PluginUi.Label(PluginUi.L(ctx,
+            "Max. Fortsetzungen (0 = Standard 8)", "Max. continuations (0 = default 8)")));
+        var contBox = new TextBox { Text = card.MaxContinuations.ToString() };
+        ToolTip.SetTip(contBox, PluginUi.L(ctx,
+            "Wie oft die KI eine wegen des Token-Limits abgeschnittene Antwort fortsetzen darf, bevor eine "
+          + "Datei als unvollständig gilt. Höher hilft bei längeren Programmen auf lokalen Modellen mit "
+          + "kleinem Kontextfenster (die brauchen mehr Runden). Sehr hohe Werte kosten mehr Zeit/Tokens. "
+          + "0 = Standardwert (8).",
+            "How many times the AI may continue a reply that was cut off by the token limit before a file "
+          + "counts as incomplete. Higher helps with longer programs on local models that have a small "
+          + "context window (they need more rounds). Very high values cost more time/tokens. 0 = default (8)."));
+        panel.Children.Add(contBox);
+
         // Self-describe
         var describe = PluginUi.Btn("🔍  Selbstbeschreibung holen"); describe.Margin = new(0, 14, 0, 0);
         var spinner  = new ProgressBar { IsIndeterminate = true, IsVisible = false, Height = 4, Margin = new(0, 6, 0, 0) };
@@ -293,6 +308,7 @@ internal static class AiConfigWindow
             c.Model     = modelBox.Text?.Trim() ?? "";
             c.ServerUrl = urlBox.Text?.Trim() ?? "";
             c.MaxTokens = int.TryParse(maxBox.Text, out var mt) ? mt : 0;
+            c.MaxContinuations = int.TryParse(contBox.Text, out var mc) && mc >= 0 ? mc : 8;
         }
 
         dlg.Content = new ScrollViewer { Content = panel };

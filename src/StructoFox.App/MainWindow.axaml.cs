@@ -257,6 +257,7 @@ public partial class MainWindow : Window
     sealed class PluginCtx(MainWindow w) : IPluginContext
     {
         public string? ProjectFolder => w._project;
+        public string Language => Loc.Lang;
         public object? OwnerWindow => w;
         public void ApplyTheme(object window) { if (window is Window win) Ui.ThemeWindow(win); }
         public void ShowText(string title, string content) => w.ShowPluginText(title, content);

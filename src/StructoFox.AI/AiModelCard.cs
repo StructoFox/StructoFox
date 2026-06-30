@@ -26,6 +26,11 @@ public sealed class AiModelCard
     public int    MaxTokens { get; set; }          // 0 = provider default
     public bool   Enabled   { get; set; } = true;
 
+    /// <summary>How many times codegen may ask the model to CONTINUE a reply that was cut off by the output
+    /// token cap, before giving up on that file. Higher = handles longer programs on small-context local
+    /// models; 0 = use the built-in default. (See CodegenRunner.)</summary>
+    public int    MaxContinuations { get; set; } = 8;
+
     // ── Self-description (code flavour) ──
     public string Role            { get; set; } = "";   // short title the model gives itself
     public string SelfDescription { get; set; } = "";   // one sentence
