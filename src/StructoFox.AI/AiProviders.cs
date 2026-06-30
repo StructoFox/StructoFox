@@ -45,6 +45,33 @@ public static class AiProviders
     public static ICloudAIService Create(AiConfig cfg) =>
         (All.FirstOrDefault(p => p.Id == cfg.Provider) ?? All[0]).Create(cfg);
 
+    /// <summary>Looks up a provider by id (null if unknown).</summary>
+    public static AiProviderInfo? Find(string id) => All.FirstOrDefault(p => p.Id == id);
+
+    /// <summary>Builds the service for a model card: cloud providers take their key from <see cref="KeyStore"/>,
+    /// local providers take the card's server URL.</summary>
+    public static ICloudAIService Create(AiModelCard card)
+    {
+        var info = Find(card.Provider) ?? All[0];
+        var cfg  = new AiConfig
+        {
+            Provider  = info.Id,
+            Model     = card.Model,
+            MaxTokens = card.MaxTokens,
+            ApiKey    = info.Kind == AiProviderKind.Cloud ? (KeyStore.Load(info.Id) ?? "") : "",
+            BaseUrl   = card.ServerUrl
+        };
+        return info.Create(cfg);
+    }
+
+    /// <summary>A provider is selectable for a new card when it's local (URL-based) OR has an API key stored.
+    /// (Mirrors the requirement: only providers with a configured key appear in the provider dropdown.)</summary>
+    public static bool IsSelectable(AiProviderInfo p) =>
+        p.Kind == AiProviderKind.Local || KeyStore.Has(p.Id);
+
+    /// <summary>The providers a user may pick for a model card right now (local + key-configured cloud).</summary>
+    public static IReadOnlyList<AiProviderInfo> Selectable() => All.Where(IsSelectable).ToList();
+
     static AiProviderInfo Cloud(string id, Func<string, ICloudAIService> ctor) =>
         new(id, id, AiProviderKind.Cloud, c => Apply(ctor(c.ApiKey), c));
 

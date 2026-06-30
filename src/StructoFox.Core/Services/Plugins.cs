@@ -37,6 +37,15 @@ public interface IPluginContext
     /// <summary>The open project's folder, or null if none is open.</summary>
     string? ProjectFolder { get; }
 
+    /// <summary>The host's main window as an opaque handle (an Avalonia <c>Window</c>), so a plugin that
+    /// references a UI framework can parent and theme its own dialogs. Null if unavailable. Core stays UI-free
+    /// by typing this as <see cref="object"/>; the plugin casts it.</summary>
+    object? OwnerWindow { get; }
+
+    /// <summary>Applies the host theme (merged resource dictionaries) to a plugin-created window, so plugin
+    /// dialogs match the app. The argument is an Avalonia <c>Window</c>; no-op if the host can't theme it.</summary>
+    void ApplyTheme(object window);
+
     /// <summary>Shows a read-only text panel to the user (e.g. generated code, a lookup result).</summary>
     void ShowText(string title, string content);
 

@@ -1,0 +1,310 @@
+using Avalonia.Controls;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
+using StructoFox.AI;
+using StructoFox.Core;
+
+namespace StructoFox.Plugin.AiCodegen;
+
+/// <summary>
+/// The plugin's central AI configuration: a grid of model "cards" (à la ClaudetRelay participants, simplified).
+/// "Hinzufügen" creates a card; each card picks a provider + model, and for LOCAL providers the server URL is
+/// set on the same card. Only providers with a stored API key (or local ones) are offered. We fetch the model
+/// list live and ask the model to describe itself — its favourite / least-favourite programming languages become
+/// the card's Strengths / Weaknesses.
+/// </summary>
+internal static class AiConfigWindow
+{
+    public static void Show(IPluginContext ctx)
+    {
+        var win = PluginUi.NewWindow(ctx, "KI-Konfiguration", 720, 640);
+
+        var cards = new WrapPanel { Orientation = Orientation.Horizontal };
+
+        void Rebuild()
+        {
+            cards.Children.Clear();
+            var s = AiSettings.Load();
+            foreach (var card in s.Cards) cards.Children.Add(BuildCard(ctx, card, Rebuild));
+            if (s.Cards.Count == 0)
+                cards.Children.Add(PluginUi.Dim("Noch keine Modelle. „Modell hinzufügen“ klicken."));
+        }
+
+        var add = new Button { Content = "➕  Modell hinzufügen", Padding = new(14, 7) };
+        add.Click += async (_, _) =>
+        {
+            var card = new AiModelCard();
+            if (await EditDialog(ctx, card, isNew: true))
+            {
+                var s = AiSettings.Load();
+                s.Cards.Add(card);
+                s.Save();
+                Rebuild();
+            }
+        };
+
+        var keys = new Button { Content = "🔑  API-Keys…", Padding = new(14, 7), Margin = new(8, 0, 0, 0) };
+        keys.Click += (_, _) => ApiKeysWindow.Show(ctx);
+
+        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 0, 0, 12) };
+        toolbar.Children.Add(add);
+        toolbar.Children.Add(keys);
+
+        var root = new DockPanel { Margin = new(16) };
+        DockPanel.SetDock(toolbar, Dock.Top);
+        root.Children.Add(toolbar);
+        root.Children.Add(new ScrollViewer { Content = cards });
+
+        win.Content = root;
+        Rebuild();
+        win.Open(ctx);
+    }
+
+    static Border BuildCard(IPluginContext ctx, AiModelCard card, Action rebuild)
+    {
+        var inner = new StackPanel { Spacing = 2 };
+
+        var title = new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(card.Name) ? (string.IsNullOrWhiteSpace(card.Model) ? "(neu)" : card.Model) : card.Name,
+            FontWeight = FontWeight.SemiBold, FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        inner.Children.Add(title);
+
+        inner.Children.Add(new TextBlock { Text = card.Provider, Opacity = 0.7, FontSize = 11 });
+        if (!string.IsNullOrWhiteSpace(card.Model))
+            inner.Children.Add(new TextBlock { Text = card.Model, Opacity = 0.7, FontSize = 11,
+                TextTrimming = TextTrimming.CharacterEllipsis });
+
+        if (!string.IsNullOrWhiteSpace(card.Role))
+            inner.Children.Add(new TextBlock { Text = card.Role, FontStyle = FontStyle.Italic, FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(120, 170, 255)), Margin = new(0, 4, 0, 0) });
+
+        if (!string.IsNullOrWhiteSpace(card.Strengths))
+            inner.Children.Add(new TextBlock { Text = "💪 " + card.Strengths, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.FromRgb(90, 190, 110)), Margin = new(0, 4, 0, 0) });
+        if (!string.IsNullOrWhiteSpace(card.Weaknesses))
+            inner.Children.Add(new TextBlock { Text = "🚫 " + card.Weaknesses, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.FromRgb(210, 140, 70)) });
+        if (!string.IsNullOrWhiteSpace(card.LastApiError))
+            inner.Children.Add(new TextBlock { Text = "⚠ " + card.LastApiError, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.FromRgb(210, 80, 60)), Margin = new(0, 4, 0, 0) });
+
+        var border = new Border
+        {
+            Width = 210, Margin = new(0, 0, 12, 12), Padding = new(14, 12),
+            CornerRadius = new(8), BorderThickness = new(1),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(60, 128, 128, 128)),
+            Background = new SolidColorBrush(Color.FromArgb(20, 128, 128, 128)),
+            Opacity = card.Enabled ? 1.0 : 0.5,
+            Child = inner,
+        };
+
+        var menu = new ContextMenu();
+        var edit = new MenuItem { Header = "Bearbeiten" };
+        edit.Click += async (_, _) => { if (await EditDialog(ctx, card, isNew: false)) { Persist(card); rebuild(); } };
+        var toggle = new MenuItem { Header = card.Enabled ? "Deaktivieren" : "Aktivieren" };
+        toggle.Click += (_, _) => { card.Enabled = !card.Enabled; Persist(card); rebuild(); };
+        var del = new MenuItem { Header = "Entfernen" };
+        del.Click += (_, _) =>
+        {
+            var s = AiSettings.Load();
+            s.Cards.RemoveAll(c => Same(c, card));
+            s.Save();
+            rebuild();
+        };
+        menu.Items.Add(edit);
+        menu.Items.Add(toggle);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(del);
+        border.ContextMenu = menu;
+
+        return border;
+    }
+
+    // ── Edit dialog ─────────────────────────────────────────────────────────
+
+    static async Task<bool> EditDialog(IPluginContext ctx, AiModelCard card, bool isNew)
+    {
+        var dlg = PluginUi.NewWindow(ctx, isNew ? "Modell hinzufügen" : "Modell bearbeiten", 460, 600);
+
+        var panel = new StackPanel { Margin = new(20) };
+
+        // Name
+        panel.Children.Add(PluginUi.Label("Name (optional)"));
+        var nameBox = new TextBox { Text = card.Name, Watermark = "Anzeigename" };
+        panel.Children.Add(nameBox);
+
+        // Provider — only selectable (local, or cloud with a key)
+        panel.Children.Add(PluginUi.Label("Anbieter"));
+        var selectable = AiProviders.Selectable();
+        var provCombo  = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var p in selectable)
+            provCombo.Items.Add(new ComboBoxItem { Content = p.Display + (p.Kind == AiProviderKind.Local ? "  (lokal)" : ""), Tag = p });
+        provCombo.SelectedIndex = Math.Max(0, selectable.ToList().FindIndex(p => p.Id == card.Provider));
+        panel.Children.Add(provCombo);
+        if (selectable.Count == 0)
+            panel.Children.Add(PluginUi.Dim("Keine Anbieter verfügbar – zuerst unter „API-Keys…“ einen Schlüssel hinterlegen "
+                + "oder einen lokalen Anbieter wählen."));
+
+        AiProviderInfo? Prov() => (provCombo.SelectedItem as ComboBoxItem)?.Tag as AiProviderInfo;
+
+        // Server URL — local providers only
+        var urlLabel = PluginUi.Label("Server-URL (lokaler Anbieter)");
+        var urlBox   = new TextBox { Text = card.ServerUrl, Watermark = "http://localhost:11434/v1" };
+        panel.Children.Add(urlLabel);
+        panel.Children.Add(urlBox);
+
+        // Model + fetch
+        panel.Children.Add(PluginUi.Label("Modell"));
+        var modelBox = new AutoCompleteBox
+        {
+            Text = card.Model, Watermark = "Modellname eingeben oder ↻ klicken",
+            FilterMode = AutoCompleteFilterMode.Contains, MinimumPrefixLength = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var fetch  = new Button { Content = "↻", Margin = new(6, 0, 0, 0) };
+        var status = PluginUi.Dim("");
+        var modelRow = new Grid { ColumnDefinitions = new("*,Auto") };
+        Grid.SetColumn(modelBox, 0); modelRow.Children.Add(modelBox);
+        Grid.SetColumn(fetch, 1);    modelRow.Children.Add(fetch);
+        panel.Children.Add(modelRow);
+        panel.Children.Add(status);
+
+        void SyncProviderUi()
+        {
+            var local = Prov()?.Kind == AiProviderKind.Local;
+            urlLabel.IsVisible = local;
+            urlBox.IsVisible   = local;
+        }
+        SyncProviderUi();
+        provCombo.SelectionChanged += (_, _) => SyncProviderUi();
+
+        void PopulateDefaults()
+        {
+            var p = Prov();
+            modelBox.ItemsSource = p is null ? null : DefaultModels(p.Id);
+        }
+        PopulateDefaults();
+        provCombo.SelectionChanged += (_, _) => PopulateDefaults();
+
+        var cts = new System.Threading.CancellationTokenSource();
+        dlg.Closed += (_, _) => cts.Cancel();
+
+        fetch.Click += async (_, _) =>
+        {
+            var p = Prov();
+            if (p is null) return;
+            // build a temp card to construct the service with the current url
+            var probe = new AiModelCard { Provider = p.Id, ServerUrl = urlBox.Text?.Trim() ?? "" };
+            if (p.Kind == AiProviderKind.Cloud && !KeyStore.Has(p.Id))
+            { status.Text = "⚠ Kein API-Key für diesen Anbieter."; return; }
+            fetch.IsEnabled = false; status.Text = "Lade Modelle…";
+            try
+            {
+                using var svc = AiProviders.Create(probe);
+                var models = await svc.GetModelsAsync(cts.Token);
+                var cur = modelBox.Text;
+                modelBox.ItemsSource = models;
+                modelBox.Text = !string.IsNullOrEmpty(cur) ? cur : models.FirstOrDefault() ?? "";
+                status.Text = $"✓ {models.Count} Modell(e) gefunden";
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { status.Text = "⚠ " + ex.Message; }
+            finally { fetch.IsEnabled = true; }
+        };
+
+        // Max tokens
+        panel.Children.Add(PluginUi.Label("Max. Tokens (0 = Standard)"));
+        var maxBox = new TextBox { Text = card.MaxTokens.ToString() };
+        panel.Children.Add(maxBox);
+
+        // Self-describe
+        var describe = new Button { Content = "🔍  Selbstbeschreibung holen", Margin = new(0, 14, 0, 0) };
+        var descStatus = PluginUi.Dim("");
+        describe.Click += async (_, _) =>
+        {
+            ApplyTo(card); // capture current selections first
+            if (string.IsNullOrWhiteSpace(card.Model)) { descStatus.Text = "Erst ein Modell wählen."; return; }
+            describe.IsEnabled = false; descStatus.Text = "Frage das Modell…";
+            try
+            {
+                await CodeSelfDescription.FetchAsync(card, cts.Token);
+                descStatus.Text = string.IsNullOrWhiteSpace(card.LastApiError)
+                    ? $"✓ {card.Role}  ·  💪 {card.Strengths}  ·  🚫 {card.Weaknesses}"
+                    : "⚠ " + card.LastApiError;
+            }
+            catch (Exception ex) { descStatus.Text = "⚠ " + ex.Message; }
+            finally { describe.IsEnabled = true; }
+        };
+        panel.Children.Add(describe);
+        panel.Children.Add(descStatus);
+
+        // Buttons
+        var save   = PluginUi.Btn("Speichern");
+        var cancel = PluginUi.Btn("Abbrechen");
+        save.Click += (_, _) =>
+        {
+            if (Prov() is null) { status.Text = "⚠ Kein Anbieter gewählt."; return; }
+            if (string.IsNullOrWhiteSpace(modelBox.Text)) { status.Text = "⚠ Bitte ein Modell angeben."; return; }
+            ApplyTo(card);
+            dlg.Close(true);
+        };
+        cancel.Click += (_, _) => dlg.Close(false);
+        var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 18, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Right };
+        btnRow.Children.Add(save); btnRow.Children.Add(cancel);
+        panel.Children.Add(btnRow);
+
+        void ApplyTo(AiModelCard c)
+        {
+            c.Name      = nameBox.Text?.Trim() ?? "";
+            c.Provider  = Prov()?.Id ?? c.Provider;
+            c.Model     = modelBox.Text?.Trim() ?? "";
+            c.ServerUrl = urlBox.Text?.Trim() ?? "";
+            c.MaxTokens = int.TryParse(maxBox.Text, out var mt) ? mt : 0;
+        }
+
+        dlg.Content = new ScrollViewer { Content = panel };
+
+        // True modal when we have an owner; otherwise a non-modal window bridged through a TCS.
+        if (ctx.OwnerWindow is Window owner)
+            return await dlg.ShowDialog<bool>(owner);
+
+        var tcs = new TaskCompletionSource<bool>();
+        dlg.Closed += (_, e) => tcs.TrySetResult(false);
+        // dlg.Close(true) sets the Window's result, but without ShowDialog we capture it via Closing.
+        dlg.Show();
+        return await tcs.Task;
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    static string[] DefaultModels(string provider) => provider switch
+    {
+        "Anthropic"  => AnthropicService.DefaultModels,
+        "OpenAI"     => OpenAIService.DefaultModels,
+        "Google"     => GoogleAIService.DefaultModels,
+        "Groq"       => GroqService.DefaultModels,
+        "Mistral"    => MistralService.DefaultModels,
+        "OpenRouter" => OpenRouterService.DefaultModels,
+        "xAI (Grok)" => XAIGrokService.DefaultModels,
+        "Cerebras"   => CerebrasService.DefaultModels,
+        "DeepInfra"  => DeepInfraService.DefaultModels,
+        "DeepSeek"   => DeepSeekService.DefaultModels,
+        "Nvidia NIM" => NvidiaNIMService.DefaultModels,
+        _            => [],
+    };
+
+    static bool Same(AiModelCard a, AiModelCard b) =>
+        a.Provider == b.Provider && a.Model == b.Model && a.Name == b.Name;
+
+    static void Persist(AiModelCard card)
+    {
+        var s = AiSettings.Load();
+        var i = s.Cards.FindIndex(c => Same(c, card));
+        if (i >= 0) s.Cards[i] = card; else s.Cards.Add(card);
+        s.Save();
+    }
+}

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Loaded dynamically: emit a deps.json so the host's PluginLoadContext can resolve our PRIVATE deps
+         (StructoFox.AI) from this folder, while SHARED deps (Core, Avalonia) come from the host. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Shared with the host: do NOT copy (the plugin binds to the host's already-loaded assemblies). -->
+    <ProjectReference Include="..\StructoFox.Core\StructoFox.Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+
+    <!-- BUNDLED with the plugin: StructoFox.AI ships next to this dll, so the base app contains no AI code.
+         A school that omits this plugin omits the AI providers entirely. -->
+    <ProjectReference Include="..\StructoFox.AI\StructoFox.AI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Avalonia is loaded by the host → share it (types must match across the plugin boundary). -->
+    <PackageReference Include="Avalonia" Version="12.0.4">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Drop the built plugin (and its bundled StructoFox.AI) into the app's Plugins/ folder. -->
+  <Target Name="CopyToAppPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <AppPlugins>$(MSBuildProjectDirectory)\..\StructoFox.App\bin\$(Configuration)\net10.0\Plugins</AppPlugins>
+    </PropertyGroup>
+    <MakeDir Directories="$(AppPlugins)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(AppPlugins)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)StructoFox.AI.dll" DestinationFolder="$(AppPlugins)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).deps.json" DestinationFolder="$(AppPlugins)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
