@@ -17,6 +17,11 @@ public static class CodeSelfDescription
         "DESC: I excel at writing efficient, well-structured code and clean APIs.\n\n" +
         "Now write your two lines:";
 
+    // Completion-style (not instruction-style): base/coder models continue this line naturally.
+    const string StrengthsCompletionPrompt =
+        "Continue the following line with a comma-separated list of programming languages and nothing else.\n" +
+        "Programming languages I am strongest at writing:";
+
     const string LanguagesPrompt =
         "IMPORTANT: Reply with EXACTLY these two lines. No greeting, no explanation — just these two lines.\n" +
         "STRONG: [comma-separated list of the programming languages you most enjoy writing]\n" +
@@ -56,6 +61,15 @@ public static class CodeSelfDescription
                 if (!string.IsNullOrEmpty(weak))   card.Weaknesses = weak;
             }
 
+            // Fallback for coder / base models that ignore the structured format (yet are exactly the ones we
+            // most want for generation): prime a sentence completion and harvest known languages from the text.
+            if (string.IsNullOrWhiteSpace(card.Strengths))
+            {
+                var free = await Ask(svc, StrengthsCompletionPrompt, ct);
+                var found = free is null ? new() : ExtractLanguages(free);
+                if (found.Count > 0) card.Strengths = string.Join(", ", found);
+            }
+
             card.LastApiError = "";
             return true;
         }
@@ -64,6 +78,32 @@ public static class CodeSelfDescription
             card.LastApiError = ex.Message;
             return true;   // updated the error so the UI can show it / stop retrying
         }
+    }
+
+    // Common programming languages, scanned for in free-text replies from models that don't follow the format.
+    static readonly string[] KnownLanguages =
+    [
+        "C++", "C#", "Objective-C", "F#", "Visual Basic", "JavaScript", "TypeScript", "Python", "Java",
+        "Kotlin", "Swift", "Rust", "Golang", "Go", "Ruby", "PHP", "Scala", "Haskell", "Perl", "Julia", "Lua",
+        "Dart", "Elixir", "Erlang", "Clojure", "Assembly", "COBOL", "Fortran", "SQL", "PowerShell", "Bash",
+        "Shell", "MATLAB", "Pascal", "Zig", "Nim", "Crystal", "OCaml", "Groovy", "Solidity", "Verse", "R", "C",
+    ];
+
+    /// <summary>Harvests known programming-language names from free text, in order of first appearance, deduped.
+    /// Word boundaries treat <c>+</c> and <c>#</c> as part of the token so "C" doesn't match inside "C++"/"C#".</summary>
+    static List<string> ExtractLanguages(string text)
+    {
+        var hits = new List<(int pos, string lang)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var lang in KnownLanguages)
+        {
+            var pattern = $@"(?<![A-Za-z0-9+#]){System.Text.RegularExpressions.Regex.Escape(lang)}(?![A-Za-z0-9+#])";
+            var m = System.Text.RegularExpressions.Regex.Match(text, pattern,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (m.Success && seen.Add(lang == "Golang" ? "Go" : lang))
+                hits.Add((m.Index, lang == "Golang" ? "Go" : lang));
+        }
+        return hits.OrderBy(h => h.pos).Select(h => h.lang).Take(8).ToList();
     }
 
     static async Task<string?> Ask(ICloudAIService svc, string prompt, CancellationToken ct)
