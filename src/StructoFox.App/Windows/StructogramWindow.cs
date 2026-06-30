@@ -285,15 +285,10 @@ public class StructogramWindow : Window
     }
 
     Grid? _root;
-    Control? _decor;
-
-    // Rebuilds the title/watermark/logo decoration. It lives INSIDE the canvas content (not over the viewport),
-    // so it scrolls and zooms with the diagram and travels into print / PDF / image exports.
-    void RefreshDecor()
-    {
-        _decor = DiagramDecor.Build(_data.Title, _style, () => _ = OpenDecor());
-        Rebuild();   // recompose the canvas with the new decoration overlay
-    }
+    // Rebuilds the decoration (title / info field / watermark / logo). It lives INSIDE the canvas content, so it
+    // scrolls and zooms with the diagram and travels into print / PDF / image exports; edge decorations reserve
+    // an empty band so they never overlap the structogram.
+    void RefreshDecor() => Rebuild();
 
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
     async Task OpenDecor()
@@ -312,12 +307,7 @@ public class StructogramWindow : Window
     {
         if (_hostBorder is null) return;
         var diagram = RenderSequence(_data.Root, isRoot: true);
-        if (_decor is null) { _hostBorder.Child = diagram; return; }
-        (_decor.Parent as Panel)?.Children.Remove(_decor);   // a control can have only one parent
-        var grid = new Grid();
-        grid.Children.Add(diagram);
-        grid.Children.Add(_decor);
-        _hostBorder.Child = grid;
+        _hostBorder.Child = DiagramDecor.Compose(diagram, _data.Title, _style, () => _ = OpenDecor());
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────

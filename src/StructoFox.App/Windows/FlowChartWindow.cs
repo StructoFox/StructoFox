@@ -654,17 +654,16 @@ public class FlowChartWindow : Window
     }
 
     Grid? _root;
-    Grid? _canvasHost;   // wraps the canvas so the decoration can overlay it inside the zoom/scroll content
-    Control? _decor;
+    Grid? _canvasHost;   // wraps the canvas + decoration inside the zoom/scroll content
 
-    // Rebuilds the title/watermark/logo decoration. It overlays the canvas INSIDE the scroll/zoom content, so
-    // it scrolls and zooms with the diagram and travels into print / PDF / image exports.
+    // Rebuilds the decoration (title / info field / watermark / logo) around the canvas, INSIDE the scroll/zoom
+    // content, so it travels into print / PDF / image exports; edge decorations reserve an empty band.
     void RefreshDecor()
     {
-        if (_canvasHost is null) return;
-        if (_decor is not null) _canvasHost.Children.Remove(_decor);
-        _decor = DiagramDecor.Build(_data.Title, _style, () => _ = OpenDecor());
-        _canvasHost.Children.Add(_decor);
+        if (_canvasHost is null || _canvas is null) return;
+        (_canvas.Parent as Panel)?.Children.Remove(_canvas);   // detach from the previous composition
+        _canvasHost.Children.Clear();
+        _canvasHost.Children.Add(DiagramDecor.Compose(_canvas, _data.Title, _style, () => _ = OpenDecor()));
     }
 
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.

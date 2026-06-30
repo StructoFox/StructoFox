@@ -32,8 +32,8 @@ public class DiagramStyle
     /// <summary>Render the diagram's title as a heading on the plan.</summary>
     public bool ShowTitle { get; set; } = false;
 
-    /// <summary>Where the title heading sits on the plan.</summary>
-    public TitlePos TitlePosition { get; set; } = TitlePos.TopCenter;
+    /// <summary>Where the title heading sits on the plan (a reserved band, except Center which overlays).</summary>
+    public DecorPos TitlePosition { get; set; } = DecorPos.Top;
 
     /// <summary>Title font size in px.</summary>
     public double TitleFontSize { get; set; } = 20;
@@ -54,11 +54,23 @@ public class DiagramStyle
     /// <summary>Rotation of the watermark (text + image), in degrees.</summary>
     public double WatermarkAngle { get; set; } = -30;
 
-    /// <summary>Path to a logo image to place in a corner; empty/missing = none.</summary>
+    /// <summary>Path to a logo image to place on the plan; empty/missing = none.</summary>
     public string LogoPath { get; set; } = "";
 
-    /// <summary>Which corner the logo sits in.</summary>
-    public DecorCorner LogoCorner { get; set; } = DecorCorner.TopRight;
+    /// <summary>Where the logo sits on the plan (shares the 5-position system with title and info).</summary>
+    public DecorPos LogoPosition { get; set; } = DecorPos.Top;
+
+    // ── Info field (an optional "title block" / Schriftfeld for presentation) ─────────────────────────────
+    // Only non-empty rows are shown. Like the title, it sits in a reserved band (or overlays at Center).
+    public bool   ShowInfo        { get; set; } = false;
+    public DecorPos InfoPosition  { get; set; } = DecorPos.Bottom;
+    public string InfoName        { get; set; } = "";   // name of the structogram / PAP / function
+    public string InfoProject     { get; set; } = "";
+    public string InfoProjectNo   { get; set; } = "";
+    public string InfoVersion     { get; set; } = "";
+    public string InfoDate        { get; set; } = "";
+    public string InfoAuthor      { get; set; } = "";
+    public string InfoExtra       { get; set; } = "";   // free multiline note (plain text)
 
     // ── Grid (snapping aid) ──────────────────────────────────────────────────
 
@@ -82,11 +94,10 @@ public class DiagramStyle
 /// <summary>How the alignment grid is rendered.</summary>
 public enum GridLineStyle { Lines, Dashed, Dots }
 
-/// <summary>The corner a diagram logo is anchored to.</summary>
-public enum DecorCorner { TopLeft, TopRight, BottomLeft, BottomRight }
-
-/// <summary>Where the title heading sits on the plan.</summary>
-public enum TitlePos { TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight }
+/// <summary>Where a decoration (title / logo / info field) sits on the plan. Top/Bottom/Left/Right reserve an
+/// empty band around the diagram; Center overlays it. Several decorations sharing a position are laid out in
+/// order (logo, title, info).</summary>
+public enum DecorPos { Top, Bottom, Left, Right, Center }
 
 /// <summary>
 /// Optional per-element appearance overrides (one block / node). Every field is nullable and
