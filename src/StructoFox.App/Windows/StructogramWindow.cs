@@ -259,14 +259,14 @@ public class StructogramWindow : Window
     // Keyboard zoom: anchor on the viewport centre.
     void SetZoom(double z)
     {
-        if (_scroll is null) { _zoom = Math.Clamp(z, 0.3, 3.0); ApplyZoom(); return; }
+        if (_scroll is null) { _zoom = Math.Clamp(z, 0.1, 3.0); ApplyZoom(); return; }
         ZoomAt(z, new Point(_scroll.Viewport.Width / 2, _scroll.Viewport.Height / 2));
     }
 
     // Zooms to a clamped level while keeping the content point under the given viewport position fixed.
     void ZoomAt(double z, Point viewportPos)
     {
-        z = Math.Clamp(z, 0.3, 3.0);
+        z = Math.Clamp(z, 0.1, 3.0);
         if (_scroll is null || Math.Abs(z - _zoom) < 0.0001) { _zoom = z; ApplyZoom(); return; }
 
         var off = _scroll.Offset;
