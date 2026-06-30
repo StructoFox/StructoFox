@@ -21,6 +21,9 @@ public class NewProjectDialog : Window
 
     NewProjectDialog(List<string> libraries)
     {
+        // Drop library folders that no longer exist (e.g. the user deleted them) so stale entries aren't offered.
+        libraries = libraries.Where(System.IO.Directory.Exists).ToList();
+
         Title                 = Loc.S("NewProj_Title");
         Width                 = 520;
         SizeToContent         = SizeToContent.Height;
