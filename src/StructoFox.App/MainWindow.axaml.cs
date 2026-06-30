@@ -199,11 +199,11 @@ public partial class MainWindow : Window
         }
         cm.Items.Add(options);
 
-        // Extensions: every command contributed by a loaded plugin. Empty (or no Plugins/ folder) → just a hint.
-        var ext = new MenuItem { Header = Loc.S("Menu_Extensions") };
-        if (PluginHost.Plugins.Count == 0)
-            ext.Items.Add(new MenuItem { Header = Loc.S("Menu_NoExtensions"), IsEnabled = false });
-        else
+        // Extensions: every command contributed by a loaded plugin. With no plugins installed the menu is
+        // hidden entirely (rather than showing an empty/disabled entry), so a plain deployment stays clean.
+        if (PluginHost.Plugins.Count > 0)
+        {
+            var ext = new MenuItem { Header = Loc.S("Menu_Extensions") };
             foreach (var plugin in PluginHost.Plugins)
                 foreach (var cmd in plugin.Commands)
                 {
@@ -212,7 +212,8 @@ public partial class MainWindow : Window
                     mi.Click += (_, _) => CrashHandler.Safe(() => c.Run(new PluginCtx(this)), "Plugin:" + c.Title);
                     ext.Items.Add(mi);
                 }
-        cm.Items.Add(ext);
+            cm.Items.Add(ext);
+        }
 
         cm.Items.Add(new Separator());
 
