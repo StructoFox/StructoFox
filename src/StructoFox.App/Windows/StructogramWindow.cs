@@ -50,8 +50,11 @@ public class StructogramWindow : Window
         _projFolder = projFolder;
         _key        = key;
         _themePath  = themePath;
+        bool isNew  = !StructogramService.Exists(projFolder, key);
         _data       = StructogramService.Load(projFolder, key);
         if (string.IsNullOrEmpty(_data.Title)) _data.Title = title;
+        // A brand-new structogram gets the user's chosen default header, if any.
+        if (isNew) { HeaderTemplateService.ApplyDefault(isPap: false, _data.Style); StructogramService.Save(projFolder, key, _data); }
         _style      = _data.Style;   // persisted with the diagram
         _snapshot   = System.Text.Json.JsonSerializer.Serialize(_data);   // baseline for undo
 

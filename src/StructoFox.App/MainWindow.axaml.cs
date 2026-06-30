@@ -190,6 +190,11 @@ public partial class MainWindow : Window
         options.Items.Add(normMark);
         options.Items.Add(new Separator());
 
+        var defHeader = new MenuItem { Header = Loc.S("Menu_DefaultHeader") };
+        defHeader.Click += (_, _) => CrashHandler.Safe(() => _ = DefaultHeaderDialog.Show(this), "DefaultHeader");
+        options.Items.Add(defHeader);
+        options.Items.Add(new Separator());
+
         foreach (var (key, labelKey) in SuppressStore.Known)
         {
             var k = key;

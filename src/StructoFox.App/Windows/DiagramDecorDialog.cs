@@ -3,6 +3,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using StructoFox.Core;
 using StructoFox.Core.Models;
 
 namespace StructoFox.App;
@@ -106,6 +107,23 @@ public class DiagramDecorDialog : Window
             fromPapBtn.Click += (_, _) => { if (fromPap() is { } src) ImportFrom(src.style, src.title); };
         }
 
+        // Save the current header as a reusable template / apply a saved one.
+        var saveTpl = Ui.Btn(Loc.S("Decor_SaveTemplate"));
+        saveTpl.Click += async (_, _) =>
+        {
+            var n = await PromptDialog.Show(this, Loc.S("Decor_TemplateName"), "");
+            if (string.IsNullOrWhiteSpace(n)) return;
+            var tmp = new DiagramStyle(); ApplyTo(tmp);
+            HeaderTemplateService.Save(n.Trim(), HeaderData.Capture(tmp));
+        };
+        var applyTpl = Ui.Btn(Loc.S("Decor_ApplyTemplate"));
+        applyTpl.Click += async (_, _) =>
+        {
+            var n = await TemplatePickerDialog.Show(this);
+            if (n is not null && HeaderTemplateService.Load(n) is { } h) { var s = new DiagramStyle(); h.ApplyTo(s); PopulateHeader(s); }
+        };
+        var tplRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { saveTpl, applyTpl } };
+
         // A text field followed by its action buttons: the field fills, the buttons keep their full width
         // (a plain horizontal StackPanel squeezed the buttons in the fixed-width window — "Durchsuchen" → "L").
         static Grid FieldRow(Control field, params Control[] buttons)
@@ -180,16 +198,19 @@ public class DiagramDecorDialog : Window
                 new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new(0, 6, 0, 0), Children = { cancel, ok } },
             },
         };
-        if (fromPapBtn is not null) panel.Children.Insert(0, fromPapBtn);   // "get from flowchart" at the top
+        panel.Children.Insert(0, tplRow);                                   // template save/apply at the top
+        if (fromPapBtn is not null) panel.Children.Insert(0, fromPapBtn);   // "get from flowchart" above that
 
         Content = new ScrollViewer { MaxHeight = 680, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = panel };
     }
 
     // Copies a whole header (the PAP's) into the dialog controls: contents and positions.
-    void ImportFrom(DiagramStyle s, string title)
+    void ImportFrom(DiagramStyle s, string title) { _title.Text = title; PopulateHeader(s); }
+
+    // Loads the header fields of a style into the controls (no title text).
+    void PopulateHeader(DiagramStyle s)
     {
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        _title.Text = title;
         _showTitle.IsChecked = s.ShowTitle; _titlePos.SelectedItem = s.TitlePosition;
         _titleSize.Text = s.TitleFontSize.ToString(inv); _titleBold.IsChecked = s.TitleBold;
         if (string.IsNullOrWhiteSpace(s.TitleColor)) _titleColor.Inherit = true;
@@ -202,29 +223,32 @@ public class DiagramDecorDialog : Window
     }
 
     // Writes the edits back into the style and closes with the (possibly changed) title.
-    void Apply()
-    {
-        _style.ShowTitle      = _showTitle.IsChecked == true;
-        _style.TitlePosition  = _titlePos.SelectedItem is DecorPos tp ? tp : _style.TitlePosition;
-        if (double.TryParse(_titleSize.Text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ts) && ts > 0) _style.TitleFontSize = ts;
-        _style.TitleBold      = _titleBold.IsChecked == true;
-        _style.TitleColor     = _titleColor.Inherit ? "" : HexColorPicker.HexOf(_titleColor.Color);
-        _style.Watermark      = (_watermark.Text ?? "").Trim();
-        _style.WatermarkImage = (_watermarkImg.Text ?? "").Trim();
-        if (double.TryParse(_wmAngle.Text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var wa)) _style.WatermarkAngle = wa;
-        _style.LogoPath       = (_logo.Text ?? "").Trim();
-        _style.LogoPosition   = _corner.SelectedItem is DecorPos c ? c : _style.LogoPosition;
+    void Apply() { ApplyTo(_style); Close((_title.Text ?? "").Trim()); }
 
-        _style.ShowInfo       = _showInfo.IsChecked == true;
-        _style.InfoPosition   = _infoPos.SelectedItem is DecorPos ip ? ip : _style.InfoPosition;
-        _style.InfoName       = (_infoName.Text ?? "").Trim();
-        _style.InfoProject    = (_infoProject.Text ?? "").Trim();
-        _style.InfoProjectNo  = (_infoProjectNo.Text ?? "").Trim();
-        _style.InfoVersion    = (_infoVersion.Text ?? "").Trim();
-        _style.InfoDate       = (_infoDate.Text ?? "").Trim();
-        _style.InfoAuthor     = (_infoAuthor.Text ?? "").Trim();
-        _style.InfoExtra      = (_infoExtra.Text ?? "").TrimEnd();
-        Close((_title.Text ?? "").Trim());
+    // Writes the current control values into a style's header fields (used by Apply and by "save as template").
+    void ApplyTo(DiagramStyle s)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        s.ShowTitle      = _showTitle.IsChecked == true;
+        s.TitlePosition  = _titlePos.SelectedItem is DecorPos tp ? tp : s.TitlePosition;
+        if (double.TryParse(_titleSize.Text, System.Globalization.NumberStyles.Any, inv, out var ts) && ts > 0) s.TitleFontSize = ts;
+        s.TitleBold      = _titleBold.IsChecked == true;
+        s.TitleColor     = _titleColor.Inherit ? "" : HexColorPicker.HexOf(_titleColor.Color);
+        s.Watermark      = (_watermark.Text ?? "").Trim();
+        s.WatermarkImage = (_watermarkImg.Text ?? "").Trim();
+        if (double.TryParse(_wmAngle.Text, System.Globalization.NumberStyles.Any, inv, out var wa)) s.WatermarkAngle = wa;
+        s.LogoPath       = (_logo.Text ?? "").Trim();
+        s.LogoPosition   = _corner.SelectedItem is DecorPos c ? c : s.LogoPosition;
+
+        s.ShowInfo       = _showInfo.IsChecked == true;
+        s.InfoPosition   = _infoPos.SelectedItem is DecorPos ip ? ip : s.InfoPosition;
+        s.InfoName       = (_infoName.Text ?? "").Trim();
+        s.InfoProject    = (_infoProject.Text ?? "").Trim();
+        s.InfoProjectNo  = (_infoProjectNo.Text ?? "").Trim();
+        s.InfoVersion    = (_infoVersion.Text ?? "").Trim();
+        s.InfoDate       = (_infoDate.Text ?? "").Trim();
+        s.InfoAuthor     = (_infoAuthor.Text ?? "").Trim();
+        s.InfoExtra      = (_infoExtra.Text ?? "").TrimEnd();
     }
 
     async Task<string?> PickImageAsync()

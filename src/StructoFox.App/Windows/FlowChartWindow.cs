@@ -118,8 +118,11 @@ public class FlowChartWindow : Window
         _projFolder = projFolder;
         _key        = key;
         _themePath  = themePath;
+        bool isNew  = !FlowChartService.Exists(projFolder, key);
         _data       = FlowChartService.Load(projFolder, key);
         if (string.IsNullOrEmpty(_data.Title)) _data.Title = title;
+        // A brand-new flowchart gets the user's chosen default header, if any.
+        if (isNew) { HeaderTemplateService.ApplyDefault(isPap: true, _data.Style); FlowChartService.Save(projFolder, key, _data); }
         _style      = _data.Style;   // persisted with the diagram
         _snapshot   = Serialize(_data);   // baseline for undo
 
