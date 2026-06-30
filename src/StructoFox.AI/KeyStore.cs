@@ -1,39 +1,80 @@
-using System.IO;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
 
 namespace StructoFox.AI;
 
 /// <summary>
-/// Stores per-provider API keys outside the plain-text settings JSON. On Windows the keys live in the
-/// Windows Credential Manager (target <c>StructoFox:{provider}</c>), exactly like ClaudetRelay. On other
-/// platforms we fall back to a DPAPI-less, machine-local file under the user's app-data folder (best effort —
-/// the OS keychain integration is Windows-only, which is what the user asked for).
+/// Stores per-provider API keys ONLY in the operating system's native secret store — never in a plain file:
+///   • Windows → Credential Manager (advapi32, target <c>StructoFox:{provider}</c>)
+///   • macOS   → Keychain via the built-in <c>security</c> tool
+///   • Linux   → Secret Service (GNOME Keyring / KDE Wallet) via <c>secret-tool</c> (package <c>libsecret</c>)
+/// There is deliberately NO insecure fallback. If the native store is unavailable, <see cref="Save"/> /
+/// <see cref="Delete"/> throw a <see cref="KeyStoreException"/> with copy-able details so the UI can tell the
+/// user exactly what failed and what to install.
 /// </summary>
 public static class KeyStore
 {
-    /// <summary>Saves (or clears, if <paramref name="apiKey"/> is empty) the key for a provider.</summary>
+    const string Service = "StructoFox";   // service / target-prefix used across all backends
+
+    /// <summary>Human label of the backend used on this OS (for messages).</summary>
+    public static string BackendName =>
+        OperatingSystem.IsWindows() ? "Windows-Anmeldeinformationsverwaltung"
+      : OperatingSystem.IsMacOS()   ? "macOS-Schlüsselbund (Keychain)"
+      :                               "Secret Service (secret-tool / libsecret)";
+
+    /// <summary>Saves the key for a provider, or clears it when <paramref name="apiKey"/> is empty.
+    /// Throws <see cref="KeyStoreException"/> if the native store can't be reached.</summary>
     public static void Save(string provider, string apiKey)
     {
         if (string.IsNullOrEmpty(apiKey)) { Delete(provider); return; }
-        if (OperatingSystem.IsWindows()) Win.Save(provider, apiKey);
-        else                             FileFallback.Save(provider, apiKey);
+        if      (OperatingSystem.IsWindows()) Win.Save(provider, apiKey);
+        else if (OperatingSystem.IsMacOS())   Mac.Save(provider, apiKey);
+        else                                  Sec.Save(provider, apiKey);
     }
 
-    /// <summary>Returns the stored key for a provider, or null if none.</summary>
-    public static string? Load(string provider) =>
-        OperatingSystem.IsWindows() ? Win.Load(provider) : FileFallback.Load(provider);
+    /// <summary>Returns the stored key, or null if none / the backend is unavailable (reading never throws,
+    /// so a missing keyring just means "no key" — the failure surfaces when the user tries to SAVE).</summary>
+    public static string? Load(string provider)
+    {
+        try
+        {
+            if      (OperatingSystem.IsWindows()) return Win.Load(provider);
+            else if (OperatingSystem.IsMacOS())   return Mac.Load(provider);
+            else                                  return Sec.Load(provider);
+        }
+        catch { return null; }
+    }
 
-    /// <summary>Removes the stored key for a provider (no-op if none).</summary>
+    /// <summary>Removes the stored key. Throws <see cref="KeyStoreException"/> on a real backend failure
+    /// (a "not found" is treated as success).</summary>
     public static void Delete(string provider)
     {
-        if (OperatingSystem.IsWindows()) Win.Delete(provider);
-        else                             FileFallback.Delete(provider);
+        if      (OperatingSystem.IsWindows()) Win.Delete(provider);
+        else if (OperatingSystem.IsMacOS())   Mac.Delete(provider);
+        else                                  Sec.Delete(provider);
     }
 
-    /// <summary>True if a non-empty key is configured for the provider.</summary>
     public static bool Has(string provider) => !string.IsNullOrWhiteSpace(Load(provider));
+
+    /// <summary>Checks the native store is reachable. Returns (true, null) if OK, otherwise (false, details)
+    /// with a copy-able explanation + install hint. Used to warn the user before they enter keys.</summary>
+    public static (bool ok, string? details) Probe()
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows()) return (true, null);          // CredMan is always present
+            // mac/Linux: prove the CLI tool exists and runs by attempting a harmless lookup.
+            _ = Load("__structofox_probe__");
+            if (OperatingSystem.IsMacOS()) return (true, null);            // `security` ships with macOS
+            // Linux: confirm secret-tool is actually installed (Load swallows errors, so probe explicitly).
+            Sec.EnsureToolPresent();
+            return (true, null);
+        }
+        catch (KeyStoreException ex) { return (false, ex.FullText); }
+        catch (Exception ex)         { return (false, ex.ToString()); }
+    }
 
     // ── Windows Credential Manager (CRED_TYPE_GENERIC) ──────────────────────
     static class Win
@@ -67,7 +108,7 @@ public static class KeyStore
         [DllImport("advapi32.dll", SetLastError = true)]
         static extern void CredFree  (IntPtr buffer);
 
-        static string Target(string provider) => $"StructoFox:{provider}";
+        static string Target(string provider) => $"{Service}:{provider}";
 
         public static void Save(string provider, string apiKey)
         {
@@ -84,7 +125,10 @@ public static class KeyStore
                     CredentialBlobSize = (uint)bytes.Length,
                     Persist            = CRED_PERSIST_LOCAL_MACHINE
                 };
-                CredWrite(ref cred, 0);
+                if (!CredWrite(ref cred, 0))
+                    throw new KeyStoreException(
+                        "Der API-Key konnte nicht in der Windows-Anmeldeinformationsverwaltung gespeichert werden.",
+                        $"CredWriteW schlug fehl. Win32-Fehlercode: {Marshal.GetLastWin32Error()} (Target: {Target(provider)}).");
             }
             finally { handle.Free(); }
         }
@@ -106,35 +150,133 @@ public static class KeyStore
         public static void Delete(string provider) => CredDelete(Target(provider), CRED_TYPE_GENERIC, 0);
     }
 
-    // ── Non-Windows fallback: a single JSON file in app-data (keys lightly obfuscated, not OS-secured) ──
-    static class FileFallback
+    // ── macOS Keychain via the built-in `security` CLI ──────────────────────
+    static class Mac
     {
-        static string Path_ => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "StructoFox", "keys.json");
-
-        static Dictionary<string, string> Read()
+        public static void Save(string provider, string apiKey)
         {
+            // -U updates if an item already exists; service/account identify the entry.
+            var r = Proc.Run("security",
+                ["add-generic-password", "-U", "-s", Service, "-a", provider, "-w", apiKey],
+                whatFailed: "Der API-Key konnte nicht im macOS-Schlüsselbund gespeichert werden.");
+            if (r.code != 0)
+                throw new KeyStoreException(
+                    "Der API-Key konnte nicht im macOS-Schlüsselbund gespeichert werden.",
+                    $"`security add-generic-password` Exit {r.code}.\nstderr:\n{r.err}");
+        }
+
+        public static string? Load(string provider)
+        {
+            var r = Proc.Run("security", ["find-generic-password", "-s", Service, "-a", provider, "-w"],
+                whatFailed: "Der macOS-Schlüsselbund konnte nicht gelesen werden.");
+            return r.code == 0 ? r.@out.TrimEnd('\n', '\r') : null;   // nonzero = item not found
+        }
+
+        public static void Delete(string provider)
+        {
+            var r = Proc.Run("security", ["delete-generic-password", "-s", Service, "-a", provider],
+                whatFailed: "Der API-Key konnte nicht aus dem macOS-Schlüsselbund entfernt werden.");
+            // Exit 44 = item not found → treat as already-deleted (success).
+            if (r.code is not (0 or 44))
+                throw new KeyStoreException(
+                    "Der API-Key konnte nicht aus dem macOS-Schlüsselbund entfernt werden.",
+                    $"`security delete-generic-password` Exit {r.code}.\nstderr:\n{r.err}");
+        }
+    }
+
+    // ── Linux Secret Service via `secret-tool` (package libsecret) ───────────
+    static class Sec
+    {
+        const string InstallHint =
+            "Auf Linux wird das Programm `secret-tool` (Paket `libsecret`/`libsecret-tools`) benötigt, "
+          + "und ein laufender Schlüsselbund-Dienst (GNOME Keyring oder KDE Wallet).\n"
+          + "Installation z. B.:\n"
+          + "  Debian/Ubuntu:  sudo apt install libsecret-tools\n"
+          + "  Fedora:         sudo dnf install libsecret\n"
+          + "  Arch:           sudo pacman -S libsecret";
+
+        public static void EnsureToolPresent()
+        {
+            // A which-style check: `secret-tool --version` (or any invocation) must start.
+            try { Proc.Run("secret-tool", ["--version"], whatFailed: ""); }
+            catch (KeyStoreException ex)
+            {
+                throw new KeyStoreException(
+                    "Der Linux-Schlüsselbund (Secret Service) ist nicht verfügbar.",
+                    ex.Details + "\n\n" + InstallHint);
+            }
+        }
+
+        public static void Save(string provider, string apiKey)
+        {
+            var r = Proc.Run("secret-tool",
+                ["store", "--label", $"{Service} {provider}", "service", Service, "account", provider],
+                stdin: apiKey,
+                whatFailed: "Der API-Key konnte nicht im Linux-Schlüsselbund gespeichert werden.");
+            if (r.code != 0)
+                throw new KeyStoreException(
+                    "Der API-Key konnte nicht im Linux-Schlüsselbund gespeichert werden.",
+                    $"`secret-tool store` Exit {r.code}.\nstderr:\n{r.err}\n\n{InstallHint}");
+        }
+
+        public static string? Load(string provider)
+        {
+            var r = Proc.Run("secret-tool", ["lookup", "service", Service, "account", provider],
+                whatFailed: "Der Linux-Schlüsselbund konnte nicht gelesen werden.");
+            return r.code == 0 ? r.@out.TrimEnd('\n', '\r') : null;   // exit 1 = no match
+        }
+
+        public static void Delete(string provider)
+        {
+            var r = Proc.Run("secret-tool", ["clear", "service", Service, "account", provider],
+                whatFailed: "Der API-Key konnte nicht aus dem Linux-Schlüsselbund entfernt werden.");
+            if (r.code != 0)
+                throw new KeyStoreException(
+                    "Der API-Key konnte nicht aus dem Linux-Schlüsselbund entfernt werden.",
+                    $"`secret-tool clear` Exit {r.code}.\nstderr:\n{r.err}\n\n{InstallHint}");
+        }
+    }
+
+    // ── Tiny process runner (no shell, args passed individually; optional stdin) ──
+    static class Proc
+    {
+        public static (int code, string @out, string err) Run(
+            string file, string[] args, string? stdin = null, string whatFailed = "")
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = file, RedirectStandardOutput = true, RedirectStandardError = true,
+                RedirectStandardInput = stdin is not null, UseShellExecute = false, CreateNoWindow = true,
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+
             try
             {
-                return File.Exists(Path_)
-                    ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(Path_)) ?? new()
-                    : new();
+                using var p = Process.Start(psi)
+                    ?? throw new KeyStoreException(whatFailed, $"Prozess `{file}` ließ sich nicht starten.");
+                if (stdin is not null) { p.StandardInput.Write(stdin); p.StandardInput.Close(); }
+                var so = p.StandardOutput.ReadToEnd();
+                var se = p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                return (p.ExitCode, so, se);
             }
-            catch { return new(); }
+            catch (Win32Exception ex)   // tool not installed / not on PATH
+            {
+                throw new KeyStoreException(
+                    string.IsNullOrEmpty(whatFailed) ? $"`{file}` ist nicht verfügbar." : whatFailed,
+                    $"`{file}` konnte nicht gestartet werden: {ex.Message} (Win32 {ex.NativeErrorCode}).");
+            }
         }
-
-        static void Write(Dictionary<string, string> d)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path_)!);
-            File.WriteAllText(Path_, JsonSerializer.Serialize(d));
-        }
-
-        static string Enc(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
-        static string Dec(string s) { try { return Encoding.UTF8.GetString(Convert.FromBase64String(s)); } catch { return ""; } }
-
-        public static void Save(string provider, string apiKey) { var d = Read(); d[provider] = Enc(apiKey); Write(d); }
-        public static string? Load(string provider) => Read().TryGetValue(provider, out var v) ? Dec(v) : null;
-        public static void Delete(string provider) { var d = Read(); if (d.Remove(provider)) Write(d); }
     }
+}
+
+/// <summary>Raised when the OS secret store can't be used. <see cref="Details"/> carries the technical cause
+/// (command, exit code, stderr, install hints) for a copy-able error dialog.</summary>
+public sealed class KeyStoreException(string message, string details) : Exception(message)
+{
+    /// <summary>Technical detail (command, exit code, stderr, install hints).</summary>
+    public string Details { get; } = details;
+
+    /// <summary>Summary + details, ready to drop into a copy-able text box.</summary>
+    public string FullText => $"{Message}\n\n{Details}";
 }

@@ -133,7 +133,7 @@ internal static class AiConfigWindow
 
         // Name
         panel.Children.Add(PluginUi.Label("Name (optional)"));
-        var nameBox = new TextBox { Text = card.Name, Watermark = "Anzeigename" };
+        var nameBox = new TextBox { Text = card.Name, PlaceholderText = "Anzeigename" };
         panel.Children.Add(nameBox);
 
         // Provider — only selectable (local, or cloud with a key)
@@ -152,7 +152,7 @@ internal static class AiConfigWindow
 
         // Server URL — local providers only
         var urlLabel = PluginUi.Label("Server-URL (lokaler Anbieter)");
-        var urlBox   = new TextBox { Text = card.ServerUrl, Watermark = "http://localhost:11434/v1" };
+        var urlBox   = new TextBox { Text = card.ServerUrl, PlaceholderText = "http://localhost:11434/v1" };
         panel.Children.Add(urlLabel);
         panel.Children.Add(urlBox);
 
@@ -160,7 +160,7 @@ internal static class AiConfigWindow
         panel.Children.Add(PluginUi.Label("Modell"));
         var modelBox = new AutoCompleteBox
         {
-            Text = card.Model, Watermark = "Modellname eingeben oder ↻ klicken",
+            Text = card.Model, PlaceholderText = "Modellname eingeben oder ↻ klicken",
             FilterMode = AutoCompleteFilterMode.Contains, MinimumPrefixLength = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
