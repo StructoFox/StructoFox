@@ -52,6 +52,9 @@ public static class StructogramConverter
         // few levels deep (sequential segments are iterated, not recursed).
         private int _budget = 500_000;   // overall block budget
         public readonly HashSet<string> Flagged = new();   // flowchart node ids that could not be structured
+        // Decision nodes that currently have a branch cut as a loop back-edge (so a single remaining branch is
+        // really a conditional early-exit / continue, to be rendered as an If rather than a plain statement).
+        private readonly HashSet<string> _cutFrom = new();
 
         public Ctx(FlowChartData fc)
         {
@@ -159,6 +162,24 @@ public static class StructogramConverter
                 { cur = One(cur); continue; }
 
                 var outs = Succ(cur);
+
+                // A decision whose OTHER branch was cut as a loop back-edge: the one remaining branch is a
+                // conditional early-exit / continue. Render it as an If (condition from the kept branch), with
+                // the implicit "otherwise" being the loop repeat. Without this it would flatten to a plain
+                // statement and the break/return would look unconditional.
+                if (outs.Count == 1 && _cutFrom.Contains(cur)
+                    && node.Kind is FlowNodeKind.Decision or FlowNodeKind.MultiDecision)
+                {
+                    blocks.Add(new NsBlock
+                    {
+                        Kind = NsBlockKind.If,
+                        Text = BranchCond(node.Text, outs[0].Label),
+                        Note = Ann(node.Id),
+                        TrueLabel = outs[0].Label,
+                        Body = ParseRegion(outs[0].ToId, stopId, depth + 1)
+                    });
+                    break;
+                }
 
                 if (outs.Count == 0) { blocks.Add(Stmt(node)); break; }
                 if (outs.Count == 1) { blocks.Add(Stmt(node)); cur = outs[0].ToId; continue; }
@@ -328,19 +349,35 @@ public static class StructogramConverter
             var L = _nodes.Keys.Where(n => n == header || (Reaches(header, n) && Reaches(n, header))).ToHashSet();
             var exitEdges = new List<(string from, string to)>();
             foreach (var n in L) foreach (var e in Succ(n)) if (!L.Contains(e.ToId)) exitEdges.Add((n, e.ToId));
-            var exitTests = exitEdges.Select(x => x.from).Distinct().ToList();
-            // A clean loop has exactly one exit (one decision leaving to one target). Otherwise it's
-            // irreducible — mark the offending exit DECISIONS (or the header if the loop never exits), so the
-            // flag points at where the loop actually leaks, not at the loop header.
-            if (exitEdges.Select(x => x.to).Distinct().Count() != 1 || exitTests.Count != 1)
+            // Edges leaving the loop to an End node are EARLY EXITS (return/break) — they render as DIN exit
+            // arrows (Jump) inside the body, NOT the loop's normal exit. Exclude them from the single-exit test
+            // so a loop with one real exit plus one or more early End-exits is still cleanly structurable.
+            var realExits = exitEdges
+                .Where(x => !(_nodes.TryGetValue(x.to, out var en) && en.Kind == FlowNodeKind.End)).ToList();
+            // If EVERY exit goes to an End (the loop's normal termination also ends the program), one of those
+            // End-exits is still the loop's real exit. Pick the one whose source is the back-edge test (has a
+            // branch returning to the header); the remaining End-exits stay early exits (Jumps).
+            if (realExits.Count == 0 && exitEdges.Count > 0)
+            {
+                // Prefer the header's own exit (pre-test while), then any back-edge test's exit, else the first.
+                var backTests = L.Where(n => Succ(n).Any(e => e.ToId == header)).ToHashSet();
+                var primary = exitEdges.FirstOrDefault(x => x.from == header);
+                if (primary.from is null) primary = exitEdges.FirstOrDefault(x => backTests.Contains(x.from));
+                realExits = [primary.from is null ? exitEdges[0] : primary];
+            }
+            var exitTests = realExits.Select(x => x.from).Distinct().ToList();
+            // A clean loop has exactly one (non-terminal) exit. Otherwise it's irreducible — mark the offending
+            // exit DECISIONS (or the header if the loop never exits normally), so the flag points at where the
+            // loop actually leaks, not at the loop header.
+            if (realExits.Select(x => x.to).Distinct().Count() != 1 || exitTests.Count != 1)
             {
                 if (exitTests.Count > 0) foreach (var f in exitTests) Flagged.Add(f);
                 else Flagged.Add(header);
                 return false;
             }
-            var exitTo = exitEdges[0].to;
+            var exitTo = realExits[0].to;
             exit = exitTo;
-            var xt = exitEdges[0].from;
+            var xt = realExits[0].from;
 
             WithLoopCut(header, () =>   // cut back-edge(s) into the header so the body parses acyclically
             {
@@ -372,8 +409,15 @@ public static class StructogramConverter
             foreach (var p in backSrcs)
                 for (int i = _succ[p].Count - 1; i >= 0; i--)
                     if (_succ[p][i].ToId == header) { removed.Add((p, _succ[p][i])); _succ[p].RemoveAt(i); }
+            // Remember which decision nodes lost a branch to this cut, so ParseRegion renders their remaining
+            // branch as a conditional (If) rather than collapsing it to a single-exit statement.
+            var addedCut = removed.Select(r => r.p).Distinct().Where(_cutFrom.Add).ToList();
             try { return body(); }
-            finally { foreach (var (p, e) in removed) _succ[p].Add(e); }
+            finally
+            {
+                foreach (var (p, e) in removed) _succ[p].Add(e);
+                foreach (var p in addedCut) _cutFrom.Remove(p);
+            }
         }
 
         // The loop condition text from a decision + the looping branch's label. A plain yes/no caption gets
@@ -386,6 +430,16 @@ public static class StructogramConverter
             if (string.IsNullOrWhiteSpace(label)) return decisionText;
             if (string.IsNullOrWhiteSpace(decisionText)) return label;
             return _yesNo.Contains(label.Trim().ToLowerInvariant()) ? $"{decisionText} = {label}" : label;
+        }
+
+        // The If-condition for taking a single kept branch of a decision (the other branch having looped back):
+        // an affirmative label keeps the wording, a negative label negates it, an expression label stands alone.
+        private static string BranchCond(string text, string label)
+        {
+            var l = (label ?? "").Trim().ToLowerInvariant();
+            if (new[] { "yes", "true", "ja", "y", "1", "wahr" }.Contains(l))    return text;
+            if (new[] { "no", "false", "nein", "n", "0", "falsch" }.Contains(l)) return $"!({text})";
+            return string.IsNullOrWhiteSpace(label) ? text : label;
         }
 
         private static (Edge t, Edge f) OrderTrueFalse(List<Edge> outs)
