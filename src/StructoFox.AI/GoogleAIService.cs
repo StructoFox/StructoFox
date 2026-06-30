@@ -33,6 +33,9 @@ public sealed class GoogleAIService : ICloudAIService
     public UsageInfo? LastUsage { get; private set; }
 
     /// <inheritdoc/>
+    public string? LastFinishReason { get; private set; }
+
+    /// <inheritdoc/>
     /// Gemini 1.5 / 2.0 models have a 1 M token context window.
     public int ContextWindowTokens => 1_000_000;
 
@@ -85,7 +88,11 @@ public sealed class GoogleAIService : ICloudAIService
         response.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-        return ExtractText(doc.RootElement);
+        var root = doc.RootElement;
+        LastFinishReason = FinishReason.Normalize(
+            root.TryGetProperty("candidates", out var cands) && cands.GetArrayLength() > 0
+            && cands[0].TryGetProperty("finishReason", out var frg) ? frg.GetString() : null);
+        return ExtractText(root);
     }
 
     public async IAsyncEnumerable<string> StreamAsync(

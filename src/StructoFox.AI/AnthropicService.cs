@@ -34,6 +34,9 @@ public sealed class AnthropicService : ICloudAIService
     public UsageInfo? LastUsage { get; private set; }
 
     /// <inheritdoc/>
+    public string? LastFinishReason { get; private set; }
+
+    /// <inheritdoc/>
     /// All current Claude models have a 200 K context window.
     public int ContextWindowTokens => 200_000;
 
@@ -81,10 +84,10 @@ public sealed class AnthropicService : ICloudAIService
         response.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-        return doc.RootElement
-                  .GetProperty("content")[0]
-                  .GetProperty("text")
-                  .GetString() ?? string.Empty;
+        var root = doc.RootElement;
+        LastFinishReason = FinishReason.Normalize(
+            root.TryGetProperty("stop_reason", out var sr) ? sr.GetString() : null);
+        return root.GetProperty("content")[0].GetProperty("text").GetString() ?? string.Empty;
     }
 
     public async IAsyncEnumerable<string> StreamAsync(

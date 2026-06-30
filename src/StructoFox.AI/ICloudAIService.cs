@@ -42,4 +42,23 @@ public interface ICloudAIService : IDisposable
     /// Used to compute the fill ratio of the usage bar.
     /// </summary>
     int ContextWindowTokens { get; }
+
+    /// <summary>Why the last <see cref="SendAsync"/> stopped, normalized: <c>"stop"</c> (finished naturally),
+    /// <c>"length"</c> (hit the output-token cap → the reply is TRUNCATED), or null if unknown. Lets callers
+    /// detect a cut-off response and continue it instead of emitting half-finished code.</summary>
+    string? LastFinishReason { get; }
+}
+
+/// <summary>Helpers for the normalized <see cref="ICloudAIService.LastFinishReason"/>.</summary>
+public static class FinishReason
+{
+    public const string Stop = "stop", Length = "length";
+
+    /// <summary>Maps any provider's raw stop/finish reason to <see cref="Stop"/> or <see cref="Length"/>.</summary>
+    public static string Normalize(string? raw) =>
+        raw is not null && (raw.Equals("length", StringComparison.OrdinalIgnoreCase)
+                         || raw.Equals("max_tokens", StringComparison.OrdinalIgnoreCase)
+                         || raw.Equals("MAX_TOKENS", StringComparison.OrdinalIgnoreCase)
+                         || raw.Equals("model_length", StringComparison.OrdinalIgnoreCase))
+            ? Length : Stop;
 }

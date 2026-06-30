@@ -2,6 +2,7 @@ using System.IO;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using StructoFox.AI;
 using StructoFox.Core;
 using StructoFox.Core.Models;
@@ -77,11 +78,21 @@ internal static class CodegenRunner
             go.IsEnabled = false; status.Text = "Erzeuge Gerüst…";
             try
             {
-                var written = await Task.Run(() => Generate(ctx.ProjectFolder!, card, lang, outDir,
-                    s => status.Text = s));
-                status.Text = $"✓ Fertig. {written} Datei(en) geschrieben.";
+                // report runs on a worker thread → marshal status updates back to the UI thread.
+                void Report(string s) => Dispatcher.UIThread.Post(() => status.Text = s);
+                var (written, incomplete) = await Task.Run(() =>
+                    Generate(ctx.ProjectFolder!, card, lang, outDir, Report));
+
+                var warn = incomplete.Count == 0 ? "" :
+                    $"\n\n⚠ {incomplete.Count} Datei(en) wurden trotz Fortsetzungs-Versuchen vom Modell nicht "
+                  + "vollständig beendet (Token-/Kontextgrenze):\n  • " + string.Join("\n  • ", incomplete)
+                  + "\nTipp: Max. Tokens auf der Modell-Karte erhöhen oder das Diagramm in kleinere "
+                  + "Funktionen aufteilen.";
+                status.Text = incomplete.Count == 0
+                    ? $"✓ Fertig. {written} Datei(en) geschrieben."
+                    : $"⚠ Fertig mit {incomplete.Count} unvollständigen Datei(en).";
                 ctx.ShowText("Generiertes Projekt",
-                    $"Geschrieben nach:\n{outDir}\n\n{written} Datei(en).\n\n"
+                    $"Geschrieben nach:\n{outDir}\n\n{written} Datei(en).{warn}\n\n"
                     + "C#: dotnet build   ·   C++: cmake . && cmake --build .");
             }
             catch (Exception ex) { status.Text = "⚠ " + ex.Message; }
@@ -94,17 +105,19 @@ internal static class CodegenRunner
 
     // ── Core generation ──────────────────────────────────────────────────────
 
-    static int Generate(string projFolder, AiModelCard card, ExportLanguage lang, string outDir,
-                        Action<string> report)
+    static (int count, List<string> incomplete) Generate(
+        string projFolder, AiModelCard card, ExportLanguage lang, string outDir, Action<string> report)
     {
         var entities    = AiCodegenPlugin.GatherEntities(projFolder);
         var projectName = new DirectoryInfo(projFolder).Name;
         var files       = ProjectExporter.Build(entities, lang, projectName, projFolder);
 
         using var svc = AiProviders.Create(card);
-        svc.MaxTokens = card.MaxTokens > 0 ? card.MaxTokens : 4096;
+        // A generous per-reply budget so most files finish in one call; the continuation loop covers the rest.
+        svc.MaxTokens = card.MaxTokens > 0 ? card.MaxTokens : 8192;
 
         int count = 0;
+        var incomplete = new List<string>();
         foreach (var (path, content) in files)
         {
             var full = Path.Combine(outDir, path);
@@ -114,14 +127,23 @@ internal static class CodegenRunner
             if (IsSource(path))
             {
                 report($"KI füllt {Path.GetFileName(path)} …");
-                try { finalContent = FillBodies(svc, lang, content).GetAwaiter().GetResult(); }
+                try
+                {
+                    var (text, complete) = FillBodies(svc, lang, content, report, Path.GetFileName(path))
+                        .GetAwaiter().GetResult();
+                    finalContent = text;
+                    if (!complete) incomplete.Add(path);
+                }
                 catch { /* keep the deterministic skeleton if the AI call fails */ }
             }
             File.WriteAllText(full, finalContent);
             count++;
         }
-        return count;
+        return (count, incomplete);
     }
+
+    // Hard cap on continuation rounds, so a runaway model can't loop forever.
+    const int MaxContinuations = 8;
 
     // A project/build file we never send to the AI; everything else is source to complete.
     static bool IsSource(string path)
@@ -132,28 +154,46 @@ internal static class CodegenRunner
         return ext is not (".csproj" or ".sln" or ".txt" or ".json" or ".xml");
     }
 
-    static async Task<string> FillBodies(ICloudAIService svc, ExportLanguage lang, string skeleton)
+    // Fills the bodies and GUARANTEES a complete file as far as the model allows: if the API stops because it
+    // hit the output-token cap (finish_reason "length"), we ask it to continue from where it left off and
+    // concatenate, until it finishes naturally or we reach MaxContinuations. Returns (source, wasCompleted).
+    static async Task<(string content, bool complete)> FillBodies(
+        ICloudAIService svc, ExportLanguage lang, string skeleton, Action<string> report, string fileName)
     {
         var system =
             $"You are a senior {lang} programmer. You complete code skeletons generated from program-flow "
             + "diagrams. The structure (namespaces, types, signatures) is FIXED — do not change it. Implement "
             + "every method/function body so the file compiles and behaves sensibly. Reply with ONLY the complete "
             + "source file: no markdown fences, no commentary.";
-        var user = "Complete this skeleton:\n\n" + skeleton;
 
-        var reply = await svc.SendAsync(new[] { new CloudAIMessage("user", user) }, system);
-        return StripFences(reply);
+        var messages = new List<CloudAIMessage> { new("user", "Complete this skeleton:\n\n" + skeleton) };
+        var sb       = new System.Text.StringBuilder();
+
+        var reply = await svc.SendAsync(messages, system);
+        sb.Append(reply);
+
+        int rounds = 0;
+        while (svc.LastFinishReason == FinishReason.Length && rounds++ < MaxContinuations)
+        {
+            report($"KI setzt {fileName} fort … ({rounds})");
+            messages.Add(new CloudAIMessage("assistant", reply));
+            messages.Add(new CloudAIMessage("user",
+                "Continue the source code EXACTLY where you left off. Do not repeat anything already written, "
+              + "do not add explanations or markdown fences — output only the remaining code."));
+            reply = await svc.SendAsync(messages, system);
+            sb.Append(reply);
+        }
+
+        var complete = svc.LastFinishReason != FinishReason.Length;   // false only if still truncated at the cap
+        return (StripFences(sb.ToString()), complete);
     }
 
-    // Models often wrap code in ``` fences despite instructions — remove them.
+    // Remove any markdown fence lines (```), wherever they appear — robust against fences that show up at the
+    // seams when a truncated reply is continued across several calls.
     static string StripFences(string s)
     {
-        var t = s.Trim();
-        if (!t.StartsWith("```")) return s;
-        var nl = t.IndexOf('\n');
-        if (nl >= 0) t = t[(nl + 1)..];                 // drop opening ```lang line
-        var close = t.LastIndexOf("```", StringComparison.Ordinal);
-        if (close >= 0) t = t[..close];
-        return t.TrimEnd();
+        var lines = s.Replace("\r\n", "\n").Split('\n');
+        var kept  = lines.Where(l => !l.TrimStart().StartsWith("```")).ToArray();
+        return kept.Length == lines.Length ? s : string.Join("\n", kept).Trim('\n');
     }
 }

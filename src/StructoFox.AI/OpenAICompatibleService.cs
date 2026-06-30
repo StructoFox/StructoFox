@@ -23,6 +23,9 @@ public abstract class OpenAICompatibleService : ICloudAIService
     public UsageInfo? LastUsage { get; private set; }
 
     /// <inheritdoc/>
+    public string? LastFinishReason { get; private set; }
+
+    /// <inheritdoc/>
     /// Override in subclasses that know their model's context window precisely.
     public virtual int ContextWindowTokens => 128_000;
 
@@ -75,11 +78,10 @@ public abstract class OpenAICompatibleService : ICloudAIService
         response.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-        return doc.RootElement
-                  .GetProperty("choices")[0]
-                  .GetProperty("message")
-                  .GetProperty("content")
-                  .GetString() ?? string.Empty;
+        var choice = doc.RootElement.GetProperty("choices")[0];
+        LastFinishReason = FinishReason.Normalize(
+            choice.TryGetProperty("finish_reason", out var fr) ? fr.GetString() : null);
+        return choice.GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
     }
 
     public async IAsyncEnumerable<string> StreamAsync(
