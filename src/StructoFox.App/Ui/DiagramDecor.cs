@@ -27,27 +27,15 @@ public static class DiagramDecor
         if (BuildTitle(title, style, onEditTitle) is { } ttl) items.Add((style.TitlePosition, ttl));
         if (BuildInfo(style)  is { } info)  items.Add((style.InfoPosition,  info));
 
-        // Space-reserving bands around the diagram (Top/Bottom = horizontal rows, Left/Right = vertical stacks).
+        // Space-reserving header/footer bands; each has three slots (left / centre / right).
         var dock = new DockPanel { LastChildFill = true };
-        AddBand(dock, Dock.Top,    items, DecorPos.Top);
-        AddBand(dock, Dock.Bottom, items, DecorPos.Bottom);
-        AddBand(dock, Dock.Left,   items, DecorPos.Left);
-        AddBand(dock, Dock.Right,  items, DecorPos.Right);
+        if (BuildBand(items, top: true)  is { } topBand)  { DockPanel.SetDock(topBand, Dock.Top);    dock.Children.Add(topBand); }
+        if (BuildBand(items, top: false) is { } botBand)  { DockPanel.SetDock(botBand, Dock.Bottom); dock.Children.Add(botBand); }
         dock.Children.Add(diagram);   // fills the centre
 
-        // Overlay layer (faint watermark + any Center-positioned decorations), click-through.
+        // Overlay layer: the faint, centred watermark behind everything; click-through.
         var overlay = new Panel { IsHitTestVisible = false };
         AddWatermark(overlay, style);
-        var centre = items.Where(i => i.pos == DecorPos.Center).Select(i => i.ctrl).ToList();
-        if (centre.Count > 0)
-        {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12,
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            foreach (var c in centre) row.Children.Add(c);
-            // The title in the centre may want to be editable, so this overlay piece opts back into hit-testing.
-            row.IsHitTestVisible = true;
-            overlay.Children.Add(row);
-        }
 
         var outer = new Grid
         {
@@ -60,21 +48,37 @@ public static class DiagramDecor
         return outer;
     }
 
-    static void AddBand(DockPanel dock, Dock side, List<(DecorPos pos, Control ctrl)> items, DecorPos pos)
+    static bool IsTop(DecorPos p)  => p is DecorPos.TopLeft or DecorPos.TopCenter or DecorPos.TopRight;
+    static HorizontalAlignment HAlign(DecorPos p) => p switch
     {
-        var here = items.Where(i => i.pos == pos).Select(i => i.ctrl).ToList();
-        if (here.Count == 0) return;
-        bool horizontal = pos is DecorPos.Top or DecorPos.Bottom;
-        var band = new StackPanel
+        DecorPos.TopLeft  or DecorPos.BottomLeft  => HorizontalAlignment.Left,
+        DecorPos.TopRight or DecorPos.BottomRight => HorizontalAlignment.Right,
+        _                                         => HorizontalAlignment.Center,
+    };
+
+    // Builds one header/footer band: a 3-column grid (left / centre / right). Items in the same slot stack
+    // horizontally in collision order. Returns null if the band has no items.
+    static Control? BuildBand(List<(DecorPos pos, Control ctrl)> items, bool top)
+    {
+        var here = items.Where(i => IsTop(i.pos) == top).ToList();
+        if (here.Count == 0) return null;
+
+        var grid = new Grid { Margin = new(12, 8, 12, 8) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+
+        foreach (var (h, col) in new[] { (HorizontalAlignment.Left, 0), (HorizontalAlignment.Center, 1), (HorizontalAlignment.Right, 2) })
         {
-            Orientation = horizontal ? Orientation.Horizontal : Orientation.Vertical,
-            Spacing = 12, Margin = new(12, 8, 12, 8),
-            HorizontalAlignment = horizontal ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
-            VerticalAlignment   = horizontal ? VerticalAlignment.Stretch  : VerticalAlignment.Center,
-        };
-        foreach (var c in here) band.Children.Add(c);
-        DockPanel.SetDock(band, side);
-        dock.Children.Add(band);
+            var slot = here.Where(i => HAlign(i.pos) == h).Select(i => i.ctrl).ToList();
+            if (slot.Count == 0) continue;
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, HorizontalAlignment = h,
+                VerticalAlignment = VerticalAlignment.Center };
+            foreach (var c in slot) row.Children.Add(c);
+            row.SetValue(Grid.ColumnProperty, col);
+            grid.Children.Add(row);
+        }
+        return grid;
     }
 
     // ── Pieces ───────────────────────────────────────────────────────────────

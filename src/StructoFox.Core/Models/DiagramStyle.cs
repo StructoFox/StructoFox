@@ -33,7 +33,7 @@ public class DiagramStyle
     public bool ShowTitle { get; set; } = false;
 
     /// <summary>Where the title heading sits on the plan (a reserved band, except Center which overlays).</summary>
-    public DecorPos TitlePosition { get; set; } = DecorPos.Top;
+    public DecorPos TitlePosition { get; set; } = DecorPos.TopCenter;
 
     /// <summary>Title font size in px.</summary>
     public double TitleFontSize { get; set; } = 20;
@@ -58,12 +58,12 @@ public class DiagramStyle
     public string LogoPath { get; set; } = "";
 
     /// <summary>Where the logo sits on the plan (shares the 5-position system with title and info).</summary>
-    public DecorPos LogoPosition { get; set; } = DecorPos.Top;
+    public DecorPos LogoPosition { get; set; } = DecorPos.TopLeft;
 
     // ── Info field (an optional "title block" / Schriftfeld for presentation) ─────────────────────────────
     // Only non-empty rows are shown. Like the title, it sits in a reserved band (or overlays at Center).
     public bool   ShowInfo        { get; set; } = false;
-    public DecorPos InfoPosition  { get; set; } = DecorPos.Bottom;
+    public DecorPos InfoPosition  { get; set; } = DecorPos.BottomCenter;
     public string InfoName        { get; set; } = "";   // name of the structogram / PAP / function
     public string InfoProject     { get; set; } = "";
     public string InfoProjectNo   { get; set; } = "";
@@ -94,10 +94,10 @@ public class DiagramStyle
 /// <summary>How the alignment grid is rendered.</summary>
 public enum GridLineStyle { Lines, Dashed, Dots }
 
-/// <summary>Where a decoration (title / logo / info field) sits on the plan. Top/Bottom/Left/Right reserve an
-/// empty band around the diagram; Center overlays it. Several decorations sharing a position are laid out in
-/// order (logo, title, info).</summary>
-public enum DecorPos { Top, Bottom, Left, Right, Center }
+/// <summary>Where a decoration (title / logo / info field) sits on the plan: a top or bottom band, aligned
+/// left / centre / right. The chosen band reserves an empty strip so decorations never cover the drawing.
+/// Several decorations sharing the exact same slot are laid out in order (logo, title, info).</summary>
+public enum DecorPos { TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight }
 
 /// <summary>
 /// Optional per-element appearance overrides (one block / node). Every field is nullable and
