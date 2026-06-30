@@ -195,7 +195,7 @@ public class StructogramWindow : Window
             VerticalAlignment   = VerticalAlignment.Top,
             MinWidth            = 360,
             Background          = _bgBrush,
-            Padding             = new(8),
+            Padding             = new(22),   // breathing room so the structogram doesn't touch the canvas edge
         };
         // Wrap in a LayoutTransformControl so zoom scales the scrollable extent (not just the rendering).
         _zoomHost = new LayoutTransformControl
@@ -522,16 +522,12 @@ public class StructogramWindow : Window
         Grid.SetRow(header, 0);
         grid.Children.Add(header);
 
-        // Two branch columns (split at the centre, under the apex).
-        var cols = new Grid();
-        cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-        cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        // Two branch columns — equal width, each at least as wide as its content (no clipping).
+        var cols = new EqualColumns();
         var thenCol = RenderSequence(b.Body);
         var elseCol = RenderSequence(b.Else);
-        Grid.SetColumn(thenCol, 0);
-        var elseWrap = LeftBorder(elseCol); Grid.SetColumn(elseWrap, 1);
         cols.Children.Add(thenCol);
-        cols.Children.Add(elseWrap);
+        cols.Children.Add(LeftBorder(elseCol));
         var colsWrap = TopBorder(cols); Grid.SetRow(colsWrap, 1);
         grid.Children.Add(colsWrap);
 
@@ -590,16 +586,12 @@ public class StructogramWindow : Window
         header.Children.Add(new HeaderDiagonals { Stroke = _lineBrush, StrokeThickness = _style.LineThickness, TwoLines = false });
         outer.Children.Add(header);
 
-        // Body columns under the labels, split by vertical dividers.
-        var cols = new Grid();
-        for (int i = 0; i < b.Arms.Count; i++)
-            cols.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        // Body columns under the labels — equal width, each at least as wide as its content (no clipping).
+        var cols = new EqualColumns();
         for (int i = 0; i < b.Arms.Count; i++)
         {
             var body = RenderSequence(b.Arms[i].Body);
-            var colWrap = i == 0 ? body : LeftBorder(body);
-            Grid.SetColumn(colWrap, i);
-            cols.Children.Add(colWrap);
+            cols.Children.Add(i == 0 ? body : LeftBorder(body));
         }
         outer.Children.Add(TopBorder(cols));
         return outer;
@@ -806,6 +798,33 @@ public class StructogramWindow : Window
 /// <summary>DIN 66261 IF header layout: the condition centred at the top (in the downward triangle), with the
 /// then/else captions in the two lower corners. Children: [0]=condition, [1]=true caption, [2]=false caption.
 /// The diagonals themselves are drawn by an overlaid <see cref="HeaderDiagonals"/>.</summary>
+/// <summary>Lays children out in N EQUAL columns, each at least as wide as the WIDEST child — so DIN if/case
+/// branches stay equal-width (symmetric) yet never clip the wider branch (the bug with plain Grid <c>*</c>
+/// columns, which split the summed width and squeezed the larger branch). Each column fills the full height.</summary>
+internal class EqualColumns : Panel
+{
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        double colW = 0, h = 0;
+        foreach (var c in Children)
+        {
+            c.Measure(new Size(double.PositiveInfinity, availableSize.Height));
+            colW = Math.Max(colW, c.DesiredSize.Width);
+            h    = Math.Max(h, c.DesiredSize.Height);
+        }
+        return new Size(colW * Math.Max(1, Children.Count), h);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        int n = Math.Max(1, Children.Count);
+        double cw = finalSize.Width / n;
+        for (int i = 0; i < Children.Count; i++)
+            Children[i].Arrange(new Rect(i * cw, 0, cw, finalSize.Height));
+        return finalSize;
+    }
+}
+
 internal class IfHeaderPanel : Panel
 {
     protected override Size MeasureOverride(Size availableSize)
