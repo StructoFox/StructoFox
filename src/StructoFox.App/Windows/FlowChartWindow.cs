@@ -1054,6 +1054,14 @@ public class FlowChartWindow : Window
     // Appends a new node of the given kind (with an optional DIN symbol variant) at a cascading offset.
     void AddNode(FlowNodeKind kind, FlowSymbol sym = FlowSymbol.Auto)
     {
+        // One entry point per flowchart: a PAP maps to exactly one function for code generation, so a second
+        // Start node is refused (multiple diagrams per canvas is a future presentation/export feature).
+        if (kind == FlowNodeKind.Start && _data.Nodes.Any(n => n.Kind == FlowNodeKind.Start))
+        {
+            _ = MessageDialog.Show(this, Loc.S("Flow_OnlyOneStart"), Loc.S("Flow_Start"));
+            return;
+        }
+
         var at = SpawnPoint();
         var (dw, dh) = DefaultNodeSize(kind, sym);
         var node = new FlowNode
