@@ -30,7 +30,7 @@ public class DiagramDecorDialog : Window
     // Info field ("title block").
     readonly CheckBox _showInfo  = new();
     readonly ComboBox _infoPos   = Ui.Combo(140);
-    readonly TextBox  _infoName      = new();
+    readonly TextBox  _infoName      = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 46 };
     readonly TextBox  _infoProject   = new();
     readonly TextBox  _infoProjectNo = new();
     readonly TextBox  _infoVersion   = new();
@@ -38,10 +38,11 @@ public class DiagramDecorDialog : Window
     readonly TextBox  _infoAuthor    = new();
     readonly TextBox  _infoExtra     = new() { AcceptsReturn = true, MinHeight = 56, TextWrapping = TextWrapping.Wrap };
 
-    public static Task<string?> Show(Window owner, string title, DiagramStyle style)
-        => new DiagramDecorDialog(title, style).ShowDialog<string?>(owner);
+    public static Task<string?> Show(Window owner, string title, DiagramStyle style,
+        Func<(DiagramStyle style, string title)?>? fromPap = null)
+        => new DiagramDecorDialog(title, style, fromPap).ShowDialog<string?>(owner);
 
-    DiagramDecorDialog(string title, DiagramStyle style)
+    DiagramDecorDialog(string title, DiagramStyle style, Func<(DiagramStyle style, string title)?>? fromPap)
     {
         _style = style;
         Title                 = Loc.S("Decor_Title");
@@ -97,6 +98,14 @@ public class DiagramDecorDialog : Window
         var ok = Ui.Btn(Loc.S("Common_OK")); ok.IsDefault = true; ok.Click += (_, _) => Apply();
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true; cancel.Click += (_, _) => Close(null);
 
+        // Optional "get from flowchart": copies the matching PAP's whole header (contents + positions) here.
+        Button? fromPapBtn = null;
+        if (fromPap is not null)
+        {
+            fromPapBtn = Ui.Btn(Loc.S("Decor_FromPap"));
+            fromPapBtn.Click += (_, _) => { if (fromPap() is { } src) ImportFrom(src.style, src.title); };
+        }
+
         // A text field followed by its action buttons: the field fills, the buttons keep their full width
         // (a plain horizontal StackPanel squeezed the buttons in the fixed-width window — "Durchsuchen" → "L").
         static Grid FieldRow(Control field, params Control[] buttons)
@@ -142,10 +151,7 @@ public class DiagramDecorDialog : Window
 
         var infoHeader = Label(Loc.S("Decor_InfoSection")); infoHeader.FontWeight = FontWeight.SemiBold;
 
-        Content = new ScrollViewer
-        {
-            MaxHeight = 680, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = new StackPanel
+        var panel = new StackPanel
         {
             Margin = new(18), Spacing = 10,
             Children =
@@ -173,8 +179,26 @@ public class DiagramDecorDialog : Window
                 Label(Loc.S("Decor_InfoExtra")), _infoExtra,
                 new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new(0, 6, 0, 0), Children = { cancel, ok } },
             },
-        },
         };
+        if (fromPapBtn is not null) panel.Children.Insert(0, fromPapBtn);   // "get from flowchart" at the top
+
+        Content = new ScrollViewer { MaxHeight = 680, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = panel };
+    }
+
+    // Copies a whole header (the PAP's) into the dialog controls: contents and positions.
+    void ImportFrom(DiagramStyle s, string title)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        _title.Text = title;
+        _showTitle.IsChecked = s.ShowTitle; _titlePos.SelectedItem = s.TitlePosition;
+        _titleSize.Text = s.TitleFontSize.ToString(inv); _titleBold.IsChecked = s.TitleBold;
+        if (string.IsNullOrWhiteSpace(s.TitleColor)) _titleColor.Inherit = true;
+        else { _titleColor.Inherit = false; try { _titleColor.Color = Color.Parse(s.TitleColor); } catch { } }
+        _watermark.Text = s.Watermark; _watermarkImg.Text = s.WatermarkImage; _wmAngle.Text = s.WatermarkAngle.ToString(inv);
+        _logo.Text = s.LogoPath; _corner.SelectedItem = s.LogoPosition;
+        _showInfo.IsChecked = s.ShowInfo; _infoPos.SelectedItem = s.InfoPosition;
+        _infoName.Text = s.InfoName; _infoProject.Text = s.InfoProject; _infoProjectNo.Text = s.InfoProjectNo;
+        _infoVersion.Text = s.InfoVersion; _infoDate.Text = s.InfoDate; _infoAuthor.Text = s.InfoAuthor; _infoExtra.Text = s.InfoExtra;
     }
 
     // Writes the edits back into the style and closes with the (possibly changed) title.

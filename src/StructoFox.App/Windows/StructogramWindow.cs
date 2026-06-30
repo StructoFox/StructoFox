@@ -293,7 +293,9 @@ public class StructogramWindow : Window
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
     async Task OpenDecor()
     {
-        var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style);
+        // Offer to pull the whole header from the matching flowchart (same function/method key).
+        var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style,
+            () => { var fc = FlowChartService.Load(_projFolder, _key); return (fc.Style, fc.Title); });
         if (newTitle is null) return;
         _data.Title = newTitle;
         Save();

@@ -223,7 +223,7 @@ public static class DiagramDecor
         VerticalAlignment = VerticalAlignment.Stretch,
         Child = new StackPanel
         {
-            VerticalAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,   // label sits top-left at the line, like every cell
             Children =
             {
                 new TextBlock { Text = Loc.S(labelKey), FontWeight = FontWeight.Bold, FontSize = 7, Foreground = text },

@@ -356,9 +356,9 @@ public static class Loc
         ["NodeTxt_Strike"]             = "Strikethrough",
 
         // Diagram decoration (title / watermark / logo)
-        ["Decor_Title"]      = "Plan decoration",
-        ["Decor_Open"]       = "🏷 Decoration…",
-        ["Decor_OpenTip"]    = "Title, watermark and logo on the plan",
+        ["Decor_Title"]      = "Header",
+        ["Decor_Open"]       = "🏷 Header…",
+        ["Decor_OpenTip"]    = "Title, info field, watermark and logo on the plan",
         ["Decor_TitleText"]  = "Title:",
         ["Decor_ShowTitle"]  = "Show the title on the plan",
         ["Decor_TitlePos"]   = "Position:",
@@ -372,6 +372,7 @@ public static class Loc
         ["Decor_Logo"]       = "Logo image:",
         ["Decor_Browse"]     = "Browse…",
         ["Decor_ClearLogo"]  = "Clear",
+        ["Decor_FromPap"]    = "⤵ Get header from the flowchart",
         ["Decor_Corner"]     = "Logo position:",
         ["Decor_InfoSection"]  = "Info field (title block)",
         ["Decor_ShowInfo"]     = "Show the info field on the plan",
@@ -781,9 +782,9 @@ public static class Loc
         ["NodeTxt_Strike"]             = "Durchgestrichen",
 
         // Diagramm-Deko (Titel / Wasserzeichen / Logo)
-        ["Decor_Title"]      = "Plan-Dekoration",
-        ["Decor_Open"]       = "🏷 Dekoration…",
-        ["Decor_OpenTip"]    = "Titel, Wasserzeichen und Logo auf dem Plan",
+        ["Decor_Title"]      = "Header",
+        ["Decor_Open"]       = "🏷 Header…",
+        ["Decor_OpenTip"]    = "Titel, Info-Feld, Wasserzeichen und Logo auf dem Plan",
         ["Decor_TitleText"]  = "Titel:",
         ["Decor_ShowTitle"]  = "Titel auf dem Plan anzeigen",
         ["Decor_TitlePos"]   = "Position:",
@@ -797,6 +798,7 @@ public static class Loc
         ["Decor_Logo"]       = "Logo-Bild:",
         ["Decor_Browse"]     = "Durchsuchen…",
         ["Decor_ClearLogo"]  = "Leeren",
+        ["Decor_FromPap"]    = "⤵ Header vom PAP holen",
         ["Decor_Corner"]     = "Logo-Position:",
         ["Decor_InfoSection"]  = "Info-Feld (Schriftfeld)",
         ["Decor_ShowInfo"]     = "Info-Feld auf dem Plan anzeigen",
