@@ -9,40 +9,32 @@ using StructoFox.Core.Models;
 namespace StructoFox.App;
 
 /// <summary>
-/// Composes a diagram with its decoration — an optional title, an info "title block", a faint watermark and a
-/// logo — into one canvas the way it will print / export. Title, logo and info each sit at a chosen position
-/// (Top/Bottom/Left/Right reserve an EMPTY band around the diagram so nothing overlaps the drawing; Center
-/// overlays it). Several decorations sharing a position are laid out in order: logo, title, info. The watermark
-/// is always a faint centred overlay behind everything. The fox's letterhead, basically.
+/// Composes a diagram with its decoration — title, an info "title block", a faint watermark and a logo — into
+/// one canvas the way it will print / export. Each decoration sits in a top or bottom band, aligned left/centre/
+/// right (six slots), and the band reserves an empty strip so nothing covers the drawing. Several decorations
+/// in the same slot lay out in order: logo, title, info. When a logo or title shares a slot with the info field,
+/// they're drawn as extra framed cells of the same title block — engineering-office style.
 /// </summary>
 public static class DiagramDecor
 {
-    /// <summary>Wraps <paramref name="diagram"/> with the configured decoration, reserving space for edge
-    /// decorations so they never cover the drawing. Returns the composed control to host on the canvas.</summary>
+    enum Kind { Logo, Title, Info }
+
     public static Control Compose(Control diagram, string title, DiagramStyle style, Action? onEditTitle = null)
     {
-        // Collect the positioned decorations in their collision order: logo, then title, then info.
-        var items = new List<(DecorPos pos, Control ctrl)>();
-        if (BuildLogo(style)  is { } logo)  items.Add((style.LogoPosition,  logo));
-        if (BuildTitle(title, style, onEditTitle) is { } ttl) items.Add((style.TitlePosition, ttl));
-        if (BuildInfo(style)  is { } info)  items.Add((style.InfoPosition,  info));
+        var items = new List<(DecorPos pos, Kind kind)>();
+        if (HasLogo(style))               items.Add((style.LogoPosition,  Kind.Logo));
+        if (style.ShowTitle && !string.IsNullOrWhiteSpace(title)) items.Add((style.TitlePosition, Kind.Title));
+        if (HasInfo(style))               items.Add((style.InfoPosition,  Kind.Info));
 
-        // Space-reserving header/footer bands; each has three slots (left / centre / right).
         var dock = new DockPanel { LastChildFill = true };
-        if (BuildBand(items, top: true)  is { } topBand)  { DockPanel.SetDock(topBand, Dock.Top);    dock.Children.Add(topBand); }
-        if (BuildBand(items, top: false) is { } botBand)  { DockPanel.SetDock(botBand, Dock.Bottom); dock.Children.Add(botBand); }
-        dock.Children.Add(diagram);   // fills the centre
+        if (BuildBand(items, true,  title, style, onEditTitle)  is { } topBand) { DockPanel.SetDock(topBand, Dock.Top);    dock.Children.Add(topBand); }
+        if (BuildBand(items, false, title, style, onEditTitle)  is { } botBand) { DockPanel.SetDock(botBand, Dock.Bottom); dock.Children.Add(botBand); }
+        dock.Children.Add(diagram);
 
-        // Overlay layer: the faint, centred watermark behind everything; click-through.
         var overlay = new Panel { IsHitTestVisible = false };
         AddWatermark(overlay, style);
 
-        var outer = new Grid
-        {
-            // The whole composed area carries the diagram's background, so the reserved decoration bands read
-            // as part of the canvas (the canvas simply grows to make room) rather than a frame around it.
-            Background = new SolidColorBrush(ParseOr(style.BackgroundColor, Colors.White)),
-        };
+        var outer = new Grid { Background = new SolidColorBrush(ParseOr(style.BackgroundColor, Colors.White)) };
         outer.Children.Add(dock);
         outer.Children.Add(overlay);
         return outer;
@@ -56,29 +48,68 @@ public static class DiagramDecor
         _                                         => HorizontalAlignment.Center,
     };
 
-    // Builds one header/footer band: a 3-column grid (left / centre / right). Items in the same slot stack
-    // horizontally in collision order. Returns null if the band has no items.
-    static Control? BuildBand(List<(DecorPos pos, Control ctrl)> items, bool top)
+    // One header/footer band: a 3-column grid (left/centre/right). Returns null if empty.
+    static Control? BuildBand(List<(DecorPos pos, Kind kind)> items, bool top, string title, DiagramStyle style, Action? onEdit)
     {
         var here = items.Where(i => IsTop(i.pos) == top).ToList();
         if (here.Count == 0) return null;
 
         var grid = new Grid { Margin = new(12, 8, 12, 8) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        for (int i = 0; i < 3; i++) grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
 
         foreach (var (h, col) in new[] { (HorizontalAlignment.Left, 0), (HorizontalAlignment.Center, 1), (HorizontalAlignment.Right, 2) })
         {
-            var slot = here.Where(i => HAlign(i.pos) == h).Select(i => i.ctrl).ToList();
+            var slot = here.Where(i => HAlign(i.pos) == h).Select(i => i.kind).ToList();
             if (slot.Count == 0) continue;
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, HorizontalAlignment = h,
-                VerticalAlignment = VerticalAlignment.Center };
-            foreach (var c in slot) row.Children.Add(c);
-            row.SetValue(Grid.ColumnProperty, col);
-            grid.Children.Add(row);
+            var ctrl = BuildSlot(slot, title, style, onEdit);
+            if (ctrl is null) continue;
+            ctrl.HorizontalAlignment = h;
+            ctrl.SetValue(Grid.ColumnProperty, col);
+            grid.Children.Add(ctrl);
         }
         return grid;
+    }
+
+    // Builds the controls for one slot (in collision order logo→title→info). If the info field shares the slot
+    // with a logo/title, they become extra framed cells of the same title block; otherwise a simple spaced row.
+    static Control? BuildSlot(List<Kind> kinds, string title, DiagramStyle style, Action? onEdit)
+    {
+        var text = new SolidColorBrush(ParseOr(style.TextColor, Colors.Black));
+        var line = new SolidColorBrush(ParseOr(style.LineColor, Colors.Gray));
+
+        if (kinds.Contains(Kind.Info) && kinds.Count > 1)
+        {
+            // One continuous title block: logo / title as bordered cells, then the info table inner.
+            var rowp = new StackPanel { Orientation = Orientation.Horizontal };
+            foreach (var k in kinds)
+            {
+                if (k == Kind.Logo && BuildLogo(style) is { } lg)
+                    rowp.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
+                        Padding = new(8), Child = lg, VerticalAlignment = VerticalAlignment.Stretch });
+                else if (k == Kind.Title && BuildTitle(title, style, onEdit) is { } tt)
+                    rowp.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
+                        Padding = new(10, 6), Child = tt, VerticalAlignment = VerticalAlignment.Stretch });
+                else if (k == Kind.Info)
+                    rowp.Children.Add(InfoInner(style, text, line));
+            }
+            return new Border { BorderBrush = line, BorderThickness = new(1), Child = rowp,
+                Background = new SolidColorBrush(Color.FromArgb(0x14, 0x80, 0x80, 0x80)) };
+        }
+
+        // No merge: a simple spaced row of whatever is here (each piece keeps its own look).
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var k in kinds)
+        {
+            Control? c = k switch
+            {
+                Kind.Logo  => BuildLogo(style),
+                Kind.Title => BuildTitle(title, style, onEdit),
+                Kind.Info  => InfoBox(style, text, line),
+                _          => null,
+            };
+            if (c is not null) row.Children.Add(c);
+        }
+        return row.Children.Count == 0 ? null : row;
     }
 
     // ── Pieces ───────────────────────────────────────────────────────────────
@@ -105,9 +136,11 @@ public static class DiagramDecor
         return heading;
     }
 
+    static bool HasLogo(DiagramStyle s) => !string.IsNullOrWhiteSpace(s.LogoPath) && File.Exists(s.LogoPath);
+
     static Control? BuildLogo(DiagramStyle style)
     {
-        if (string.IsNullOrWhiteSpace(style.LogoPath) || !File.Exists(style.LogoPath)) return null;
+        if (!HasLogo(style)) return null;
         try
         {
             return new Image { Source = new Bitmap(style.LogoPath), Width = 96, Stretch = Stretch.Uniform,
@@ -116,73 +149,73 @@ public static class DiagramDecor
         catch { return null; }
     }
 
-    // The optional "title block" / Schriftfeld: a line-separated table. Name fills the left; the right side has
-    // ProjectNo + Project on top and Version + Date + Author below; an optional free note spans the bottom.
-    // Each cell shows its label small+bold on top, the value larger underneath.
-    static Control? BuildInfo(DiagramStyle style)
+    static bool HasInfo(DiagramStyle s) => s.ShowInfo && (
+        !string.IsNullOrWhiteSpace(s.InfoName) || !string.IsNullOrWhiteSpace(s.InfoProject) ||
+        !string.IsNullOrWhiteSpace(s.InfoProjectNo) || !string.IsNullOrWhiteSpace(s.InfoVersion) ||
+        !string.IsNullOrWhiteSpace(s.InfoDate) || !string.IsNullOrWhiteSpace(s.InfoAuthor) ||
+        !string.IsNullOrWhiteSpace(s.InfoExtra));
+
+    // The info field wrapped in its own outer frame (used when it stands alone in a slot).
+    static Control InfoBox(DiagramStyle style, IBrush text, IBrush line) => new Border
     {
-        if (!style.ShowInfo) return null;
+        BorderBrush = line, BorderThickness = new(1), Child = InfoInner(style, text, line),
+        Background = new SolidColorBrush(Color.FromArgb(0x14, 0x80, 0x80, 0x80)),
+        VerticalAlignment = VerticalAlignment.Center,
+    };
 
-        var text = new SolidColorBrush(ParseOr(style.TextColor, Colors.Black));
-        var line = new SolidColorBrush(ParseOr(style.LineColor, Colors.Gray));
-
-        // One cell: label (bold, size 7) on a top line, value (size 14) on the line below.
-        Control Cell(string labelKey, string value, Thickness sep) => new Border
-        {
-            BorderBrush = line, BorderThickness = sep, Padding = new(6, 3, 6, 4),
-            Child = new StackPanel
-            {
-                Children =
-                {
-                    new TextBlock { Text = Loc.S(labelKey), FontWeight = FontWeight.Bold, FontSize = 7, Foreground = text },
-                    new TextBlock { Text = value, FontSize = 14, Foreground = text, TextWrapping = TextWrapping.Wrap,
-                        MinHeight = 18 },
-                },
-            },
-        };
-
-        Grid Cols(string defs, params Control[] cells)
-        {
-            var g = new Grid();
-            foreach (var d in defs.Split(',')) g.ColumnDefinitions.Add(new ColumnDefinition(
-                d == "auto" ? GridLength.Auto : new GridLength(double.Parse(d), GridUnitType.Star)));
-            for (int i = 0; i < cells.Length; i++) { cells[i].SetValue(Grid.ColumnProperty, i); g.Children.Add(cells[i]); }
-            return g;
-        }
-
-        // Right block: two stacked rows, separated by a horizontal line.
-        var rightTop = Cols("1,1",
-            Cell("Decor_InfoProjectNo", style.InfoProjectNo, new(0, 0, 1, 0)),
-            Cell("Decor_InfoProject",   style.InfoProject,   new(0)));
-        var rightBottom = Cols("1,1,1",
-            Cell("Decor_InfoVersion", style.InfoVersion, new(0, 0, 1, 0)),
-            Cell("Decor_InfoDate",    style.InfoDate,    new(0, 0, 1, 0)),
-            Cell("Decor_InfoAuthor",  style.InfoAuthor,  new(0)));
+    // The info field's INNER content (no outer frame), so it can be embedded into a merged title block.
+    static Control InfoInner(DiagramStyle style, IBrush text, IBrush line)
+    {
+        var rightTop = Cols(line, "1,1",
+            Cell("Decor_InfoProjectNo", style.InfoProjectNo, new(0, 0, 1, 0), text, line),
+            Cell("Decor_InfoProject",   style.InfoProject,   new(0), text, line));
+        var rightBottom = Cols(line, "1,1,1",
+            Cell("Decor_InfoVersion", style.InfoVersion, new(0, 0, 1, 0), text, line),
+            Cell("Decor_InfoDate",    style.InfoDate,    new(0, 0, 1, 0), text, line),
+            Cell("Decor_InfoAuthor",  style.InfoAuthor,  new(0), text, line));
         var rightTopWrap = new Border { BorderBrush = line, BorderThickness = new(0, 0, 0, 1), Child = rightTop };
+
         var right = new Grid();
         right.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         right.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         rightTopWrap.SetValue(Grid.RowProperty, 0); right.Children.Add(rightTopWrap);
         rightBottom.SetValue(Grid.RowProperty, 1); right.Children.Add(rightBottom);
 
-        // Name fills the left, vertically spanning both right rows; a vertical line divides it from the right.
         var name = new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0), MinWidth = 170,
-            Child = Cell("Decor_InfoName", style.InfoName, new(0)) };
-        var main = Cols("auto,1", name, right);
+            Child = Cell("Decor_InfoName", style.InfoName, new(0), text, line) };
+        var main = Cols(line, "auto,1", name, right);
 
-        // Stack the main block over an optional full-width note row, all inside the outer box.
         var stack = new StackPanel();
         stack.Children.Add(main);
         if (!string.IsNullOrWhiteSpace(style.InfoExtra))
             stack.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 1, 0, 0),
-                Child = Cell("Decor_InfoExtra", style.InfoExtra, new(0)) });
+                Child = Cell("Decor_InfoExtra", style.InfoExtra, new(0), text, line) });
+        return stack;
+    }
 
-        return new Border
+    // One title-block cell: label (bold, size 7) above, value (size 14) below; sep = which edges draw a line.
+    static Control Cell(string labelKey, string value, Thickness sep, IBrush text, IBrush line) => new Border
+    {
+        BorderBrush = line, BorderThickness = sep, Padding = new(6, 3, 6, 4),
+        VerticalAlignment = VerticalAlignment.Stretch,
+        Child = new StackPanel
         {
-            BorderBrush = line, BorderThickness = new(1), Child = stack,
-            Background = new SolidColorBrush(Color.FromArgb(0x14, 0x80, 0x80, 0x80)),
-            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
-        };
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new TextBlock { Text = Loc.S(labelKey), FontWeight = FontWeight.Bold, FontSize = 7, Foreground = text },
+                new TextBlock { Text = value, FontSize = 14, Foreground = text, TextWrapping = TextWrapping.Wrap, MinHeight = 18 },
+            },
+        },
+    };
+
+    static Grid Cols(IBrush line, string defs, params Control[] cells)
+    {
+        var g = new Grid();
+        foreach (var d in defs.Split(','))
+            g.ColumnDefinitions.Add(new ColumnDefinition(d == "auto" ? GridLength.Auto : new GridLength(double.Parse(d), GridUnitType.Star)));
+        for (int i = 0; i < cells.Length; i++) { cells[i].SetValue(Grid.ColumnProperty, i); g.Children.Add(cells[i]); }
+        return g;
     }
 
     static void AddWatermark(Panel layer, DiagramStyle style)
