@@ -667,8 +667,9 @@ public class FlowChartWindow : Window
         (_canvas.Parent as Panel)?.Children.Remove(_canvas);   // detach from the previous composition
         _canvasHost.Children.Clear();
         _canvasHost.Children.Add(DiagramDecor.Compose(_canvas, _data.Title, _style, () => _ = OpenDecor()));
-        // Re-attach the zoom wrapper's child to clear its cached size, so the canvas snaps back when content shrinks.
-        if (_zoomHost is not null && _canvasHost is { } ch) { _zoomHost.Child = null; _zoomHost.Child = ch; }
+        // Re-attach the scroll content to clear the zoom wrapper + presenter size cache, so the canvas snaps
+        // back when the header (and thus the composed size) shrinks.
+        if (_scroll is not null && _zoomHost is { } zh) { _scroll.Content = null; _scroll.Content = zh; }
     }
 
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.

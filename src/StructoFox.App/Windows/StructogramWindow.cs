@@ -291,7 +291,13 @@ public class StructogramWindow : Window
     // Rebuilds the decoration (title / info field / watermark / logo). It lives INSIDE the canvas content, so it
     // scrolls and zooms with the diagram and travels into print / PDF / image exports; edge decorations reserve
     // an empty band so they never overlap the structogram.
-    void RefreshDecor() => Rebuild();
+    void RefreshDecor()
+    {
+        Rebuild();
+        // After a header change the content size may shrink; the zoom wrapper + scroll presenter cache their
+        // size and won't shrink on their own — re-attach the content so the scroll extent is recomputed.
+        if (_scroll is not null && _zoomHost is { } zh) { _scroll.Content = null; _scroll.Content = zh; }
+    }
 
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
     async Task OpenDecor()
@@ -313,14 +319,6 @@ public class StructogramWindow : Window
         if (_hostBorder is null) return;
         var diagram = RenderSequence(_data.Root, isRoot: true);
         _hostBorder.Child = DiagramDecor.Compose(diagram, _data.Title, _style, () => _ = OpenDecor());
-        // The zoom wrapper (LayoutTransformControl) caches its measured size and won't shrink on its own when
-        // the content gets smaller (e.g. a header was removed). Re-attaching its child clears that cache so the
-        // canvas (and scroll extent) snap back to the content size.
-        if (_zoomHost is not null && _hostBorder is { } hb)
-        {
-            _zoomHost.Child = null;
-            _zoomHost.Child = hb;
-        }
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────
