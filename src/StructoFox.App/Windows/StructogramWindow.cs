@@ -175,12 +175,13 @@ public class StructogramWindow : Window
             Children = { bgBtn, decorBtn, hint },
         };
 
-        // Scrollable diagram host — the structogram can grow past the window.
+        // Scrollable diagram host — the structogram can grow past the window. NOTE: no Padding here — a
+        // ScrollViewer's padding sits INSIDE the viewport, so the far-side padding isn't scrollable (you
+        // can't reach the right/bottom edge). The outer spacing is a Margin on the content instead.
         _scroll = new ScrollViewer
         {
             VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Padding = new(20),
         };
         Grid.SetRow(_scroll, 1); root.Children.Add(_scroll);
 
@@ -198,10 +199,12 @@ public class StructogramWindow : Window
             Padding             = new(22),   // breathing room so the structogram doesn't touch the canvas edge
         };
         // Wrap in a LayoutTransformControl so zoom scales the scrollable extent (not just the rendering).
+        // The outer Margin is part of the scrollable content, so the right/bottom edge is always reachable.
         _zoomHost = new LayoutTransformControl
         {
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment   = VerticalAlignment.Top,
+            Margin              = new(20),
             Child               = _hostBorder,
         };
         _scroll.Content = _zoomHost;
