@@ -523,7 +523,7 @@ public class StructogramWindow : Window
         grid.Children.Add(header);
 
         // Two branch columns — equal width, each at least as wide as its content (no clipping).
-        var cols = new EqualColumns();
+        var cols = new BranchColumns();
         var thenCol = RenderSequence(b.Body);
         var elseCol = RenderSequence(b.Else);
         cols.Children.Add(thenCol);
@@ -587,7 +587,7 @@ public class StructogramWindow : Window
         outer.Children.Add(header);
 
         // Body columns under the labels — equal width, each at least as wide as its content (no clipping).
-        var cols = new EqualColumns();
+        var cols = new BranchColumns();
         for (int i = 0; i < b.Arms.Count; i++)
         {
             var body = RenderSequence(b.Arms[i].Body);
@@ -798,29 +798,40 @@ public class StructogramWindow : Window
 /// <summary>DIN 66261 IF header layout: the condition centred at the top (in the downward triangle), with the
 /// then/else captions in the two lower corners. Children: [0]=condition, [1]=true caption, [2]=false caption.
 /// The diagonals themselves are drawn by an overlaid <see cref="HeaderDiagonals"/>.</summary>
-/// <summary>Lays children out in N EQUAL columns, each at least as wide as the WIDEST child — so DIN if/case
-/// branches stay equal-width (symmetric) yet never clip the wider branch (the bug with plain Grid <c>*</c>
-/// columns, which split the summed width and squeezed the larger branch). Each column fills the full height.</summary>
-internal class EqualColumns : Panel
+/// <summary>Lays DIN if/case branches side by side. Measured width = SUM of the branches' content widths
+/// (bounded — no explosion), and on arrange each column is sized in PROPORTION to its content, so every column
+/// is at least as wide as its content (never clipped) while together filling the block width. Each column
+/// fills the full height (branches are equal height, DIN-style).</summary>
+internal class BranchColumns : Panel
 {
     protected override Size MeasureOverride(Size availableSize)
     {
-        double colW = 0, h = 0;
+        double w = 0, h = 0;
         foreach (var c in Children)
         {
             c.Measure(new Size(double.PositiveInfinity, availableSize.Height));
-            colW = Math.Max(colW, c.DesiredSize.Width);
-            h    = Math.Max(h, c.DesiredSize.Height);
+            w += c.DesiredSize.Width;
+            h  = Math.Max(h, c.DesiredSize.Height);
         }
-        return new Size(colW * Math.Max(1, Children.Count), h);
+        return new Size(w, h);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        int n = Math.Max(1, Children.Count);
-        double cw = finalSize.Width / n;
+        double sum = 0;
+        foreach (var c in Children) sum += c.DesiredSize.Width;
+        if (sum <= 0) sum = 1;
+
+        double x = 0;
         for (int i = 0; i < Children.Count; i++)
-            Children[i].Arrange(new Rect(i * cw, 0, cw, finalSize.Height));
+        {
+            // Last column takes the remainder, so rounding never leaves a gap or overshoot.
+            double cw = i == Children.Count - 1
+                ? Math.Max(0, finalSize.Width - x)
+                : finalSize.Width * (Children[i].DesiredSize.Width / sum);
+            Children[i].Arrange(new Rect(x, 0, cw, finalSize.Height));
+            x += cw;
+        }
         return finalSize;
     }
 }
