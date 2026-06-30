@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -132,8 +133,14 @@ public class StructogramWindow : Window
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
             bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-            if (e.Key == Key.Z && !shift) { Undo(); e.Handled = true; }
-            else if (e.Key == Key.Y || e.Key == Key.Z) { Redo(); e.Handled = true; }
+            switch (e.Key)
+            {
+                case Key.Z when !shift:                            Undo();  e.Handled = true; break;
+                case Key.Y: case Key.Z:                            Redo();  e.Handled = true; break;
+                case Key.OemPlus: case Key.Add:                    SetZoom(_zoom + 0.1); e.Handled = true; break;
+                case Key.OemMinus: case Key.Subtract:              SetZoom(_zoom - 0.1); e.Handled = true; break;
+                case Key.D0: case Key.NumPad0:                     SetZoom(1.0); e.Handled = true; break;
+            }
         };
 
         // Toolbar: a background-colour button plus a usage hint.
@@ -169,13 +176,13 @@ public class StructogramWindow : Window
         };
 
         // Scrollable diagram host — the structogram can grow past the window.
-        var scroll = new ScrollViewer
+        _scroll = new ScrollViewer
         {
             VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             Padding = new(20),
         };
-        Grid.SetRow(scroll, 1); root.Children.Add(scroll);
+        Grid.SetRow(_scroll, 1); root.Children.Add(_scroll);
 
         // Resolve the diagram-surface brushes from the style (not the app theme).
         _lineBrush = new SolidColorBrush(Color.Parse(_style.LineColor));
@@ -190,10 +197,88 @@ public class StructogramWindow : Window
             Background          = _bgBrush,
             Padding             = new(8),
         };
-        scroll.Content = _hostBorder;
+        // Wrap in a LayoutTransformControl so zoom scales the scrollable extent (not just the rendering).
+        _zoomHost = new LayoutTransformControl
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment   = VerticalAlignment.Top,
+            Child               = _hostBorder,
+        };
+        _scroll.Content = _zoomHost;
+        SetupZoomPan();
 
         Rebuild();
         RefreshDecor();
+    }
+
+    ScrollViewer? _scroll;
+    LayoutTransformControl? _zoomHost;
+    double _zoom = 1.0;
+    bool _panning; Point _panStart; Vector _panOrigin;
+
+    // Ctrl+wheel to zoom; left- or middle-drag to pan the canvas.
+    void SetupZoomPan()
+    {
+        if (_scroll is null) return;
+
+        _scroll.AddHandler(InputElement.PointerWheelChangedEvent, (_, e) =>
+        {
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;   // plain wheel = normal scroll
+            e.Handled = true;
+            ZoomAt(_zoom + (e.Delta.Y > 0 ? 0.1 : -0.1), e.GetPosition(_scroll));
+        }, RoutingStrategies.Tunnel);
+
+        _scroll.PointerPressed += (_, e) =>
+        {
+            var p = e.GetCurrentPoint(_scroll);
+            if (!p.Properties.IsLeftButtonPressed && !p.Properties.IsMiddleButtonPressed) return;
+            _panning = true;
+            _panStart = p.Position;
+            _panOrigin = _scroll!.Offset;
+        };
+        _scroll.PointerMoved += (_, e) =>
+        {
+            if (!_panning) return;
+            var d = e.GetPosition(_scroll) - _panStart;
+            if (_scroll!.Cursor is null && (Math.Abs(d.X) > 4 || Math.Abs(d.Y) > 4))
+                _scroll.Cursor = new Cursor(StandardCursorType.SizeAll);
+            _scroll.Offset = new Vector(_panOrigin.X - d.X, _panOrigin.Y - d.Y);
+        };
+        void EndPan() { _panning = false; if (_scroll is not null) _scroll.Cursor = null; }
+        _scroll.PointerReleased    += (_, _) => EndPan();
+        _scroll.PointerCaptureLost += (_, _) => EndPan();
+    }
+
+    // Applies the current zoom as a LayoutTransform (so the scroll viewer scrolls the whole scaled diagram).
+    void ApplyZoom()
+    {
+        if (_zoomHost is not null)
+            _zoomHost.LayoutTransform = Math.Abs(_zoom - 1.0) < 0.001 ? null : new ScaleTransform(_zoom, _zoom);
+    }
+
+    // Keyboard zoom: anchor on the viewport centre.
+    void SetZoom(double z)
+    {
+        if (_scroll is null) { _zoom = Math.Clamp(z, 0.3, 3.0); ApplyZoom(); return; }
+        ZoomAt(z, new Point(_scroll.Viewport.Width / 2, _scroll.Viewport.Height / 2));
+    }
+
+    // Zooms to a clamped level while keeping the content point under the given viewport position fixed.
+    void ZoomAt(double z, Point viewportPos)
+    {
+        z = Math.Clamp(z, 0.3, 3.0);
+        if (_scroll is null || Math.Abs(z - _zoom) < 0.0001) { _zoom = z; ApplyZoom(); return; }
+
+        var off = _scroll.Offset;
+        double cx = (off.X + viewportPos.X) / _zoom;
+        double cy = (off.Y + viewportPos.Y) / _zoom;
+        _zoom = z;
+        ApplyZoom();
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_scroll is null) return;
+            _scroll.Offset = new Vector(Math.Max(0, cx * _zoom - viewportPos.X), Math.Max(0, cy * _zoom - viewportPos.Y));
+        }, DispatcherPriority.Render);
     }
 
     Grid? _root;
