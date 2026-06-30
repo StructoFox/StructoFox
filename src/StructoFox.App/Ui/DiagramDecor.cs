@@ -87,9 +87,10 @@ public static class DiagramDecor
                 if (k == Kind.Logo && LogoImage(style) is { } lg)
                 {
                     lg.VerticalAlignment = VerticalAlignment.Center;
-                    // Scale the logo to the title-block height: track the info table's actual height.
+                    lg.Height = LogoHeight;   // start scaled (never native) so it can't inflate the row height
+                    // Then track the info table's actual content height so the logo lines up with the rows.
                     info.PropertyChanged += (_, e) =>
-                    { if (e.Property == Visual.BoundsProperty) lg.Height = info.Bounds.Height > 0 ? info.Bounds.Height : double.NaN; };
+                    { if (e.Property == Visual.BoundsProperty && info.Bounds.Height > 0) lg.Height = info.Bounds.Height; };
                     rowp.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
                         Padding = new(6, 0), Child = lg, VerticalAlignment = VerticalAlignment.Stretch });
                 }
@@ -200,7 +201,9 @@ public static class DiagramDecor
             Child = Cell("Decor_InfoName", style.InfoName, new(0), text, line) };
         var main = Cols(line, "auto,1", name, right);
 
-        var stack = new StackPanel();
+        // Top-aligned so its Bounds height equals its content height (it must not stretch to the row, otherwise
+        // a merged logo bound to that height would feed back and grow).
+        var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
         stack.Children.Add(main);
         if (!string.IsNullOrWhiteSpace(style.InfoExtra))
             stack.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 1, 0, 0),
