@@ -313,6 +313,10 @@ public class StructogramWindow : Window
         if (_hostBorder is null) return;
         var diagram = RenderSequence(_data.Root, isRoot: true);
         _hostBorder.Child = DiagramDecor.Compose(diagram, _data.Title, _style, () => _ = OpenDecor());
+        // The zoom wrapper (LayoutTransformControl) caches its measured size and won't shrink on its own when
+        // the content gets smaller (e.g. a header was removed) — force it (and the scroll extent) to re-measure.
+        _zoomHost?.InvalidateMeasure();
+        _scroll?.InvalidateMeasure();
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────

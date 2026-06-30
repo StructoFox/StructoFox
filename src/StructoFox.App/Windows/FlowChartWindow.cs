@@ -667,6 +667,8 @@ public class FlowChartWindow : Window
         (_canvas.Parent as Panel)?.Children.Remove(_canvas);   // detach from the previous composition
         _canvasHost.Children.Clear();
         _canvasHost.Children.Add(DiagramDecor.Compose(_canvas, _data.Title, _style, () => _ = OpenDecor()));
+        _zoomHost?.InvalidateMeasure();   // LayoutTransformControl caches its size; force it to re-measure
+        _scroll?.InvalidateMeasure();
     }
 
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
