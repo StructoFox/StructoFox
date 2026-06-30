@@ -49,7 +49,12 @@ public static class DiagramDecor
             overlay.Children.Add(row);
         }
 
-        var outer = new Grid();
+        var outer = new Grid
+        {
+            // The whole composed area carries the diagram's background, so the reserved decoration bands read
+            // as part of the canvas (the canvas simply grows to make room) rather than a frame around it.
+            Background = new SolidColorBrush(ParseOr(style.BackgroundColor, Colors.White)),
+        };
         outer.Children.Add(dock);
         outer.Children.Add(overlay);
         return outer;
@@ -107,51 +112,70 @@ public static class DiagramDecor
         catch { return null; }
     }
 
-    // The optional "title block" / Schriftfeld: a small bordered table of the non-empty info fields.
+    // The optional "title block" / Schriftfeld: a line-separated table. Name fills the left; the right side has
+    // ProjectNo + Project on top and Version + Date + Author below; an optional free note spans the bottom.
+    // Each cell shows its label small+bold on top, the value larger underneath.
     static Control? BuildInfo(DiagramStyle style)
     {
         if (!style.ShowInfo) return null;
 
-        var rows = new List<(string label, string val)>();
-        void Add(string key, string val) { if (!string.IsNullOrWhiteSpace(val)) rows.Add((Loc.S(key), val)); }
-        Add("Decor_InfoName",      style.InfoName);
-        Add("Decor_InfoProject",   style.InfoProject);
-        Add("Decor_InfoProjectNo", style.InfoProjectNo);
-        Add("Decor_InfoVersion",   style.InfoVersion);
-        Add("Decor_InfoDate",      style.InfoDate);
-        Add("Decor_InfoAuthor",    style.InfoAuthor);
-        bool hasExtra = !string.IsNullOrWhiteSpace(style.InfoExtra);
-        if (rows.Count == 0 && !hasExtra) return null;
-
         var text = new SolidColorBrush(ParseOr(style.TextColor, Colors.Black));
         var line = new SolidColorBrush(ParseOr(style.LineColor, Colors.Gray));
 
-        var grid = new Grid { RowSpacing = 2, ColumnSpacing = 10 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-        int r = 0;
-        foreach (var (label, val) in rows)
+        // One cell: label (bold, size 7) on a top line, value (size 14) on the line below.
+        Control Cell(string labelKey, string value, Thickness sep) => new Border
         {
-            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            var l = new TextBlock { Text = label, FontWeight = FontWeight.SemiBold, Foreground = text, FontSize = 12 };
-            var v = new TextBlock { Text = val, Foreground = text, FontSize = 12, TextWrapping = TextWrapping.Wrap };
-            Grid.SetRow(l, r); Grid.SetColumn(l, 0); grid.Children.Add(l);
-            Grid.SetRow(v, r); Grid.SetColumn(v, 1); grid.Children.Add(v);
-            r++;
-        }
-        if (hasExtra)
+            BorderBrush = line, BorderThickness = sep, Padding = new(6, 3, 6, 4),
+            Child = new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock { Text = Loc.S(labelKey), FontWeight = FontWeight.Bold, FontSize = 7, Foreground = text },
+                    new TextBlock { Text = value, FontSize = 14, Foreground = text, TextWrapping = TextWrapping.Wrap,
+                        MinHeight = 18 },
+                },
+            },
+        };
+
+        Grid Cols(string defs, params Control[] cells)
         {
-            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            var extra = new TextBlock { Text = style.InfoExtra, Foreground = text, FontSize = 12,
-                TextWrapping = TextWrapping.Wrap, MaxWidth = 360, Margin = new(0, rows.Count > 0 ? 4 : 0, 0, 0) };
-            Grid.SetRow(extra, r); Grid.SetColumn(extra, 0); Grid.SetColumnSpan(extra, 2);
-            grid.Children.Add(extra);
+            var g = new Grid();
+            foreach (var d in defs.Split(',')) g.ColumnDefinitions.Add(new ColumnDefinition(
+                d == "auto" ? GridLength.Auto : new GridLength(double.Parse(d), GridUnitType.Star)));
+            for (int i = 0; i < cells.Length; i++) { cells[i].SetValue(Grid.ColumnProperty, i); g.Children.Add(cells[i]); }
+            return g;
         }
+
+        // Right block: two stacked rows, separated by a horizontal line.
+        var rightTop = Cols("1,1",
+            Cell("Decor_InfoProjectNo", style.InfoProjectNo, new(0, 0, 1, 0)),
+            Cell("Decor_InfoProject",   style.InfoProject,   new(0)));
+        var rightBottom = Cols("1,1,1",
+            Cell("Decor_InfoVersion", style.InfoVersion, new(0, 0, 1, 0)),
+            Cell("Decor_InfoDate",    style.InfoDate,    new(0, 0, 1, 0)),
+            Cell("Decor_InfoAuthor",  style.InfoAuthor,  new(0)));
+        var rightTopWrap = new Border { BorderBrush = line, BorderThickness = new(0, 0, 0, 1), Child = rightTop };
+        var right = new Grid();
+        right.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        right.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        rightTopWrap.SetValue(Grid.RowProperty, 0); right.Children.Add(rightTopWrap);
+        rightBottom.SetValue(Grid.RowProperty, 1); right.Children.Add(rightBottom);
+
+        // Name fills the left, vertically spanning both right rows; a vertical line divides it from the right.
+        var name = new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0), MinWidth = 170,
+            Child = Cell("Decor_InfoName", style.InfoName, new(0)) };
+        var main = Cols("auto,1", name, right);
+
+        // Stack the main block over an optional full-width note row, all inside the outer box.
+        var stack = new StackPanel();
+        stack.Children.Add(main);
+        if (!string.IsNullOrWhiteSpace(style.InfoExtra))
+            stack.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 1, 0, 0),
+                Child = Cell("Decor_InfoExtra", style.InfoExtra, new(0)) });
 
         return new Border
         {
-            BorderBrush = line, BorderThickness = new(1), CornerRadius = new(3),
-            Padding = new(10, 8), Child = grid,
+            BorderBrush = line, BorderThickness = new(1), Child = stack,
             Background = new SolidColorBrush(Color.FromArgb(0x14, 0x80, 0x80, 0x80)),
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
         };
