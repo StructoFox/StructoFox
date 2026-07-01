@@ -529,6 +529,8 @@ public class FlowChartWindow : Window
             n.Id = Guid.NewGuid().ToString("N")[..8];
             idMap[old] = n.Id;
             n.X += offX; n.Y += offY;
+            n.Page = _page;   // paste onto the page being viewed
+            if (IsOffPage(n)) { n.OffPageEntry = false; n.OffPagePair = Guid.NewGuid().ToString("N")[..8]; n.Text = NextOffPageLabel(); }  // a pasted off-page connector is a fresh exit
             _data.Nodes.Add(n);
             _selected.Add(n.Id);
             RenderNode(n);
@@ -664,7 +666,7 @@ public class FlowChartWindow : Window
         if (r.Width < 3 && r.Height < 3) return;   // a click, not a drag
         _selected.Clear();
         foreach (var n in _data.Nodes)
-            if (r.Intersects(new Rect(n.X, n.Y, n.Width, n.Height))) _selected.Add(n.Id);
+            if (n.Page == _page && r.Intersects(new Rect(n.X, n.Y, n.Width, n.Height))) _selected.Add(n.Id);
         RefreshSelection();
     }
 
@@ -1182,6 +1184,7 @@ public class FlowChartWindow : Window
     // Builds one node's shape + label inside a draggable, selectable container on the canvas.
     void RenderNode(FlowNode node)
     {
+        if (node.Page != _page) return;   // only the current page is drawn
         if (_nodeViews.ContainsKey(node.Id)) return;
 
         var (fill, stroke) = NodeColors(node.Kind);
@@ -2868,6 +2871,7 @@ public class FlowChartWindow : Window
     // Draws one connection: line, arrowhead, a transparent hit-zone for editing, and an optional label.
     void RenderConnection(FlowConnection conn, List<Point>? forcePts = null)
     {
+        if (NodePage(conn.FromId) != _page) return;   // only the current page's connections are drawn
         if (_connViews.TryGetValue(conn.Id, out var old))
             foreach (var v in old) _canvas!.Children.Remove(v);
         _connViews.Remove(conn.Id);
