@@ -422,6 +422,40 @@ public class CodeEntityEditorDialog : Window
         RebuildPortRows();
         addPortBtn.Click += (_, _) => { workPorts.Add(new CodePort()); RebuildPortRows(); };
 
+        // ── Declared variables (read-only, scanned from the function's own diagram) ──
+        var varsBody = new StackPanel { Spacing = 2, Margin = new(8, 2, 4, 6) };
+        var varsSection = new StackPanel { Children = { FieldLabel(Loc.S("CodeEdit_DeclaredVars")), varsBody } };
+        form.Children.Add(varsSection);
+
+        TextBlock DimLine(string t)
+        {
+            var b = new TextBlock { Text = t, TextWrapping = TextWrapping.Wrap, FontSize = 11, Opacity = 0.75 };
+            Ui.Theme(b, TextBlock.ForegroundProperty, "SidebarTextBrush");
+            return b;
+        }
+        void RefreshVars()
+        {
+            varsBody.Children.Clear();
+            var key = entity.Id;
+            (List<VariableScanner.Decl> vars, List<VariableScanner.Decl> loop) scan =
+                FlowChartService.Exists(_projFolder, key)   ? VariableScanner.FromFlowChart(FlowChartService.Load(_projFolder, key))
+              : StructogramService.Exists(_projFolder, key) ? VariableScanner.FromStructogram(StructogramService.Load(_projFolder, key))
+              : (new(), new());
+
+            if (scan.vars.Count == 0 && scan.loop.Count == 0)
+            {
+                varsBody.Children.Add(DimLine(Loc.S("CodeEdit_VarsHint")));
+                return;
+            }
+            foreach (var d in scan.vars) varsBody.Children.Add(ItemSummaryText($"~ {d.Name} : {d.Type}"));
+            if (scan.loop.Count > 0)
+            {
+                varsBody.Children.Add(FieldLabel(Loc.S("CodeEdit_LoopVars")));
+                foreach (var d in scan.loop) varsBody.Children.Add(ItemSummaryText($"~ {d.Name} : {d.Type}"));
+            }
+        }
+        RefreshVars();
+
         // Section visibility per type.
         void UpdateSections()
         {
@@ -433,6 +467,7 @@ public class CodeEntityEditorDialog : Window
             methodsSection.IsVisible  = isClassish || t == CodeEntityType.Interface;
             enumSection.IsVisible     = t == CodeEntityType.Enum;
             portsSection.IsVisible    = t == CodeEntityType.Function;
+            varsSection.IsVisible     = t == CodeEntityType.Function;
         }
         typeCombo.SelectionChanged += (_, _) => UpdateSections();
         UpdateSections();
