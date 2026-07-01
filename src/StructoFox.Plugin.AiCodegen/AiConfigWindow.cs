@@ -224,6 +224,7 @@ internal static class AiConfigWindow
                 SetModels(models);
                 // Keep what the user already had; do NOT auto-pick the first model.
                 status.Text = PluginLoc.Tf("st_found", models.Count);
+                if (models.Count > 0) modelBox.IsDropDownOpen = true;   // show the fetched list (safe: no custom filter now)
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { status.Text = "⚠ " + ex.Message; }
