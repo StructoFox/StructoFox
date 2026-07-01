@@ -41,6 +41,8 @@ public class FlowChartWindow : Window
     readonly HashSet<string> _selected = new();
     readonly HashSet<string> _flaggedNodes = new();   // nodes the last structogram conversion couldn't structure
     double   _zoom = 1.0;
+    int      _page;        // the flowchart page currently shown/edited (0 = first)
+    TextBlock? _pageLabel; // "page x/y" in the toolbar
     bool     _liveDrag;    // a node is being dragged → route attached arrows cheaply (no A*) until release
     bool     _culling;     // re-entrancy guard for viewport culling
     bool     _crossoverHops;   // temporary, non-DIN crossover "bridges" at line crossings (per-window, not saved)
@@ -385,6 +387,12 @@ public class FlowChartWindow : Window
 
     // Realizes the nodes/connections that intersect the viewport (plus a margin) and drops those well
     // outside — keeping the live control count proportional to what's on screen, not to the whole diagram.
+    // The page a node lives on (defaults to the current page for a free/comb endpoint with no matching node).
+    int NodePage(string id) => _data.Nodes.FirstOrDefault(n => n.Id == id)?.Page ?? _page;
+
+    // Highest page index in use (so we know how many pages exist / where to add the next).
+    int MaxPage() => _data.Nodes.Count == 0 ? 0 : _data.Nodes.Max(n => n.Page);
+
     void CullToViewport()
     {
         if (_canvas is null || _culling) return;
@@ -396,7 +404,7 @@ public class FlowChartWindow : Window
 
             foreach (var n in _data.Nodes)
             {
-                bool show = vis.Intersects(new Rect(n.X, n.Y, n.Width, n.Height)) || _selected.Contains(n.Id);
+                bool show = n.Page == _page && (vis.Intersects(new Rect(n.X, n.Y, n.Width, n.Height)) || _selected.Contains(n.Id));
                 bool realized = _nodeViews.ContainsKey(n.Id);
                 if (show && !realized) RenderNode(n);
                 else if (!show && realized) { _canvas.Children.Remove(_nodeViews[n.Id]); _nodeViews.Remove(n.Id); }
@@ -406,6 +414,7 @@ public class FlowChartWindow : Window
             foreach (var c in _data.Connections)
             {
                 if (!string.IsNullOrEmpty(c.ToTapConn)) continue;
+                if (NodePage(c.FromId) != _page) continue;   // only the current page's lines
                 var a = NodeRect(c.FromId); var b = NodeRect(c.ToId);
                 bool realized = _connViews.ContainsKey(c.Id);
                 bool show = false;
@@ -429,6 +438,7 @@ public class FlowChartWindow : Window
             foreach (var c in _data.Connections)
             {
                 if (string.IsNullOrEmpty(c.ToTapConn)) continue;
+                if (NodePage(c.FromId) != _page) continue;   // only the current page's taps
                 var a = NodeRect(c.FromId); var tp = TapInfo(c)?.pt;
                 bool realized = _connViews.ContainsKey(c.Id);
                 bool show = false;
@@ -814,6 +824,15 @@ public class FlowChartWindow : Window
         row.Children.Add(_zoomBtn);
         UpdateZoomLabel();
 
+        // Page switcher (multi-page PAP via off-page connectors).
+        row.Children.Add(new Border { Width = 12 });
+        var pagePrev = TBtn("‹", Loc.S("Flow_PagePrev")); pagePrev.Click += (_, _) => GoToPage(_page - 1);
+        _pageLabel = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new(6, 0) };
+        Ui.Theme(_pageLabel, TextBlock.ForegroundProperty, "SidebarTextBrush");
+        var pageNext = TBtn("›", Loc.S("Flow_PageNext")); pageNext.Click += (_, _) => GoToPage(_page + 1);
+        row.Children.Add(pagePrev); row.Children.Add(_pageLabel); row.Children.Add(pageNext);
+        UpdatePageLabel();
+
         // "Options" gathers the set-once-and-forget surface settings: colours, decoration, zoom reset and
         // the grid (visibility / colour / style / opacity / snap) — rarely touched while actually drawing.
         var viewBtn = TBtn(Loc.S("Flow_View"), Loc.S("Flow_ViewTip"));
@@ -1085,7 +1104,14 @@ public class FlowChartWindow : Window
             Y      = at.Y,
             Width  = dw,
             Height = dh,
+            Page   = _page,   // new nodes belong to the page being edited
         };
+        // An off-page connector (Folgeseite) is an EXIT: pair id + a unique label so its entry can mirror it.
+        if (kind == FlowNodeKind.Connector && sym == FlowSymbol.OffPageConnector)
+        {
+            node.OffPagePair = Guid.NewGuid().ToString("N")[..8];
+            node.Text = NextOffPageLabel();
+        }
         _data.Nodes.Add(node);
         // A Multi-Verzweigung is born with a small comb of free tines (cases), ready to be wired to targets.
         if (kind == FlowNodeKind.MultiDecision) for (int k = 0; k < 3; k++) AddTine(node);
@@ -1257,7 +1283,13 @@ public class FlowChartWindow : Window
             if (_mode == EditMode.Scale) { e.Handled = true; return; }   // resizing happens via the grips, not the body
             if (_mode == EditMode.Remove) { _selected.Clear(); _selected.Add(node.Id); RemoveSelected(); e.Handled = true; return; }
             // Double-click (outside connect mode): open a subroutine's diagram / edit the node text.
-            if (e.ClickCount >= 2 && !ConnectMode) { if (node.Kind == FlowNodeKind.Subroutine) ShowChartFlow(node); else _ = EditNodeText(node, label); e.Handled = true; return; }
+            if (e.ClickCount >= 2 && !ConnectMode)
+            {
+                if (node.Kind == FlowNodeKind.Subroutine) ShowChartFlow(node);
+                else if (IsOffPage(node) && !node.OffPageEntry) OpenOffPage(node);   // exit → jump to its page
+                else if (!node.OffPageEntry) _ = EditNodeText(node, label);          // (entry label is read-only)
+                e.Handled = true; return;
+            }
 
             pressed = true; dragging = false;
             pressPos = e.GetPosition(_canvas);
@@ -1711,7 +1743,23 @@ public class FlowChartWindow : Window
     // Opens the rich node-text editor (text + font/size/style, multiline); re-applies and saves on OK.
     async Task EditNodeText(FlowNode node, TextBlock label)
     {
+        // An off-page ENTRY mirrors its exit — its label is read-only.
+        if (node.OffPageEntry) { _ = MessageDialog.Show(this, Loc.S("Flow_EntryReadOnly"), Loc.S("Flow_SymOffPage")); return; }
+
+        var before = node.Text;
         if (!await NodeTextDialog.Edit(this, node)) return;
+
+        // An off-page EXIT must keep a unique label and push it to its entry.
+        if (IsOffPage(node) && !node.OffPageEntry)
+        {
+            if (_data.Nodes.Any(n => IsOffPage(n) && !n.OffPageEntry && n.Id != node.Id
+                                     && string.Equals(n.Text.Trim(), node.Text.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                node.Text = before;   // revert the duplicate
+                _ = MessageDialog.Show(this, Loc.S("Flow_OffPageDup"), Loc.S("Flow_SymOffPage"));
+            }
+            else SyncOffPageEntry(node);
+        }
         ApplyTextFormat(label, node);
         Save();
     }
@@ -3324,12 +3372,13 @@ public class FlowChartWindow : Window
     // whitespace. The automatic call (false) only grows that side, preserving a centered layout.</param>
     void FitCanvas(bool trim = false, bool keepPosition = false)
     {
-        if (_canvas is null || _data.Nodes.Count == 0) return;
+        if (_canvas is null) return;
+        if (!_data.Nodes.Any(n => n.Page == _page)) { _canvas.Width = 320; _canvas.Height = 240; if (_gridRect is not null) { _gridRect.Width = 320; _gridRect.Height = 240; } return; }
         const double pad = 80;
         double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
         void Inc(double x, double y) { minX = Math.Min(minX, x); minY = Math.Min(minY, y); maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); }
-        foreach (var n in _data.Nodes) { Inc(n.X, n.Y); Inc(n.X + n.Width, n.Y + n.Height); }
-        foreach (var c in _data.Connections) foreach (var w in c.Waypoints) Inc(w.X, w.Y);
+        foreach (var n in _data.Nodes.Where(n => n.Page == _page)) { Inc(n.X, n.Y); Inc(n.X + n.Width, n.Y + n.Height); }
+        foreach (var c in _data.Connections.Where(c => NodePage(c.FromId) == _page)) foreach (var w in c.Waypoints) Inc(w.X, w.Y);
 
         // Shift by a whole number of grid cells, so everything stays aligned to the grid (which tiles from
         // 0,0) — a non-grid shift would knock all placements off the grid.
@@ -3372,6 +3421,58 @@ public class FlowChartWindow : Window
         FitCanvas();   // shrink the surface back if the removed nodes freed up edge space
         Save();
         if (anySub) _ = InfoDialog.Show(this, "sub_remove", Loc.S("Sub_RemoveInfo"), Loc.S("Flow_Subroutine"));
+    }
+
+    // ── Off-page connectors / pages ────────────────────────────────────────
+
+    static bool IsOffPage(FlowNode n) => n.Kind == FlowNodeKind.Connector && n.Symbol == FlowSymbol.OffPageConnector;
+
+    // Next free single-letter label (A, B, …, then A1, A2, …) not used by an existing off-page exit.
+    string NextOffPageLabel()
+    {
+        var used = _data.Nodes.Where(n => IsOffPage(n) && !n.OffPageEntry)
+            .Select(n => n.Text.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        for (char c = 'A'; c <= 'Z'; c++) if (!used.Contains(c.ToString())) return c.ToString();
+        for (int i = 1; ; i++) for (char c = 'A'; c <= 'Z'; c++) { var s = $"{c}{i}"; if (!used.Contains(s)) return s; }
+    }
+
+    // Double-clicking an off-page EXIT jumps to (creating if needed) the page holding its ENTRY.
+    void OpenOffPage(FlowNode exit)
+    {
+        var entry = _data.Nodes.FirstOrDefault(n => n.OffPageEntry && n.OffPagePair == exit.OffPagePair);
+        if (entry is null)
+        {
+            entry = new FlowNode
+            {
+                Kind = FlowNodeKind.Connector, Symbol = FlowSymbol.OffPageConnector,
+                OffPageEntry = true, OffPagePair = exit.OffPagePair, Text = exit.Text,
+                Page = MaxPage() + 1, X = 80, Y = 80, Width = exit.Width, Height = exit.Height,
+            };
+            _data.Nodes.Add(entry);
+            Save();
+        }
+        else if (entry.Text != exit.Text) { entry.Text = exit.Text; Save(); }
+        GoToPage(entry.Page);
+    }
+
+    // Keeps a moved/edited exit's entry label mirrored, and enforces one unique label per exit.
+    void SyncOffPageEntry(FlowNode exit)
+    {
+        var entry = _data.Nodes.FirstOrDefault(n => n.OffPageEntry && n.OffPagePair == exit.OffPagePair);
+        if (entry is not null && entry.Text != exit.Text) { entry.Text = exit.Text; }
+    }
+
+    void GoToPage(int page)
+    {
+        _page = Math.Clamp(page, 0, MaxPage());
+        RebuildAll();
+        if (_scroll is not null) _scroll.Offset = default;
+        UpdatePageLabel();
+    }
+
+    void UpdatePageLabel()
+    {
+        if (_pageLabel is not null) _pageLabel.Text = string.Format(Loc.S("Flow_PageOf"), _page + 1, MaxPage() + 1);
     }
 
     // Opens (or creates, in the Functions library) the function a subroutine node calls, then its diagram.
@@ -3426,7 +3527,13 @@ public class FlowChartWindow : Window
     // Removes a node and any connections attached to it, optionally saving.
     void DeleteNode(string id, bool persist = true)
     {
+        var gone = _data.Nodes.FirstOrDefault(n => n.Id == id);
+        // An off-page ENTRY can't be deleted directly — it only goes away when its exit does.
+        if (gone is { OffPageEntry: true }) return;
         _data.Nodes.RemoveAll(n => n.Id == id);
+        // Deleting an off-page EXIT removes its paired entry too (possibly on another page).
+        if (gone is not null && IsOffPage(gone) && !gone.OffPageEntry)
+            _data.Nodes.RemoveAll(n => n.OffPageEntry && n.OffPagePair == gone.OffPagePair);
         if (_nodeViews.TryGetValue(id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(id); }
         foreach (var c in _data.Connections.Where(c => c.FromId == id || c.ToId == id).ToList())
         {

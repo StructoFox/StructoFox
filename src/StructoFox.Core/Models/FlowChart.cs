@@ -75,6 +75,20 @@ public class FlowNode
     /// its diagram is keyed by this id). Empty until linked/created via "show chart".</summary>
     public string       RefId  { get; set; } = "";
     public string       Text   { get; set; } = "";
+
+    /// <summary>Which page of the flowchart this node lives on (0 = first page). Pages are a display grouping
+    /// within the SAME file; off-page connectors pair across pages by their label (like on-page connectors),
+    /// so the converter/codegen still see one continuous graph.</summary>
+    public int          Page   { get; set; } = 0;
+
+    /// <summary>Off-page connectors: the auto-created "entry" on the target page (mirrors the exit's label,
+    /// read-only, undeletable, movable). The user-made "exit" has this false.</summary>
+    public bool         OffPageEntry { get; set; } = false;
+
+    /// <summary>Links an off-page exit to its entry (same value on both), so a label change on the exit can
+    /// update the entry and a double-click can jump to the paired page.</summary>
+    public string       OffPagePair  { get; set; } = "";
+
     public double       X      { get; set; } = 60;
     public double       Y      { get; set; } = 60;
     public double       Width  { get; set; } = 140;
