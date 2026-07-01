@@ -187,11 +187,11 @@ public static class DiagramDecor
     // The info field's INNER content (no outer frame), so it can be embedded into a merged title block.
     static Control InfoInner(DiagramStyle style, IBrush text, IBrush line)
     {
-        var rightTop = Cols(line, "1,1",
+        var rightTop = Cols(line, "1,1,1",
+            Cell("Decor_InfoVersion",   style.InfoVersion,   new(0, 0, 1, 0), text, line),
             Cell("Decor_InfoProjectNo", style.InfoProjectNo, new(0, 0, 1, 0), text, line),
             Cell("Decor_InfoProject",   style.InfoProject,   new(0), text, line));
-        var rightBottom = Cols(line, "1,1,1,1",
-            Cell("Decor_InfoVersion", style.InfoVersion,    new(0, 0, 1, 0), text, line),
+        var rightBottom = Cols(line, "1,1,1",
             Cell("Decor_InfoDate",    style.InfoDate,       new(0, 0, 1, 0), text, line),
             Cell("Decor_InfoAuthor",  style.InfoAuthor,     new(0, 0, 1, 0), text, line),
             Cell("Decor_InfoDept",    style.InfoDepartment, new(0), text, line));
