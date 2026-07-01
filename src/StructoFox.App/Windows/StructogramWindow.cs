@@ -475,6 +475,7 @@ public class StructogramWindow : Window
     Control SubroutineBox(NsBlock b)
     {
         var text = string.IsNullOrWhiteSpace(b.Text) ? Loc.S("Struct_PhSubroutine") : b.Text;
+        text = text.Replace(".", "." + (char)0x200B);   // prefer wrapping qualified names at the dots
         var t = PrimaryLabel(text, b);
         t.Margin = new(16, 6, 16, 6);
         t.TextAlignment = TextAlignment.Center;

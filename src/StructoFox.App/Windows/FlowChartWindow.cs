@@ -1717,9 +1717,13 @@ public class FlowChartWindow : Window
     }
 
     // Applies a node's text and formatting (font, size, weight, style, decorations) to its label.
+    // A zero-width space after each dot gives the layout a preferred break point, so long qualified names
+    // (Namespace.Class.method) wrap AT the dots instead of mid-word.
+    static string BreakAtDots(string s) => s.Replace(".", "." + (char)0x200B);
+
     static void ApplyTextFormat(TextBlock label, FlowNode node)
     {
-        label.Text       = node.Text;
+        label.Text       = BreakAtDots(node.Text);
         label.FontFamily  = node.FontFamily is { } ff ? new FontFamily(ff) : FontFamily.Default;
         label.FontSize   = node.FontSize ?? 11;
         label.FontWeight = node.Bold ? FontWeight.Bold : FontWeight.Normal;
