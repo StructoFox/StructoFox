@@ -366,6 +366,8 @@ public class FlowChartWindow : Window
             if (e.Property == ScrollViewer.OffsetProperty || e.Property == ScrollViewer.ViewportProperty) CullToViewport();
         };
         Dispatcher.UIThread.Post(CullToViewport, DispatcherPriority.Loaded);
+        // Fit the surface to the content on open (the canvas starts at a large default size otherwise).
+        Dispatcher.UIThread.Post(() => FitCanvas(), DispatcherPriority.Loaded);
     }
 
     // The visible canvas region in content coordinates (accounts for scroll offset and zoom). A huge
@@ -3343,9 +3345,10 @@ public class FlowChartWindow : Window
         else if (!trim) { dx = Math.Max(0, dx); dy = Math.Max(0, dy); }   // auto-fit grows only; Crop also trims
         ShiftWorld(dx, dy);   // bring the top-left of the content near the margin
 
-        // Never shrink below the visible viewport (so a near-empty chart doesn't collapse to a tiny box).
-        double minW = Math.Max(800, _scroll?.Viewport.Width  / (_zoom <= 0 ? 1 : _zoom) ?? 800);
-        double minH = Math.Max(600, _scroll?.Viewport.Height / (_zoom <= 0 ? 1 : _zoom) ?? 600);
+        // The surface hugs the content (+ a small working margin), with only a modest floor so it never
+        // collapses to nothing. It deliberately does NOT fill the viewport — an empty chart shows a small page
+        // with window background around it (dragging a node to the edge grows it again via GrowCanvasFor).
+        const double minW = 320, minH = 240;
         double cw = Math.Max(minW, maxX + dx + pad), ch = Math.Max(minH, maxY + dy + pad);
         if (Math.Abs(_canvas.Width  - cw) > 0.5) _canvas.Width  = cw;
         if (Math.Abs(_canvas.Height - ch) > 0.5) _canvas.Height = ch;
