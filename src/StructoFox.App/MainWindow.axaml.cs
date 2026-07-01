@@ -201,6 +201,14 @@ public partial class MainWindow : Window
             if (n is not null) AppSettings.UserName = n.Trim();
         }, "UserName");
         options.Items.Add(userName);
+
+        var userDept = new MenuItem { Header = Loc.S("Menu_UserDept") };
+        userDept.Click += (_, _) => CrashHandler.Safe(async () =>
+        {
+            var d = await PromptDialog.Show(this, Loc.S("Opt_UserDeptPrompt"), AppSettings.UserDepartment);
+            if (d is not null) AppSettings.UserDepartment = d.Trim();
+        }, "UserDept");
+        options.Items.Add(userDept);
         options.Items.Add(new Separator());
 
         foreach (var (key, labelKey) in SuppressStore.Known)

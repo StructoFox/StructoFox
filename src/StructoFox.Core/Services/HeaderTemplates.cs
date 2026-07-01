@@ -32,6 +32,7 @@ public sealed class HeaderData
     public string   InfoVersion    { get; set; } = "";
     public string   InfoDate       { get; set; } = "";
     public string   InfoAuthor     { get; set; } = "";
+    public string   InfoDepartment { get; set; } = "";
     public string   InfoExtra      { get; set; } = "";
 
     /// <summary>Reads the header fields out of a diagram style.</summary>
@@ -43,7 +44,7 @@ public sealed class HeaderData
         LogoPath = s.LogoPath, LogoPosition = s.LogoPosition,
         ShowInfo = s.ShowInfo, InfoPosition = s.InfoPosition, InfoName = s.InfoName, InfoProject = s.InfoProject,
         InfoProjectNo = s.InfoProjectNo, InfoVersion = s.InfoVersion, InfoDate = s.InfoDate,
-        InfoAuthor = s.InfoAuthor, InfoExtra = s.InfoExtra,
+        InfoAuthor = s.InfoAuthor, InfoDepartment = s.InfoDepartment, InfoExtra = s.InfoExtra,
     };
 
     /// <summary>Writes these header fields into a diagram style (leaving colours/grid untouched).</summary>
@@ -55,7 +56,7 @@ public sealed class HeaderData
         s.LogoPath = LogoPath; s.LogoPosition = LogoPosition;
         s.ShowInfo = ShowInfo; s.InfoPosition = InfoPosition; s.InfoName = InfoName; s.InfoProject = InfoProject;
         s.InfoProjectNo = InfoProjectNo; s.InfoVersion = InfoVersion; s.InfoDate = InfoDate;
-        s.InfoAuthor = InfoAuthor; s.InfoExtra = InfoExtra;
+        s.InfoAuthor = InfoAuthor; s.InfoDepartment = InfoDepartment; s.InfoExtra = InfoExtra;
     }
 }
 

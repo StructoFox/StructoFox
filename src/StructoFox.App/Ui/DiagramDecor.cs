@@ -190,10 +190,11 @@ public static class DiagramDecor
         var rightTop = Cols(line, "1,1",
             Cell("Decor_InfoProjectNo", style.InfoProjectNo, new(0, 0, 1, 0), text, line),
             Cell("Decor_InfoProject",   style.InfoProject,   new(0), text, line));
-        var rightBottom = Cols(line, "1,1,1",
-            Cell("Decor_InfoVersion", style.InfoVersion, new(0, 0, 1, 0), text, line),
-            Cell("Decor_InfoDate",    style.InfoDate,    new(0, 0, 1, 0), text, line),
-            Cell("Decor_InfoAuthor",  style.InfoAuthor,  new(0), text, line));
+        var rightBottom = Cols(line, "1,1,1,1",
+            Cell("Decor_InfoVersion", style.InfoVersion,    new(0, 0, 1, 0), text, line),
+            Cell("Decor_InfoDate",    style.InfoDate,       new(0, 0, 1, 0), text, line),
+            Cell("Decor_InfoAuthor",  style.InfoAuthor,     new(0, 0, 1, 0), text, line),
+            Cell("Decor_InfoDept",    style.InfoDepartment, new(0), text, line));
         var rightTopWrap = new Border { BorderBrush = line, BorderThickness = new(0, 0, 0, 1), Child = rightTop };
 
         var right = new Grid();

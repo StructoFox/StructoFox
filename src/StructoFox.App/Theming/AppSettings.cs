@@ -75,4 +75,8 @@ public static class AppSettings
     // The user's name — suggested as the header's "author" field on new diagrams.
     public const string UserNameKey = "user_name";
     public static string UserName { get => GetStr(UserNameKey, ""); set => SetStr(UserNameKey, value); }
+
+    // The user's class (school) or department (company) — suggested in the header too.
+    public const string UserDeptKey = "user_dept";
+    public static string UserDepartment { get => GetStr(UserDeptKey, ""); set => SetStr(UserDeptKey, value); }
 }

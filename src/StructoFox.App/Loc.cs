@@ -384,6 +384,8 @@ public static class Loc
         ["Menu_DefaultHeader"]   = "🏷 Default header…",
         ["Menu_UserName"]        = "👤 User name…",
         ["Opt_UserNamePrompt"]   = "Your name (suggested as the header's author):",
+        ["Menu_UserDept"]        = "🏫 Class / department…",
+        ["Opt_UserDeptPrompt"]   = "Your class or department (suggested in the header):",
         ["Decor_Today"]          = "Today",
         ["DefHdr_Title"]         = "Default header for new diagrams",
         ["DefHdr_Pap"]           = "New flowcharts (PAP):",
@@ -399,6 +401,7 @@ public static class Loc
         ["Decor_InfoVersion"]  = "Version:",
         ["Decor_InfoDate"]     = "Date:",
         ["Decor_InfoAuthor"]   = "Author:",
+        ["Decor_InfoDept"]     = "Class / Dept.:",
         ["Decor_InfoExtra"]    = "Note:",
 
         // Per-element styling
@@ -829,6 +832,8 @@ public static class Loc
         ["Menu_DefaultHeader"]   = "🏷 Standard-Header…",
         ["Menu_UserName"]        = "👤 Benutzername…",
         ["Opt_UserNamePrompt"]   = "Dein Name (wird als Ersteller im Header vorgeschlagen):",
+        ["Menu_UserDept"]        = "🏫 Klasse / Abteilung…",
+        ["Opt_UserDeptPrompt"]   = "Deine Klasse oder Abteilung (wird im Header vorgeschlagen):",
         ["Decor_Today"]          = "Heute",
         ["DefHdr_Title"]         = "Standard-Header für neue Diagramme",
         ["DefHdr_Pap"]           = "Neue Ablaufpläne (PAP):",
@@ -844,6 +849,7 @@ public static class Loc
         ["Decor_InfoVersion"]  = "Version:",
         ["Decor_InfoDate"]     = "Datum:",
         ["Decor_InfoAuthor"]   = "Ersteller:",
+        ["Decor_InfoDept"]     = "Klasse / Abteilung:",
         ["Decor_InfoExtra"]    = "Notiz:",
 
         // Per-element styling

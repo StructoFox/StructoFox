@@ -70,6 +70,7 @@ public class DiagramStyle
     public string InfoVersion     { get; set; } = "";
     public string InfoDate        { get; set; } = "";
     public string InfoAuthor      { get; set; } = "";
+    public string InfoDepartment  { get; set; } = "";   // class (school) or department (company)
     public string InfoExtra       { get; set; } = "";   // free multiline note (plain text)
 
     // ── Grid (snapping aid) ──────────────────────────────────────────────────
