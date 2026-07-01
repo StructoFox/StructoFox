@@ -159,26 +159,17 @@ internal static class AiConfigWindow
         // Model + fetch
         panel.Children.Add(PluginUi.Label(PluginLoc.T("f_model")));
         var currentModels = new List<string>();   // the models currently offered (defaults or fetched)
+        // Editable model box: type a name or pick a fetched/default one. Plain built-in substring filter —
+        // a custom ItemFilter + auto-open here caused re-entrant selection glitches (wrong pick) and hangs.
         var modelBox = new AutoCompleteBox
         {
             Text = card.Model, PlaceholderText = PluginLoc.T("model_ph"),
-            FilterMode = AutoCompleteFilterMode.Custom, MinimumPrefixLength = 0,
+            FilterMode = AutoCompleteFilterMode.Contains, MinimumPrefixLength = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         PluginUi.Theme(modelBox, TemplatedControl.ForegroundProperty, "SidebarTextBrush");
         PluginUi.Theme(modelBox, TemplatedControl.BackgroundProperty,  "ControlBgBrush");
         PluginUi.Theme(modelBox, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
-        // Custom filter: empty text or a text that already equals a full model name → show the WHOLE list
-        // (so the dropdown stays browsable after a pick); otherwise narrow by substring.
-        modelBox.ItemFilter = (search, item) =>
-        {
-            var s = (search ?? "").Trim();
-            if (s.Length == 0) return true;
-            if (currentModels.Any(m => string.Equals(m, s, StringComparison.OrdinalIgnoreCase))) return true;
-            return (item?.ToString() ?? "").Contains(s, StringComparison.OrdinalIgnoreCase);
-        };
-        // Always pop the dropdown open on focus, so the user can browse without clearing the field first.
-        modelBox.GotFocus += (_, _) => { if (currentModels.Count > 0) modelBox.IsDropDownOpen = true; };
         var fetch  = PluginUi.Btn("↻"); fetch.Margin = new(6, 0, 0, 0);
         var status = PluginUi.Dim("");
         var modelRow = new Grid { ColumnDefinitions = new("*,Auto") };
@@ -231,9 +222,8 @@ internal static class AiConfigWindow
                 using var svc = AiProviders.Create(probe);
                 var models = await svc.GetModelsAsync(cts.Token);
                 SetModels(models);
-                // Keep what the user already had; do NOT auto-pick the first model (let the dropdown show all).
+                // Keep what the user already had; do NOT auto-pick the first model.
                 status.Text = PluginLoc.Tf("st_found", models.Count);
-                if (currentModels.Count > 0) modelBox.IsDropDownOpen = true;
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { status.Text = "⚠ " + ex.Message; }
