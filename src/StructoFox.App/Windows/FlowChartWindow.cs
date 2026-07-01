@@ -1331,7 +1331,7 @@ public class FlowChartWindow : Window
                 if (node.Kind == FlowNodeKind.Junction) TrySpliceJunction(node);
                 RerouteAfterMove(movedSet);       // boundary lines re-route (rigid still excluded via _dragRoute)
                 _dragStart = null; _dragTapStart = null; _dragWpStart = null; _dragRoute = null;
-                FitCanvas();   // grow/shrink the surface to fit the content (all sides)
+                FitCanvas(keepPosition: true);   // fit the surface to content but leave the move where the user put it
                 RenderCrossovers();
                 Save();
             }
@@ -3301,7 +3301,11 @@ public class FlowChartWindow : Window
     {
         if (_canvas is null || (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5)) return;
         foreach (var n in _data.Nodes) { n.X += dx; n.Y += dy; }
-        foreach (var c in _data.Connections) foreach (var w in c.Waypoints) { w.X += dx; w.Y += dy; }
+        foreach (var c in _data.Connections)
+        {
+            foreach (var w in c.Waypoints) { w.X += dx; w.Y += dy; }
+            if (!string.IsNullOrEmpty(c.ToTapConn)) { c.ToTapX += dx; c.ToTapY += dy; }   // taps move with the world too
+        }
         if (_scroll is not null) _scroll.Offset = new Vector(Math.Max(0, _scroll.Offset.X + dx * _zoom), Math.Max(0, _scroll.Offset.Y + dy * _zoom));
         foreach (var (id, v) in _nodeViews)
             if (_data.Nodes.FirstOrDefault(n => n.Id == id) is { } nd) { Canvas.SetLeft(v, nd.X); Canvas.SetTop(v, nd.Y); }
@@ -3312,7 +3316,7 @@ public class FlowChartWindow : Window
     // edge and shrinks back when you move away (all four sides). Called when an edit settles.
     // <param name="trim">When true (the "Crop" action), also pull content up/left to remove top/left
     // whitespace. The automatic call (false) only grows that side, preserving a centered layout.</param>
-    void FitCanvas(bool trim = false)
+    void FitCanvas(bool trim = false, bool keepPosition = false)
     {
         if (_canvas is null || _data.Nodes.Count == 0) return;
         const double pad = 80;
@@ -3328,7 +3332,15 @@ public class FlowChartWindow : Window
         // keep its left/top whitespace. Right/bottom still shrink, since that just resizes the surface.
         double g = _data.GridSize >= 1 ? _data.GridSize : 10;
         double dx = Math.Round((pad - minX) / g) * g, dy = Math.Round((pad - minY) / g) * g;
-        if (!trim) { dx = Math.Max(0, dx); dy = Math.Max(0, dy); }   // auto-fit grows only; Crop also trims
+        if (keepPosition)
+        {
+            // After a user move: leave the content exactly where they put it; only shift to rescue content
+            // that went off the top/left (negative coords a Canvas can't hold). The surface still shrinks on
+            // the right/bottom below, so moving content left frees up space instead of shoving it back.
+            dx = minX < 0 ? Math.Max(0, dx) : 0;
+            dy = minY < 0 ? Math.Max(0, dy) : 0;
+        }
+        else if (!trim) { dx = Math.Max(0, dx); dy = Math.Max(0, dy); }   // auto-fit grows only; Crop also trims
         ShiftWorld(dx, dy);   // bring the top-left of the content near the margin
 
         // Never shrink below the visible viewport (so a near-empty chart doesn't collapse to a tiny box).
