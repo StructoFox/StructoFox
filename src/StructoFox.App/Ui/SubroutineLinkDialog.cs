@@ -30,9 +30,12 @@ public static class SubroutineLinkDialog
         return CodeEntityService.LoadAll(projFolder, "Function").FirstOrDefault(f => f.Id == refId)?.Name ?? refId;
     }
 
-    public static Task<string?> Show(Window owner, string projFolder, string suggestedName)
+    public static Task<string?> Show(Window owner, string projFolder, string suggestedName, string? excludeKey = null)
     {
-        var funcs   = CodeEntityService.LoadAll(projFolder, "Function").ToList();
+        // Callable targets exclude the entry point (you don't call main) and the current diagram itself
+        // (a subroutine can't be its own body — that would recurse forever).
+        var funcs   = CodeEntityService.LoadAll(projFolder, "Function")
+            .Where(f => !f.IsEntryPoint && f.Id != excludeKey).ToList();
         var classes = CodeEntityService.LoadAll(projFolder, "Class").ToList();
         var hasExisting = funcs.Count > 0 || classes.Any(c => c.Methods.Count > 0);
 
@@ -72,13 +75,19 @@ public static class SubroutineLinkDialog
         {
             var nsId = NsId();
             tree.Items.Clear();
+            TreeViewItem Item(string header, string? tag)
+            {
+                var it = new TreeViewItem { Header = header, Tag = tag };
+                Ui.Theme(it, TemplatedControl.ForegroundProperty, "SidebarTextBrush");   // Fluent items don't inherit
+                return it;
+            }
             foreach (var f in funcs.Where(f => f.Namespace == nsId).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
-                tree.Items.Add(new TreeViewItem { Header = "ƒ  " + f.Name, Tag = f.Id });
+                tree.Items.Add(Item("ƒ  " + f.Name, f.Id));
             foreach (var c in classes.Where(c => c.Namespace == nsId).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
             {
-                var ci = new TreeViewItem { Header = "▸  " + c.Name, IsExpanded = true };   // class node: not a target
-                foreach (var m in c.Methods.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
-                    ci.Items.Add(new TreeViewItem { Header = c.Name + "." + m.Name, Tag = $"{c.Id}#{m.Id}" });
+                var ci = Item("▸  " + c.Name, null); ci.IsExpanded = true;   // class node: not a target
+                foreach (var m in c.Methods.Where(m => $"{c.Id}#{m.Id}" != excludeKey).OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
+                    ci.Items.Add(Item(c.Name + "." + m.Name, $"{c.Id}#{m.Id}"));
                 tree.Items.Add(ci);
             }
         }

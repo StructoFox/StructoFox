@@ -3375,7 +3375,7 @@ public class FlowChartWindow : Window
     {
         if (string.IsNullOrEmpty(node.RefId))
         {
-            var id = await SubroutineLinkDialog.Show(this, _projFolder, "");
+            var id = await SubroutineLinkDialog.Show(this, _projFolder, "", _key);
             if (string.IsNullOrEmpty(id)) return;
             node.RefId = id; node.Text = SubroutineLinkDialog.RefName(_projFolder, id); Save();
             if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
