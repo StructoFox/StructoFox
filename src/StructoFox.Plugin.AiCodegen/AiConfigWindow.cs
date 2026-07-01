@@ -265,7 +265,8 @@ internal static class AiConfigWindow
             busy = true; spinner.IsVisible = true; descStatus.Text = PluginLoc.T("st_asking");
             try
             {
-                await CodeSelfDescription.FetchAsync(card, cts.Token);
+                // Off the UI thread entirely — a slow/loading local model must never freeze the window.
+                await Task.Run(() => CodeSelfDescription.FetchAsync(card, cts.Token));
                 descStatus.Text = string.IsNullOrWhiteSpace(card.LastApiError)
                     ? $"✓ {card.Role}\n💪 {card.Strengths}\n🚫 {card.Weaknesses}"
                     : "⚠ " + card.LastApiError;

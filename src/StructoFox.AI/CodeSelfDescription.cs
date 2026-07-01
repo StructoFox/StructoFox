@@ -45,6 +45,12 @@ public static class CodeSelfDescription
             using var svc = AiProviders.Create(card);
             svc.MaxTokens = card.MaxTokens > 0 ? card.MaxTokens : 200;
 
+            // Bound the whole self-description: a local model that's still loading (or unreachable) must not
+            // leave the UI waiting forever — cancel after a while and report it instead.
+            using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timed.CancelAfter(TimeSpan.FromSeconds(45));
+            ct = timed.Token;
+
             var desc = await Ask(svc, DescriptionPrompt, ct);
             if (desc is not null)
             {
@@ -63,14 +69,18 @@ public static class CodeSelfDescription
 
             // Fallback for coder / base models that ignore the structured format (yet are exactly the ones we
             // most want for generation): prime a sentence completion and harvest known languages from the text.
+            string? free = null;
             if (string.IsNullOrWhiteSpace(card.Strengths))
             {
-                var free = await Ask(svc, StrengthsCompletionPrompt, ct);
+                free = await Ask(svc, StrengthsCompletionPrompt, ct);
                 var found = free is null ? new() : ExtractLanguages(free);
                 if (found.Count > 0) card.Strengths = string.Join(", ", found);
             }
 
-            card.LastApiError = "";
+            // Nothing came back at all → most likely the model was unreachable or timed out. Say so.
+            card.LastApiError = desc is null && langs is null && free is null && string.IsNullOrWhiteSpace(card.Strengths)
+                ? "No response from the model (timeout or unreachable?)."
+                : "";
             return true;
         }
         catch (Exception ex)
