@@ -20,14 +20,22 @@ public static class SubroutineLinkDialog
     public static string RefName(string projFolder, string refId)
     {
         if (string.IsNullOrEmpty(refId)) return "";
+        var nsFull = NamespaceService.FullNames(projFolder);
+        string Qualify(string nsId, string tail)
+        {
+            var ns = nsFull.GetValueOrDefault(nsId, "");
+            return string.IsNullOrEmpty(ns) ? tail : $"{ns}.{tail}";
+        }
         var hash = refId.IndexOf('#');
         if (hash >= 0)
         {
             var cls = CodeEntityService.LoadAll(projFolder, "Class").FirstOrDefault(c => c.Id == refId[..hash]);
-            var m   = cls?.Methods.FirstOrDefault(x => x.Id == refId[(hash + 1)..]);
-            return cls is null ? refId : $"{cls.Name}.{m?.Name ?? "?"}";
+            if (cls is null) return refId;
+            var m = cls.Methods.FirstOrDefault(x => x.Id == refId[(hash + 1)..]);
+            return Qualify(cls.Namespace, $"{cls.Name}.{m?.Name ?? "?"}");
         }
-        return CodeEntityService.LoadAll(projFolder, "Function").FirstOrDefault(f => f.Id == refId)?.Name ?? refId;
+        var fn = CodeEntityService.LoadAll(projFolder, "Function").FirstOrDefault(f => f.Id == refId);
+        return fn is null ? refId : Qualify(fn.Namespace, fn.Name);
     }
 
     public static Task<string?> Show(Window owner, string projFolder, string suggestedName, string? excludeKey = null)
