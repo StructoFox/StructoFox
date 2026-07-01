@@ -40,10 +40,10 @@ public class DiagramDecorDialog : Window
     readonly TextBox  _infoExtra     = new() { AcceptsReturn = true, MinHeight = 56, TextWrapping = TextWrapping.Wrap };
 
     public static Task<string?> Show(Window owner, string title, DiagramStyle style,
-        Func<(DiagramStyle style, string title)?>? fromPap = null)
-        => new DiagramDecorDialog(title, style, fromPap).ShowDialog<string?>(owner);
+        Func<(DiagramStyle style, string title)?>? fromPap = null, string? projectName = null)
+        => new DiagramDecorDialog(title, style, fromPap, projectName).ShowDialog<string?>(owner);
 
-    DiagramDecorDialog(string title, DiagramStyle style, Func<(DiagramStyle style, string title)?>? fromPap)
+    DiagramDecorDialog(string title, DiagramStyle style, Func<(DiagramStyle style, string title)?>? fromPap, string? projectName)
     {
         _style = style;
         Title                 = Loc.S("Decor_Title");
@@ -85,6 +85,20 @@ public class DiagramDecorDialog : Window
         _infoExtra.Text = style.InfoExtra;
         foreach (var b in new[] { _infoName, _infoProject, _infoProjectNo, _infoVersion, _infoDate, _infoAuthor, _infoExtra })
             ThemeInput(b);
+
+        // Autofill suggestions for empty fields: project name, the diagram/function name, today's date, and the
+        // user name from Options. Only fill empties so an existing header is never overwritten.
+        if (string.IsNullOrWhiteSpace(_infoProject.Text) && !string.IsNullOrWhiteSpace(projectName)) _infoProject.Text = projectName;
+        if (string.IsNullOrWhiteSpace(_infoName.Text)    && !string.IsNullOrWhiteSpace(title))       _infoName.Text = title;
+        if (string.IsNullOrWhiteSpace(_infoDate.Text))                                                _infoDate.Text = DateTime.Now.ToString("d");
+        if (string.IsNullOrWhiteSpace(_infoAuthor.Text)  && !string.IsNullOrWhiteSpace(AppSettings.UserName)) _infoAuthor.Text = AppSettings.UserName;
+
+        // Date field with a "today" (calendar) button that (re)sets it to the current date.
+        var todayBtn = Ui.Btn("📅"); todayBtn.Padding = new(8, 4); ToolTip.SetTip(todayBtn, Loc.S("Decor_Today"));
+        todayBtn.Click += (_, _) => _infoDate.Text = DateTime.Now.ToString("d");
+        var dateCell = new Grid { ColumnSpacing = 4, ColumnDefinitions = new("*,Auto") };
+        _infoDate.SetValue(Grid.ColumnProperty, 0); todayBtn.SetValue(Grid.ColumnProperty, 1);
+        dateCell.Children.Add(_infoDate); dateCell.Children.Add(todayBtn);
 
         var browse = Ui.Btn(Loc.S("Decor_Browse"));
         browse.Click += async (_, _) => { var p = await PickImageAsync(); if (p is not null) _logo.Text = p; };
@@ -152,7 +166,7 @@ public class DiagramDecorDialog : Window
             {
                 ("Decor_InfoName", _infoName), ("Decor_InfoProject", _infoProject),
                 ("Decor_InfoProjectNo", _infoProjectNo), ("Decor_InfoVersion", _infoVersion),
-                ("Decor_InfoDate", _infoDate), ("Decor_InfoAuthor", _infoAuthor),
+                ("Decor_InfoDate", dateCell), ("Decor_InfoAuthor", _infoAuthor),
             };
             for (int i = 0; i < pairs.Length; i++)
             {

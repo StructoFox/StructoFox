@@ -304,7 +304,8 @@ public class StructogramWindow : Window
     {
         // Offer to pull the whole header from the matching flowchart (same function/method key).
         var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style,
-            () => { var fc = FlowChartService.Load(_projFolder, _key); return (fc.Style, fc.Title); });
+            () => { var fc = FlowChartService.Load(_projFolder, _key); return (fc.Style, fc.Title); },
+            ProjectService.DisplayName(_projFolder));
         if (newTitle is null) return;
         _data.Title = newTitle;
         Save();

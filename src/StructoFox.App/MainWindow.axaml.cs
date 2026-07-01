@@ -193,6 +193,14 @@ public partial class MainWindow : Window
         var defHeader = new MenuItem { Header = Loc.S("Menu_DefaultHeader") };
         defHeader.Click += (_, _) => CrashHandler.Safe(() => _ = DefaultHeaderDialog.Show(this), "DefaultHeader");
         options.Items.Add(defHeader);
+
+        var userName = new MenuItem { Header = Loc.S("Menu_UserName") };
+        userName.Click += (_, _) => CrashHandler.Safe(async () =>
+        {
+            var n = await PromptDialog.Show(this, Loc.S("Opt_UserNamePrompt"), AppSettings.UserName);
+            if (n is not null) AppSettings.UserName = n.Trim();
+        }, "UserName");
+        options.Items.Add(userName);
         options.Items.Add(new Separator());
 
         foreach (var (key, labelKey) in SuppressStore.Known)

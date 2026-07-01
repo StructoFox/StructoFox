@@ -677,7 +677,7 @@ public class FlowChartWindow : Window
     // Opens the decoration dialog (title / watermark / logo) and re-applies on OK.
     async Task OpenDecor()
     {
-        var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style);
+        var newTitle = await DiagramDecorDialog.Show(this, _data.Title, _style, null, ProjectService.DisplayName(_projFolder));
         if (newTitle is null) return;
         _data.Title = newTitle;
         Save();

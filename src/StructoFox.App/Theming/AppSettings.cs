@@ -71,4 +71,8 @@ public static class AppSettings
     // (in which case Loc falls back to the OS culture).
     public const string LangKey = "lang";
     public static string Lang { get => GetStr(LangKey, ""); set => SetStr(LangKey, value); }
+
+    // The user's name — suggested as the header's "author" field on new diagrams.
+    public const string UserNameKey = "user_name";
+    public static string UserName { get => GetStr(UserNameKey, ""); set => SetStr(UserNameKey, value); }
 }
