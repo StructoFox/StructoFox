@@ -15,10 +15,26 @@ namespace StructoFox.App;
 /// </summary>
 public static class SubroutineLinkDialog
 {
+    /// <summary>Resolves a subroutine RefId to a display name: a function's name, or "Class.method" for a
+    /// method key ("classId#methodId"). Falls back to the raw id if it can't be resolved.</summary>
+    public static string RefName(string projFolder, string refId)
+    {
+        if (string.IsNullOrEmpty(refId)) return "";
+        var hash = refId.IndexOf('#');
+        if (hash >= 0)
+        {
+            var cls = CodeEntityService.LoadAll(projFolder, "Class").FirstOrDefault(c => c.Id == refId[..hash]);
+            var m   = cls?.Methods.FirstOrDefault(x => x.Id == refId[(hash + 1)..]);
+            return cls is null ? refId : $"{cls.Name}.{m?.Name ?? "?"}";
+        }
+        return CodeEntityService.LoadAll(projFolder, "Function").FirstOrDefault(f => f.Id == refId)?.Name ?? refId;
+    }
+
     public static Task<string?> Show(Window owner, string projFolder, string suggestedName)
     {
-        var funcs = CodeEntityService.LoadAll(projFolder, "Function").ToList();
-        var hasExisting = funcs.Count > 0;
+        var funcs   = CodeEntityService.LoadAll(projFolder, "Function").ToList();
+        var classes = CodeEntityService.LoadAll(projFolder, "Class").ToList();
+        var hasExisting = funcs.Count > 0 || classes.Any(c => c.Methods.Count > 0);
 
         var dlg = new Window
         {
@@ -40,34 +56,42 @@ public static class SubroutineLinkDialog
         var pickExisting = new RadioButton { Content = Loc.S("Sub_PickExisting"), IsChecked = hasExisting, IsEnabled = hasExisting };
         var createNew    = new RadioButton { Content = Loc.S("Sub_CreateNew"),    IsChecked = !hasExisting };
 
-        var list = new ListBox { SelectionMode = SelectionMode.Single, MinHeight = 180 };
-        Ui.Theme(list, TemplatedControl.BackgroundProperty,  "ControlBgBrush");
-        Ui.Theme(list, TemplatedControl.ForegroundProperty,  "SidebarTextBrush");
-        Ui.Theme(list, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
+        // A tree: functions as leaves, classes expandable with their methods (leaf = classId#methodId).
+        var tree = new TreeView { MinHeight = 200 };
+        Ui.Theme(tree, TemplatedControl.BackgroundProperty,  "ControlBgBrush");
+        Ui.Theme(tree, TemplatedControl.ForegroundProperty,  "SidebarTextBrush");
+        Ui.Theme(tree, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
 
         var nameBox = new TextBox { Text = suggestedName, MinWidth = 320 };
         Ui.Theme(nameBox, TextBox.BackgroundProperty,  "InputBgBrush");
         Ui.Theme(nameBox, TextBox.ForegroundProperty,  "SidebarTextBrush");
         Ui.Theme(nameBox, TextBox.BorderBrushProperty, "ControlBorderBrush");
 
-        // Fills the existing-function list with the functions of the selected namespace.
-        void RefillList()
+        // Fills the tree with the functions + classes (→ methods) of the selected namespace.
+        void RefillTree()
         {
             var nsId = NsId();
-            list.Items.Clear();
+            tree.Items.Clear();
             foreach (var f in funcs.Where(f => f.Namespace == nsId).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
-                list.Items.Add(new ListBoxItem { Content = f.Name, Tag = f.Id });
+                tree.Items.Add(new TreeViewItem { Header = "ƒ  " + f.Name, Tag = f.Id });
+            foreach (var c in classes.Where(c => c.Namespace == nsId).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                var ci = new TreeViewItem { Header = "▸  " + c.Name, IsExpanded = true };   // class node: not a target
+                foreach (var m in c.Methods.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
+                    ci.Items.Add(new TreeViewItem { Header = c.Name + "." + m.Name, Tag = $"{c.Id}#{m.Id}" });
+                tree.Items.Add(ci);
+            }
         }
         // Greys out whichever mode isn't active, so it's obvious which input matters.
         void SyncEnabled()
         {
-            list.IsEnabled    = pickExisting.IsChecked == true;
+            tree.IsEnabled    = pickExisting.IsChecked == true;
             nameBox.IsEnabled = createNew.IsChecked == true;
         }
-        nsCombo.SelectionChanged += (_, _) => RefillList();
+        nsCombo.SelectionChanged += (_, _) => RefillTree();
         pickExisting.IsCheckedChanged += (_, _) => SyncEnabled();
         createNew.IsCheckedChanged    += (_, _) => SyncEnabled();
-        RefillList();
+        RefillTree();
         SyncEnabled();
 
         var ok     = Ui.Btn(Loc.S("Common_OK"));     ok.IsDefault = true;
@@ -78,8 +102,8 @@ public static class SubroutineLinkDialog
         {
             if (pickExisting.IsChecked == true)
             {
-                if (list.SelectedItem is ListBoxItem { Tag: string id }) dlg.Close(id);
-                return;   // nothing picked → stay open
+                if (tree.SelectedItem is TreeViewItem { Tag: string id }) dlg.Close(id);   // a function or a method leaf
+                return;   // nothing selectable picked (e.g. a class node) → stay open
             }
 
             var name = nameBox.Text?.Trim();
@@ -100,7 +124,7 @@ public static class SubroutineLinkDialog
             CodeEntityService.Save(projFolder, "Function", fn);
             dlg.Close(fn.Id);
         };
-        list.DoubleTapped += (_, _) => { if (pickExisting.IsChecked == true && list.SelectedItem is ListBoxItem { Tag: string id }) dlg.Close(id); };
+        tree.DoubleTapped += (_, _) => { if (pickExisting.IsChecked == true && tree.SelectedItem is TreeViewItem { Tag: string id }) dlg.Close(id); };
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { cancel, ok } };
 
@@ -112,7 +136,7 @@ public static class SubroutineLinkDialog
                 new TextBlock { Text = Loc.S("Sub_Namespace") },
                 nsCombo,
                 pickExisting,
-                list,
+                tree,
                 createNew,
                 nameBox,
                 btnRow,

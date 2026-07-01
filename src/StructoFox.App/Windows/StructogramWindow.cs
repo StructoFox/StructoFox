@@ -497,12 +497,10 @@ public class StructogramWindow : Window
         {
             var id = await SubroutineLinkDialog.Show(this, _projFolder, "");
             if (string.IsNullOrEmpty(id)) return;
-            var fn = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == id);
-            if (fn is null) return;
-            b.RefId = fn.Id; b.Text = fn.Name; Save(); Rebuild();
+            b.RefId = id; b.Text = SubroutineLinkDialog.RefName(_projFolder, id); Save(); Rebuild();
         }
-        var f = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == b.RefId);
-        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, b.RefId, f?.Name ?? b.Text, _themePath);
+        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, b.RefId,
+            SubroutineLinkDialog.RefName(_projFolder, b.RefId), _themePath);
     }
 
     // The classic if/else box (DIN 66261): the condition sits in a triangle formed by two diagonals running

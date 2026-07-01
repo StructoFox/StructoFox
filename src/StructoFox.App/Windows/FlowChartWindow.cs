@@ -3377,14 +3377,12 @@ public class FlowChartWindow : Window
         {
             var id = await SubroutineLinkDialog.Show(this, _projFolder, "");
             if (string.IsNullOrEmpty(id)) return;
-            var fn = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == id);
-            if (fn is null) return;
-            node.RefId = fn.Id; node.Text = fn.Name; Save();
+            node.RefId = id; node.Text = SubroutineLinkDialog.RefName(_projFolder, id); Save();
             if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
             RenderNode(node); UpdateConnectionsFor(node.Id);
         }
-        var f = CodeEntityService.LoadAll(_projFolder, "Function").FirstOrDefault(x => x.Id == node.RefId);
-        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, node.RefId, f?.Name ?? node.Text, _themePath);
+        _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, node.RefId,
+            SubroutineLinkDialog.RefName(_projFolder, node.RefId), _themePath);
     }
 
     // ── Drag functions in from the cockpit (→ subroutine nodes) ──────────────
