@@ -3375,9 +3375,9 @@ public class FlowChartWindow : Window
     {
         if (string.IsNullOrEmpty(node.RefId))
         {
-            var id = await SubroutineLinkDialog.Show(this, _projFolder, "", _key);
-            if (string.IsNullOrEmpty(id)) return;
-            node.RefId = id; node.Text = SubroutineLinkDialog.RefName(_projFolder, id); Save();
+            var r = await SubroutineLinkDialog.Show(this, _projFolder, "", _key);
+            if (r is null || string.IsNullOrEmpty(r.Id)) return;
+            node.RefId = r.Id; node.Text = SubroutineLinkDialog.CallText(_projFolder, r); Save();
             if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
             RenderNode(node); UpdateConnectionsFor(node.Id);
         }

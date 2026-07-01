@@ -15,6 +15,22 @@ namespace StructoFox.App;
 /// </summary>
 public static class SubroutineLinkDialog
 {
+    /// <summary>What the picker returns: the linked target id plus an optional call form (assign-to variable
+    /// and arguments), so the caller can label the node as "variable = Name(args)".</summary>
+    public sealed record SubResult(string Id, string AssignTo, string Args);
+
+    /// <summary>Builds the node label for a linked call: the qualified name, with optional "(args)" and an
+    /// optional "variable = " prefix. Plain name when neither is given (backward-compatible).</summary>
+    public static string CallText(string projFolder, SubResult r)
+    {
+        var name = RefName(projFolder, r.Id);
+        var assign = r.AssignTo.Trim();
+        var args   = r.Args.Trim();
+        if (assign.Length == 0 && args.Length == 0) return name;
+        var call = $"{name}({args})";
+        return assign.Length == 0 ? call : $"{assign} = {call}";
+    }
+
     /// <summary>Resolves a subroutine RefId to a display name: a function's name, or "Class.method" for a
     /// method key ("classId#methodId"). Falls back to the raw id if it can't be resolved.</summary>
     public static string RefName(string projFolder, string refId)
@@ -38,7 +54,7 @@ public static class SubroutineLinkDialog
         return fn is null ? refId : Qualify(fn.Namespace, fn.Name);
     }
 
-    public static Task<string?> Show(Window owner, string projFolder, string suggestedName, string? excludeKey = null)
+    public static Task<SubResult?> Show(Window owner, string projFolder, string suggestedName, string? excludeKey = null)
     {
         // Callable targets exclude the entry point (you don't call main) and the current diagram itself
         // (a subroutine can't be its own body — that would recurse forever).
@@ -74,9 +90,15 @@ public static class SubroutineLinkDialog
         Ui.Theme(tree, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
 
         var nameBox = new TextBox { Text = suggestedName, MinWidth = 320 };
-        Ui.Theme(nameBox, TextBox.BackgroundProperty,  "InputBgBrush");
-        Ui.Theme(nameBox, TextBox.ForegroundProperty,  "SidebarTextBrush");
-        Ui.Theme(nameBox, TextBox.BorderBrushProperty, "ControlBorderBrush");
+        // Optional call form applied to whatever target is chosen/created: "assignTo = Name(args)".
+        var assignBox = new TextBox { MinWidth = 150, PlaceholderText = Loc.S("Sub_AssignHint") };
+        var argsBox   = new TextBox { MinWidth = 150, PlaceholderText = Loc.S("Sub_ArgsHint") };
+        foreach (var b in new[] { nameBox, assignBox, argsBox })
+        {
+            Ui.Theme(b, TextBox.BackgroundProperty,  "InputBgBrush");
+            Ui.Theme(b, TextBox.ForegroundProperty,  "SidebarTextBrush");
+            Ui.Theme(b, TextBox.BorderBrushProperty, "ControlBorderBrush");
+        }
 
         // Fills the tree with the functions + classes (→ methods) of the selected namespace.
         void RefillTree()
@@ -115,11 +137,13 @@ public static class SubroutineLinkDialog
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true;
         cancel.Click += (_, _) => dlg.Close(null);
 
+        SubResult Result(string id) => new(id, assignBox.Text ?? "", argsBox.Text ?? "");
+
         ok.Click += async (_, _) =>
         {
             if (pickExisting.IsChecked == true)
             {
-                if (tree.SelectedItem is TreeViewItem { Tag: string id }) dlg.Close(id);   // a function or a method leaf
+                if (tree.SelectedItem is TreeViewItem { Tag: string id }) dlg.Close(Result(id));   // function or method leaf
                 return;   // nothing selectable picked (e.g. a class node) → stay open
             }
 
@@ -133,15 +157,15 @@ public static class SubroutineLinkDialog
             {
                 var res = await MessageDialog.Show(dlg, Loc.S("Sub_DuplicateMsg"), Loc.S("Sub_DuplicateTitle"), DialogButtons.YesNoCancel);
                 if (res == DialogResult.Cancel) return;          // back to the dialog
-                if (res == DialogResult.Yes) { dlg.Close(dup.Id); return; }   // use the existing one
+                if (res == DialogResult.Yes) { dlg.Close(Result(dup.Id)); return; }   // use the existing one
                 // No → fall through and create another anyway
             }
 
             var fn = new CodeEntity { Name = name, EntityType = CodeEntityType.Function, Namespace = nsId };
             CodeEntityService.Save(projFolder, "Function", fn);
-            dlg.Close(fn.Id);
+            dlg.Close(Result(fn.Id));
         };
-        tree.DoubleTapped += (_, _) => { if (pickExisting.IsChecked == true && tree.SelectedItem is TreeViewItem { Tag: string id }) dlg.Close(id); };
+        tree.DoubleTapped += (_, _) => { if (pickExisting.IsChecked == true && tree.SelectedItem is TreeViewItem { Tag: string id }) dlg.Close(Result(id)); };
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { cancel, ok } };
 
@@ -156,10 +180,12 @@ public static class SubroutineLinkDialog
                 tree,
                 createNew,
                 nameBox,
+                new TextBlock { Text = Loc.S("Sub_CallForm") },
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { assignBox, argsBox } },
                 btnRow,
             },
         };
 
-        return dlg.ShowDialog<string?>(owner);
+        return dlg.ShowDialog<SubResult?>(owner);
     }
 }

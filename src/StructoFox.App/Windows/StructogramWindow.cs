@@ -495,9 +495,9 @@ public class StructogramWindow : Window
     {
         if (string.IsNullOrEmpty(b.RefId))
         {
-            var id = await SubroutineLinkDialog.Show(this, _projFolder, "", _key);
-            if (string.IsNullOrEmpty(id)) return;
-            b.RefId = id; b.Text = SubroutineLinkDialog.RefName(_projFolder, id); Save(); Rebuild();
+            var r = await SubroutineLinkDialog.Show(this, _projFolder, "", _key);
+            if (r is null || string.IsNullOrEmpty(r.Id)) return;
+            b.RefId = r.Id; b.Text = SubroutineLinkDialog.CallText(_projFolder, r); Save(); Rebuild();
         }
         _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, b.RefId,
             SubroutineLinkDialog.RefName(_projFolder, b.RefId), _themePath);
