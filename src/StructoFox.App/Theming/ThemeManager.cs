@@ -139,6 +139,13 @@ public static class ThemeManager
             "RadioButtonOuterEllipseCheckedStroke", "RadioButtonOuterEllipseCheckedStrokePointerOver", "RadioButtonOuterEllipseCheckedStrokePressed");
         Set(onAccent,
             "RadioButtonCheckGlyphFill", "RadioButtonCheckGlyphFillPointerOver", "RadioButtonCheckGlyphFillPressed");
+
+        // TreeView: item label AND the expand/collapse chevron are drawn from Fluent's own brushes (white by
+        // default) — pin them to the theme text colour so the arrow follows the theme like everything else.
+        Set(text,
+            "TreeViewItemForeground", "TreeViewItemForegroundPointerOver", "TreeViewItemForegroundDisabled",
+            "TreeViewItemForegroundSelected", "TreeViewItemForegroundSelectedPointerOver",
+            "TreeViewItemForegroundPressed", "TreeViewItemForegroundSelectedPressed");
     }
 
     // The theme worn out of the box: a clean light "drawing board" surface for diagrams & code.
