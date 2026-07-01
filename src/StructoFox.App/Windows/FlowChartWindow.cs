@@ -3431,13 +3431,14 @@ public class FlowChartWindow : Window
 
     static bool IsOffPage(FlowNode n) => n.Kind == FlowNodeKind.Connector && n.Symbol == FlowSymbol.OffPageConnector;
 
-    // Next free single-letter label (A, B, …, then A1, A2, …) not used by an existing off-page exit.
+    // A readable default off-page label: "Page 2", "Page 3", … — the first number not already used by an
+    // existing off-page exit (page 1 is the current/first page, so numbering starts at 2).
     string NextOffPageLabel()
     {
+        var word = Loc.S("Flow_PageWord");
         var used = _data.Nodes.Where(n => IsOffPage(n) && !n.OffPageEntry)
             .Select(n => n.Text.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        for (char c = 'A'; c <= 'Z'; c++) if (!used.Contains(c.ToString())) return c.ToString();
-        for (int i = 1; ; i++) for (char c = 'A'; c <= 'Z'; c++) { var s = $"{c}{i}"; if (!used.Contains(s)) return s; }
+        for (int n = 2; ; n++) { var s = $"{word} {n}"; if (!used.Contains(s)) return s; }
     }
 
     // Double-clicking an off-page EXIT jumps to (creating if needed) the page holding its ENTRY.
