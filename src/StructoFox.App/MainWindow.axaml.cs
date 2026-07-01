@@ -194,21 +194,9 @@ public partial class MainWindow : Window
         defHeader.Click += (_, _) => CrashHandler.Safe(() => _ = DefaultHeaderDialog.Show(this), "DefaultHeader");
         options.Items.Add(defHeader);
 
-        var userName = new MenuItem { Header = Loc.S("Menu_UserName") };
-        userName.Click += (_, _) => CrashHandler.Safe(async () =>
-        {
-            var n = await PromptDialog.Show(this, Loc.S("Opt_UserNamePrompt"), AppSettings.UserName);
-            if (n is not null) AppSettings.UserName = n.Trim();
-        }, "UserName");
-        options.Items.Add(userName);
-
-        var userDept = new MenuItem { Header = Loc.S("Menu_UserDept") };
-        userDept.Click += (_, _) => CrashHandler.Safe(async () =>
-        {
-            var d = await PromptDialog.Show(this, Loc.S("Opt_UserDeptPrompt"), AppSettings.UserDepartment);
-            if (d is not null) AppSettings.UserDepartment = d.Trim();
-        }, "UserDept");
-        options.Items.Add(userDept);
+        var userInfo = new MenuItem { Header = Loc.S("Menu_UserInfo") };
+        userInfo.Click += (_, _) => CrashHandler.Safe(() => _ = UserInfoDialog.Show(this), "UserInfo");
+        options.Items.Add(userInfo);
         options.Items.Add(new Separator());
 
         foreach (var (key, labelKey) in SuppressStore.Known)
