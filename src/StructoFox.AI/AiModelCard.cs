@@ -37,6 +37,14 @@ public sealed class AiModelCard
     public string Strengths       { get; set; } = "";   // languages it likes most
     public string Weaknesses      { get; set; } = "";   // languages it likes least
     public string LastApiError    { get; set; } = "";   // last error, so we don't hammer a misconfigured key
+
+    /// <summary>A field-by-field copy — so an edit dialog can work on a draft and only commit it on Save.</summary>
+    public AiModelCard Clone() => new()
+    {
+        Name = Name, Provider = Provider, Model = Model, ServerUrl = ServerUrl, MaxTokens = MaxTokens,
+        Enabled = Enabled, MaxContinuations = MaxContinuations, Role = Role, SelfDescription = SelfDescription,
+        Strengths = Strengths, Weaknesses = Weaknesses, LastApiError = LastApiError,
+    };
 }
 
 /// <summary>The persisted set of model cards (JSON in the user's app-data; keys live in <see cref="KeyStore"/>).</summary>

@@ -3,7 +3,7 @@ using StructoFox.Core.Models;
 
 namespace StructoFox.Core;
 
-public enum ExportLanguage { CSharp, Cpp, Java, TypeScript, Python, Kotlin, Swift, Php, Go, Rust, Verse }
+public enum ExportLanguage { CSharp, Cpp, Java, TypeScript, Python, Kotlin, Swift, Php, Go, Rust, Verse, JavaScript, C }
 
 /// <summary>
 /// Generates code skeletons from CodeEntity definitions for several languages.
@@ -16,8 +16,10 @@ public static class CodeExportService
     {
         ExportLanguage.CSharp     => "cs",
         ExportLanguage.Cpp        => "h",
+        ExportLanguage.C          => "c",
         ExportLanguage.Java       => "java",
         ExportLanguage.TypeScript => "ts",
+        ExportLanguage.JavaScript => "js",
         ExportLanguage.Python     => "py",
         ExportLanguage.Kotlin     => "kt",
         ExportLanguage.Swift      => "swift",
@@ -34,23 +36,41 @@ public static class CodeExportService
     /// <summary>Project folder used to load per-method structograms for body generation. Null = skeleton bodies only.</summary>
     private static string? _projForBodies;
 
-    public static string Generate(IEnumerable<CodeEntity> entities, ExportLanguage lang, string? projFolder = null)
+    /// <summary>Ids of Object entities instantiated inside a flow (locals) — their file-level "// instance:" note is skipped.</summary>
+    private static HashSet<string> _localObjectIds = new();
+
+    // Shared prelude for single- and multi-file generation: sets the body source + local-object set, resolves
+    // namespace ids → dotted names, and returns the emittable entities with id→name / entity→namespace lookups.
+    private static (List<CodeEntity> all, Func<string, string> name, Func<CodeEntity, string> nsName)
+        Prepare(IEnumerable<CodeEntity> entities, string? projFolder)
     {
         _projForBodies = projFolder;
-        var all  = entities.ToList();
-        var byId = all.ToDictionary(e => e.Id);
+        var list = entities.ToList();
+        var byId = list.ToDictionary(e => e.Id);
         string Name(string id) => byId.TryGetValue(id, out var e) ? e.Name : "";
 
-        // Namespaces are referenced by id; resolve id → full dotted name (nested namespaces). Sources:
-        // the entity set plus disk. Legacy values that aren't an id fall back to a literal name. The
-        // Namespace entities themselves aren't emitted.
-        var nsEntities = all.Where(e => e.EntityType == CodeEntityType.Namespace).ToList();
+        var nsEntities = list.Where(e => e.EntityType == CodeEntityType.Namespace).ToList();
         if (projFolder is not null)
             nsEntities = nsEntities.Concat(CodeEntityService.LoadAll(projFolder, "Namespace"))
                                    .GroupBy(n => n.Id).Select(g => g.Last()).ToList();
         var nsById = NamespaceService.FullNames(nsEntities);
         string NsName(CodeEntity e) => string.IsNullOrEmpty(e.Namespace) ? "" : (nsById.TryGetValue(e.Namespace, out var nm) ? nm : e.Namespace.Trim());
-        all = all.Where(e => e.EntityType != CodeEntityType.Namespace).ToList();
+
+        var all = list.Where(e => e.EntityType != CodeEntityType.Namespace).ToList();
+
+        _localObjectIds = new HashSet<string>();
+        if (projFolder is not null)
+            foreach (var o in all.Where(e => e.EntityType == CodeEntityType.Object))
+                if (ObjectUsageScanner.Scan(projFolder, o).Any(u => u.Kind == ObjectUsageScanner.UseKind.Create))
+                    _localObjectIds.Add(o.Id);
+
+        return (all, Name, NsName);
+    }
+
+    public static string Generate(IEnumerable<CodeEntity> entities, ExportLanguage lang, string? projFolder = null)
+    {
+        var (all, Name, NsName) = Prepare(entities, projFolder);
+        SetFlatten(all, NsName, lang);
 
         var sb = new StringBuilder();
         sb.AppendLine($"{Cmt(lang)} Auto-generated skeleton from StructoFox. Fill in the logic.");
@@ -58,7 +78,18 @@ public static class CodeExportService
         if (lang == ExportLanguage.Python) sb.AppendLine(PythonImports(all));
         sb.AppendLine();
 
-        var groups = all.GroupBy(NsName).OrderBy(g => g.Key);
+        // C++: emit the entry point LAST so it can call functions and instantiate classes defined above it
+        // (a class can't be forward-declared for by-value use). Free functions still get forward declarations.
+        CodeEntity? cppEntry = lang == ExportLanguage.Cpp
+            ? all.FirstOrDefault(e => e.EntityType == CodeEntityType.Function && e.IsEntryPoint) : null;
+        var emit = cppEntry is null ? all : all.Where(e => e != cppEntry).ToList();
+
+        // Neither C nor C++ looks ahead: things must be declared before use. C emits full type typedefs +
+        // all prototypes; C++ needs only free-function prototypes (types are ordered before the entry point).
+        if (lang == ExportLanguage.C) EmitCForward(sb, all, Name);
+        else if (lang == ExportLanguage.Cpp) EmitCppForward(sb, emit, NsName);
+
+        var groups = emit.GroupBy(NsName).OrderBy(g => g.Key);
 
         foreach (var grp in groups)
         {
@@ -81,7 +112,22 @@ public static class CodeExportService
                 }
             }
 
-            foreach (var e in grp.OrderBy(SortRank).ThenBy(x => x.Name))
+            var ordered = grp.OrderBy(SortRank).ThenBy(x => x.Name).ToList();
+
+            // C# and Java have no free functions — every function must live inside a class. Gather all
+            // functions of this namespace (entry point + helpers) into one `Program` holder class.
+            if (lang is ExportLanguage.CSharp or ExportLanguage.Java)
+            {
+                var funcs = ordered.Where(x => x.EntityType == CodeEntityType.Function).ToList();
+                if (funcs.Count > 0)
+                {
+                    EmitFunctionHolder(sb, funcs, lang, ind, Name);
+                    sb.AppendLine();
+                }
+                ordered = ordered.Where(x => x.EntityType != CodeEntityType.Function).ToList();
+            }
+
+            foreach (var e in ordered)
             {
                 EmitEntity(sb, e, lang, ind, Name);
                 sb.AppendLine();
@@ -90,7 +136,658 @@ public static class CodeExportService
             if (hasNs && braceNs) sb.AppendLine("}");
         }
 
+        // C++ entry point, emitted last so everything it uses is already declared/defined above.
+        if (cppEntry is not null) { EmitEntity(sb, cppEntry, lang, "", Name); sb.AppendLine(); }
+
         return sb.ToString().TrimEnd() + "\n";
+    }
+
+    // ── Multi-file generation (one file per type + a functions file; C/C++ = shared header + units) ──
+
+    private const string FileHeader = "Auto-generated skeleton from StructoFox. Fill in the logic.";
+
+    /// <summary>Splits the project into multiple source files. Returns (relative path, content) pairs, or null
+    /// if the language isn't multi-file capable yet (caller falls back to single-file <see cref="Generate"/>).</summary>
+    public static List<(string path, string content)>? GenerateFiles(
+        IEnumerable<CodeEntity> entities, ExportLanguage lang, string projectName, string? projFolder = null)
+    {
+        var (all, name, ns) = Prepare(entities, projFolder);
+        SetFlatten(all, ns, lang);
+        return lang switch
+        {
+            ExportLanguage.CSharp => CSharpFiles(all, name, ns),
+            ExportLanguage.C      => CFiles(all, name, projectName),
+            ExportLanguage.Cpp    => CppFiles(all, name, ns),
+            ExportLanguage.Java   => JavaFiles(all, name, ns),
+            ExportLanguage.Go     => GoFiles(all, name),
+            ExportLanguage.Php    => PhpFiles(all, name, ns),
+            ExportLanguage.TypeScript => TypeScriptFiles(all, name),
+            ExportLanguage.Python => PythonFiles(all, name),
+            ExportLanguage.Rust   => RustFiles(all, name),
+            ExportLanguage.JavaScript => JavaScriptFiles(all, name),
+            ExportLanguage.Kotlin => KotlinFiles(all, name),
+            ExportLanguage.Swift  => SwiftFiles(all, name),
+            _                     => null,
+        };
+    }
+
+    static bool IsType(CodeEntity e) =>
+        e.EntityType is CodeEntityType.Enum or CodeEntityType.Interface or CodeEntityType.Struct or CodeEntityType.Class;
+
+    // ── C#: one .cs per type + Functions.cs (holds the entry point + free functions + object notes) ──
+    static List<(string, string)> CSharpFiles(List<CodeEntity> all, Func<string, string> name, Func<CodeEntity, string> ns)
+    {
+        var files = new List<(string, string)>();
+
+        // Wraps some emitted content in a file header + (optional) namespace block.
+        string File(string nsName, Action<StringBuilder, string> body)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine();
+            if (!string.IsNullOrWhiteSpace(nsName)) { sb.AppendLine($"namespace {nsName}"); sb.AppendLine("{"); body(sb, "    "); sb.AppendLine("}"); }
+            else body(sb, "");
+            return sb.ToString().TrimEnd() + "\n";
+        }
+
+        foreach (var e in all.Where(IsType))
+            files.Add(($"{e.Name}.cs", File(ns(e), (sb, ind) => EmitEntity(sb, e, ExportLanguage.CSharp, ind, name))));
+
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        if (funcs.Count > 0 || objs.Count > 0)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine();
+            foreach (var grp in funcs.Concat(objs).GroupBy(ns).OrderBy(g => g.Key))
+            {
+                bool hasNs = !string.IsNullOrWhiteSpace(grp.Key);
+                var ind = hasNs ? "    " : "";
+                if (hasNs) { sb.AppendLine($"namespace {grp.Key}"); sb.AppendLine("{"); }
+                var gf = grp.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+                if (gf.Count > 0) { EmitFunctionHolder(sb, gf, ExportLanguage.CSharp, ind, name); sb.AppendLine(); }
+                foreach (var o in grp.Where(e => e.EntityType == CodeEntityType.Object)) { EmitEntity(sb, o, ExportLanguage.CSharp, ind, name); }
+                if (hasNs) sb.AppendLine("}");
+            }
+            files.Add(("Functions.cs", sb.ToString().TrimEnd() + "\n"));
+        }
+        return files;
+    }
+
+    // ── C: a shared <Project>.h (types + prototypes) + main.c (free funcs + entry) + one .c per class ──
+    static List<(string, string)> CFiles(List<CodeEntity> all, Func<string, string> name, string projectName)
+    {
+        var files   = new List<(string, string)>();
+        var hdr      = Sanitize(projectName);
+        var guard    = hdr.ToUpperInvariant() + "_H";
+        var classes  = all.Where(e => e.EntityType is CodeEntityType.Class or CodeEntityType.Struct).ToList();
+        var funcs    = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+
+        var h = new StringBuilder();
+        h.AppendLine($"#ifndef {guard}");
+        h.AppendLine($"#define {guard}");
+        h.AppendLine();
+        h.AppendLine("#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <string.h>");
+        h.AppendLine();
+        EmitCForward(h, all, name);                       // enum typedefs, struct fwd typedefs, prototypes
+        foreach (var c in classes) EmitCStruct(h, c, "", name);   // full struct definitions
+        h.AppendLine();
+        h.AppendLine("#endif");
+        files.Add(($"{hdr}.h", h.ToString()));
+
+        string inc = $"#include \"{hdr}.h\"\n\n";
+
+        var m = new StringBuilder(inc);
+        var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+        foreach (var f in funcs.Where(f => f != entry)) { EmitC(m, f, "", name); m.AppendLine(); }
+        if (entry is not null) { EmitC(m, entry, "", name); m.AppendLine(); }
+        files.Add(("main.c", m.ToString().TrimEnd() + "\n"));
+
+        foreach (var c in classes)
+        {
+            var cb = new StringBuilder(inc);
+            EmitCMethods(cb, c, "", name);
+            files.Add(($"{c.Name}.c", cb.ToString().TrimEnd() + "\n"));
+        }
+        return files;
+    }
+
+    // ── C++: one <Class>.hpp per class (header-only, inline methods) + main.cpp (free funcs + entry) ──
+    static List<(string, string)> CppFiles(List<CodeEntity> all, Func<string, string> name, Func<CodeEntity, string> ns)
+    {
+        var files   = new List<(string, string)>();
+        var classes = all.Where(IsType).ToList();
+        var funcs   = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+
+        foreach (var c in classes)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("#pragma once");
+            sb.AppendLine("#include <iostream>\n#include <string>\n#include <vector>\n#include <map>");
+            sb.AppendLine();
+            var n = ns(c);
+            if (!string.IsNullOrWhiteSpace(n)) { sb.AppendLine($"namespace {n} {{"); EmitEntity(sb, c, ExportLanguage.Cpp, "    ", name); sb.AppendLine("}"); }
+            else EmitEntity(sb, c, ExportLanguage.Cpp, "", name);
+            files.Add(($"{c.Name}.hpp", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        var m = new StringBuilder();
+        m.AppendLine("#include <iostream>\n#include <string>\n#include <vector>\n#include <map>");
+        foreach (var c in classes) m.AppendLine($"#include \"{c.Name}.hpp\"");
+        m.AppendLine();
+        var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+        // Forward-declare the free functions EXCEPT the entry point (main is defined below; declaring it as
+        // "void main()" here would clash with its "int main()" definition).
+        EmitCppForward(m, all.Where(e => e != entry).ToList(), ns);
+        foreach (var f in funcs.Where(f => f != entry)) { EmitEntity(m, f, ExportLanguage.Cpp, "", name); m.AppendLine(); }
+        if (entry is not null) { EmitEntity(m, entry, ExportLanguage.Cpp, "", name); m.AppendLine(); }
+        files.Add(("main.cpp", m.ToString().TrimEnd() + "\n"));
+        return files;
+    }
+
+    // ── Java: one .java per public class (in package dirs) + Program.java (entry + static helper methods) ──
+    static List<(string, string)> JavaFiles(List<CodeEntity> all, Func<string, string> name, Func<CodeEntity, string> ns)
+    {
+        var files = new List<(string, string)>();
+
+        string Dir(string nsName) => string.IsNullOrWhiteSpace(nsName) ? "" : nsName.Replace('.', '/') + "/";
+        string Wrap(string nsName, Action<StringBuilder> body)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            if (!string.IsNullOrWhiteSpace(nsName)) { sb.AppendLine($"package {nsName};"); sb.AppendLine(); }
+            body(sb);
+            return sb.ToString().TrimEnd() + "\n";
+        }
+
+        // One public class per file, placed in its package directory (Java requires this).
+        foreach (var e in all.Where(IsType))
+        {
+            var nsName = ns(e);
+            files.Add(($"{Dir(nsName)}{e.Name}.java", Wrap(nsName, sb => EmitEntity(sb, e, ExportLanguage.Java, "", name))));
+        }
+
+        // Free functions have no place in Java → gather them (per namespace) into a Program holder class.
+        foreach (var grp in all.Where(e => e.EntityType == CodeEntityType.Function).GroupBy(ns))
+            files.Add(($"{Dir(grp.Key)}Program.java", Wrap(grp.Key, sb => EmitFunctionHolder(sb, grp.ToList(), ExportLanguage.Java, "", name))));
+
+        return files;
+    }
+
+    // ── Go: one .go per type + main.go (entry + free funcs), ALL in one package ──
+    // Go's package == folder: every .go file in the same directory shares the package and sees the others
+    // WITHOUT any import, so a multi-file split needs no cross-file wiring at all (the easiest case). Namespaces
+    // are ignored here (flat package), matching the single-file behaviour.
+    static List<(string, string)> GoFiles(List<CodeEntity> all, Func<string, string> name)
+    {
+        var files = new List<(string, string)>();
+        // A runnable command is `package main`; a library gets a lowercase package name.
+        bool exe = all.Any(e => e.IsEntryPoint && e.EntityType == CodeEntityType.Function);
+        string pkg = exe ? "main" : "lib";
+
+        string File(Action<StringBuilder> body)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine($"package {pkg}");
+            sb.AppendLine();
+            body(sb);
+            return sb.ToString().TrimEnd() + "\n";
+        }
+
+        foreach (var e in all.Where(IsType))
+            files.Add(($"{e.Name}.go", File(sb => EmitEntity(sb, e, ExportLanguage.Go, "", name))));
+
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        if (funcs.Count > 0 || objs.Count > 0)
+            files.Add(("main.go", File(sb =>
+            {
+                var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+                foreach (var f in funcs.Where(f => f != entry)) { EmitEntity(sb, f, ExportLanguage.Go, "", name); sb.AppendLine(); }
+                foreach (var o in objs) EmitEntity(sb, o, ExportLanguage.Go, "", name);
+                if (entry is not null) { EmitEntity(sb, entry, ExportLanguage.Go, "", name); sb.AppendLine(); }
+            })));
+
+        return files;
+    }
+
+    // ── PHP: one <Class>.php per type (PSR-4) + functions.php + index.php bootstrap with a class autoloader ──
+    // Cross-file class references are resolved by spl_autoload_register (order-independent, so inheritance just
+    // works); free functions aren't autoloadable, so index.php require_once's functions.php explicitly and then
+    // calls the entry point.
+    static List<(string, string)> PhpFiles(List<CodeEntity> all, Func<string, string> name, Func<CodeEntity, string> ns)
+    {
+        var files = new List<(string, string)>();
+        static string NsSep(string dotted) => dotted.Replace('.', '\\');   // PHP namespace separator is '\'
+
+        // One file per type, each with its own (single) namespace declaration.
+        foreach (var e in all.Where(IsType))
+        {
+            var nsName = ns(e);
+            var sb = new StringBuilder();
+            sb.AppendLine("<?php");
+            sb.AppendLine($"// {FileHeader}");
+            if (!string.IsNullOrWhiteSpace(nsName)) sb.AppendLine($"namespace {NsSep(nsName)};");
+            sb.AppendLine();
+            EmitEntity(sb, e, ExportLanguage.Php, "", name);
+            files.Add(($"{e.Name}.php", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        // Free functions (+ file-level object notes) → functions.php. Bracketed `namespace X { … }` blocks let
+        // several namespaces coexist in one file (functions, unlike classes, can't be autoloaded).
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        if (funcs.Count > 0 || objs.Count > 0)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("<?php");
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine();
+            foreach (var grp in funcs.Concat(objs).GroupBy(ns).OrderBy(g => g.Key))
+            {
+                bool hasNs = !string.IsNullOrWhiteSpace(grp.Key);
+                var ind = hasNs ? "    " : "";
+                if (hasNs) sb.AppendLine($"namespace {NsSep(grp.Key)} {{");
+                foreach (var f in grp.Where(x => x.EntityType == CodeEntityType.Function)) { EmitEntity(sb, f, ExportLanguage.Php, ind, name); sb.AppendLine(); }
+                foreach (var o in grp.Where(x => x.EntityType == CodeEntityType.Object)) EmitEntity(sb, o, ExportLanguage.Php, ind, name);
+                if (hasNs) sb.AppendLine("}");
+            }
+            files.Add(("functions.php", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        // index.php: autoload classes on demand (maps Ns\Class → Class.php, flat), pull in the functions file,
+        // and run the entry point if there is one.
+        var boot = new StringBuilder();
+        boot.AppendLine("<?php");
+        boot.AppendLine($"// {FileHeader}");
+        boot.AppendLine();
+        boot.AppendLine("spl_autoload_register(function ($class) {");
+        boot.AppendLine("    $pos   = strrpos($class, '\\\\');");
+        boot.AppendLine("    $short = $pos === false ? $class : substr($class, $pos + 1);");
+        boot.AppendLine("    $file  = __DIR__ . '/' . $short . '.php';");
+        boot.AppendLine("    if (file_exists($file)) require_once $file;");
+        boot.AppendLine("});");
+        if (funcs.Count > 0 || objs.Count > 0) { boot.AppendLine(); boot.AppendLine("require_once __DIR__ . '/functions.php';"); }
+        var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+        if (entry is not null)
+        {
+            var en   = ns(entry);
+            var call = string.IsNullOrWhiteSpace(en) ? entry.Name : "\\" + NsSep(en) + "\\" + entry.Name;
+            boot.AppendLine();
+            boot.AppendLine($"{call}();");
+        }
+        files.Add(("index.php", boot.ToString().TrimEnd() + "\n"));
+
+        return files;
+    }
+
+    // ── TypeScript: src/<Type>.ts per type + functions.ts + index.ts bootstrap (all under src/) ──
+    // ES modules need explicit relative imports; we generate them DETERMINISTICALLY (each file imports the other
+    // project types) so the model never has to invent a path. Namespaces are flattened (one module folder).
+    // Circular imports are safe here: every cross-type reference happens inside a body, not at module top level.
+    static List<(string, string)> TypeScriptFiles(List<CodeEntity> all, Func<string, string> name)
+    {
+        var files     = new List<(string, string)>();
+        var types      = all.Where(IsType).ToList();
+        var typeNames  = types.Select(t => t.Name).ToList();
+
+        // Imports of every project type except `self` (a type doesn't import itself).
+        string Imports(string? self) =>
+            string.Concat(typeNames.Where(n => n != self).Select(n => $"import {{ {n} }} from './{n}';\n"));
+
+        foreach (var e in types)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            var imp = Imports(e.Name);
+            if (imp.Length > 0) { sb.Append(imp); sb.AppendLine(); }
+            EmitEntity(sb, e, ExportLanguage.TypeScript, "", name);
+            files.Add(($"src/{e.Name}.ts", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        if (funcs.Count > 0 || objs.Count > 0)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            var imp = Imports(null);
+            if (imp.Length > 0) { sb.Append(imp); sb.AppendLine(); }
+            var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+            foreach (var f in funcs.Where(f => f != entry)) { EmitEntity(sb, f, ExportLanguage.TypeScript, "", name); sb.AppendLine(); }
+            foreach (var o in objs) EmitEntity(sb, o, ExportLanguage.TypeScript, "", name);
+            if (entry is not null) { EmitEntity(sb, entry, ExportLanguage.TypeScript, "", name); sb.AppendLine(); }
+            files.Add(("src/functions.ts", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        // index.ts bootstrap: import the entry point and run it. Deterministic — excluded from AI filling.
+        var entryFn = funcs.FirstOrDefault(f => f.IsEntryPoint);
+        if (entryFn is not null)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine($"import {{ {entryFn.Name} }} from './functions';");
+            sb.AppendLine();
+            sb.AppendLine($"{entryFn.Name}();");
+            files.Add(("src/index.ts", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        return files;
+    }
+
+    // ── Kotlin: src/main/kotlin/<Type>.kt per type + Main.kt (top-level funcs + entry) ──
+    // Kotlin files in the same package see each other WITHOUT imports (default package here), so no cross-file
+    // wiring is needed. The entry `fun main` lives in Main.kt (→ class MainKt, matching the Gradle mainClass).
+    static List<(string, string)> KotlinFiles(List<CodeEntity> all, Func<string, string> name)
+    {
+        var files = new List<(string, string)>();
+        const string dir = "src/main/kotlin/";
+        string File(Action<StringBuilder> body)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine();
+            body(sb);
+            return sb.ToString().TrimEnd() + "\n";
+        }
+
+        foreach (var e in all.Where(IsType))
+            files.Add(($"{dir}{e.Name}.kt", File(sb => EmitEntity(sb, e, ExportLanguage.Kotlin, "", name))));
+
+        files.Add(($"{dir}Main.kt", File(sb =>
+        {
+            var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+            var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+            var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+            foreach (var f in funcs.Where(f => f != entry)) { EmitEntity(sb, f, ExportLanguage.Kotlin, "", name); sb.AppendLine(); }
+            foreach (var o in objs) EmitEntity(sb, o, ExportLanguage.Kotlin, "", name);
+            if (entry is not null) { EmitEntity(sb, entry, ExportLanguage.Kotlin, "", name); sb.AppendLine(); }
+        })));
+
+        return files;
+    }
+
+    // ── Swift: <Type>.swift per type + Functions.swift (funcs + entry) + main.swift (top-level entry call) ──
+    // Swift files in the same module see each other WITHOUT imports. Top-level code is allowed ONLY in main.swift,
+    // so the entry is called there; its body lives in Functions.swift. main.swift is a deterministic bootstrap
+    // (excluded from AI filling).
+    static List<(string, string)> SwiftFiles(List<CodeEntity> all, Func<string, string> name)
+    {
+        var files = new List<(string, string)>();
+        string File(Action<StringBuilder> body)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine();
+            body(sb);
+            return sb.ToString().TrimEnd() + "\n";
+        }
+
+        foreach (var e in all.Where(IsType))
+            files.Add(($"{e.Name}.swift", File(sb => EmitEntity(sb, e, ExportLanguage.Swift, "", name))));
+
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        if (funcs.Count > 0 || objs.Count > 0)
+            files.Add(("Functions.swift", File(sb =>
+            {
+                foreach (var f in funcs) { EmitEntity(sb, f, ExportLanguage.Swift, "", name); sb.AppendLine(); }
+                foreach (var o in objs) EmitEntity(sb, o, ExportLanguage.Swift, "", name);
+            })));
+
+        // main.swift: the sole file allowed to hold top-level code → run the entry here. Excluded from AI filling.
+        var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+        var mn = new StringBuilder();
+        mn.AppendLine($"// {FileHeader}");
+        if (entry is not null) { mn.AppendLine(); mn.AppendLine($"{entry.Name}()"); }
+        files.Add(("main.swift", mn.ToString().TrimEnd() + "\n"));
+
+        return files;
+    }
+
+    // ── JavaScript: src/<Type>.js per type + functions.js + index.js bootstrap (ES modules, like TypeScript) ──
+    // Same as the TS split, but Node's ESM loader requires the `.js` extension in relative imports. Imports are
+    // generated deterministically; cross-type references sit inside bodies, so circular imports are safe.
+    static List<(string, string)> JavaScriptFiles(List<CodeEntity> all, Func<string, string> name)
+    {
+        var files     = new List<(string, string)>();
+        var types      = all.Where(IsType).ToList();
+        var typeNames  = types.Select(t => t.Name).ToList();
+
+        string Imports(string? self) =>
+            string.Concat(typeNames.Where(n => n != self).Select(n => $"import {{ {n} }} from './{n}.js';\n"));
+
+        foreach (var e in types)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            var imp = Imports(e.Name);
+            if (imp.Length > 0) { sb.Append(imp); sb.AppendLine(); }
+            EmitEntity(sb, e, ExportLanguage.JavaScript, "", name);
+            files.Add(($"src/{e.Name}.js", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        if (funcs.Count > 0 || objs.Count > 0)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            var imp = Imports(null);
+            if (imp.Length > 0) { sb.Append(imp); sb.AppendLine(); }
+            var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+            foreach (var f in funcs.Where(f => f != entry)) { EmitEntity(sb, f, ExportLanguage.JavaScript, "", name); sb.AppendLine(); }
+            foreach (var o in objs) EmitEntity(sb, o, ExportLanguage.JavaScript, "", name);
+            if (entry is not null) { EmitEntity(sb, entry, ExportLanguage.JavaScript, "", name); sb.AppendLine(); }
+            files.Add(("src/functions.js", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        var entryFn = funcs.FirstOrDefault(f => f.IsEntryPoint);
+        if (entryFn is not null)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            sb.AppendLine($"import {{ {entryFn.Name} }} from './functions.js';");
+            sb.AppendLine();
+            sb.AppendLine($"{entryFn.Name}();");
+            files.Add(("src/index.js", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        return files;
+    }
+
+    // ── Python: <Type>.py per type + functions.py + __main__.py bootstrap ──
+    // Python runs a module's top-level `from X import Y` at IMPORT time, so importing every sibling everywhere
+    // deadlocks mutually-referencing modules (ImportError). Instead each file imports ONLY the project types it
+    // actually references (from its declaration graph + body text). Type modules then usually import nothing from
+    // each other, and functions.py imports the types it uses one-directionally (nothing imports functions.py),
+    // so no spurious cycles arise. (A genuine mutual reference between two classes is rare and a real design cycle.)
+    static List<(string, string)> PythonFiles(List<CodeEntity> all, Func<string, string> name)
+    {
+        var files     = new List<(string, string)>();
+        var types      = all.Where(IsType).ToList();
+        var typeNames  = types.Select(t => t.Name).ToList();
+
+        // File header + standard-library imports + `from <T> import <T>` lines for the referenced project types.
+        string Header(string stdImports, IEnumerable<string> typeRefs)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"# {FileHeader}");
+            if (!string.IsNullOrWhiteSpace(stdImports)) sb.AppendLine(stdImports);
+            var ti = typeRefs.Distinct().OrderBy(x => x).Select(t => $"from {t} import {t}").ToList();
+            if (ti.Count > 0) sb.AppendLine(string.Join("\n", ti));
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        foreach (var e in types)
+        {
+            var sb = new StringBuilder();
+            sb.Append(Header(PythonImports(new List<CodeEntity> { e }), ReferencedTypes(e, typeNames, name)));
+            EmitEntity(sb, e, ExportLanguage.Python, "", name);
+            files.Add(($"{e.Name}.py", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        if (funcs.Count > 0 || objs.Count > 0)
+        {
+            var refs = new HashSet<string>();
+            foreach (var e in funcs.Concat(objs)) refs.UnionWith(ReferencedTypes(e, typeNames, name));
+            var sb = new StringBuilder();
+            sb.Append(Header("", refs));
+            var entry = funcs.FirstOrDefault(f => f.IsEntryPoint);
+            foreach (var f in funcs.Where(f => f != entry)) { EmitEntity(sb, f, ExportLanguage.Python, "", name); sb.AppendLine(); }
+            foreach (var o in objs) EmitEntity(sb, o, ExportLanguage.Python, "", name);
+            if (entry is not null) { EmitEntity(sb, entry, ExportLanguage.Python, "", name); sb.AppendLine(); }
+            files.Add(("functions.py", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        // __main__.py bootstrap: import the entry point and run it under the standard guard. Excluded from AI fill.
+        var entryFn = funcs.FirstOrDefault(f => f.IsEntryPoint);
+        if (entryFn is not null)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"# {FileHeader}");
+            sb.AppendLine($"from functions import {entryFn.Name}");
+            sb.AppendLine();
+            sb.AppendLine("if __name__ == \"__main__\":");
+            sb.AppendLine($"    {entryFn.Name}()");
+            files.Add(("__main__.py", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        return files;
+    }
+
+    // ── Rust: src/<mod>.rs per type + functions.rs (helpers + entry) + main.rs crate root (mod decls + main) ──
+    // Rust's module system needs the `mod` declarations in the crate root (main.rs) and cross-module items pulled
+    // in with `use crate::<mod>::<Type>;` (types are already emitted `pub`). No import-cycle hazard. main.rs is a
+    // deterministic bootstrap (excluded from AI filling) so the module wiring can never be broken by the model.
+    static List<(string, string)> RustFiles(List<CodeEntity> all, Func<string, string> name)
+    {
+        var files     = new List<(string, string)>();
+        var types      = all.Where(IsType).ToList();
+        var typeNames  = types.Select(t => t.Name).ToList();
+        static string Mod(string typeName) => typeName.ToLowerInvariant();   // module/file stem (Rust wants lowercase)
+
+        string UseLines(IEnumerable<string> refs) =>
+            string.Concat(refs.Distinct().OrderBy(x => x).Select(t => $"use crate::{Mod(t)}::{t};\n"));
+
+        foreach (var e in types)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            var uses = UseLines(ReferencedTypes(e, typeNames, name));
+            if (uses.Length > 0) { sb.Append(uses); sb.AppendLine(); }
+            EmitEntity(sb, e, ExportLanguage.Rust, "", name);
+            files.Add(($"src/{Mod(e.Name)}.rs", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var objs  = all.Where(e => e.EntityType == CodeEntityType.Object).ToList();
+        bool hasFunctions = funcs.Count > 0 || objs.Count > 0;
+        if (hasFunctions)
+        {
+            var refs = new HashSet<string>();
+            foreach (var e in funcs.Concat(objs)) refs.UnionWith(ReferencedTypes(e, typeNames, name));
+            var sb = new StringBuilder();
+            sb.AppendLine($"// {FileHeader}");
+            var uses = UseLines(refs);
+            if (uses.Length > 0) { sb.Append(uses); sb.AppendLine(); }
+            // EmitRust names the entry `main`; here it lives in the functions module (crate main calls it).
+            foreach (var f in funcs) { EmitEntity(sb, f, ExportLanguage.Rust, "", name); sb.AppendLine(); }
+            foreach (var o in objs) EmitEntity(sb, o, ExportLanguage.Rust, "", name);
+            files.Add(("src/functions.rs", sb.ToString().TrimEnd() + "\n"));
+        }
+
+        // main.rs crate root: declare every module, then run the entry. Deterministic — excluded from AI filling.
+        var mn = new StringBuilder();
+        mn.AppendLine($"// {FileHeader}");
+        foreach (var t in types) mn.AppendLine($"mod {Mod(t.Name)};");
+        if (hasFunctions) mn.AppendLine("mod functions;");
+        mn.AppendLine();
+        if (funcs.Any(f => f.IsEntryPoint))
+        {
+            mn.AppendLine("fn main() {");
+            mn.AppendLine("    functions::main();");
+            mn.AppendLine("}");
+        }
+        files.Add(("src/main.rs", mn.ToString().TrimEnd() + "\n"));
+
+        return files;
+    }
+
+    // Every project type an entity references — via its declaration graph (base/interfaces, instance-of, field
+    // and method/parameter/return types) AND textually inside its bodies (so a `new Other()` buried in a method
+    // is imported too). Whole-word matched, excluding the entity's own name.
+    static HashSet<string> ReferencedTypes(CodeEntity e, List<string> typeNames, Func<string, string> name)
+    {
+        var text = new StringBuilder();
+        void Id(string id) { if (!string.IsNullOrEmpty(id)) text.Append(' ').Append(name(id)); }
+
+        Id(e.BaseClassId);
+        foreach (var i in e.ImplementsIds) Id(i);
+        Id(e.InstanceOfId);
+        foreach (var f in e.Fields) text.Append(' ').Append(f.DataType);
+        foreach (var m in e.Methods)
+        {
+            text.Append(' ').Append(m.ReturnType);
+            foreach (var p in m.Parameters) text.Append(' ').Append(p.DataType);
+            AppendBodyText($"{e.Id}#{m.Id}", text);
+        }
+        if (e.EntityType == CodeEntityType.Function)
+        {
+            var (ins, ret) = FuncSig(e);
+            text.Append(' ').Append(ret);
+            foreach (var p in ins) text.Append(' ').Append(p.DataType);
+            AppendBodyText(e.Id, text);
+        }
+
+        var body = text.ToString();
+        var refs = new HashSet<string>();
+        foreach (var t in typeNames)
+            if (t != e.Name && System.Text.RegularExpressions.Regex.IsMatch(body, $@"\b{System.Text.RegularExpressions.Regex.Escape(t)}\b"))
+                refs.Add(t);
+        return refs;
+    }
+
+    // Heuristic for Rust: does this method's body assign to one of the type's fields? If so it needs `&mut self`;
+    // a pure reader keeps `&self`. Matches `field =` or `self.field =` (not `==`) anywhere in the body text.
+    static bool MutatesSelf(string key, List<CodeField> fields)
+    {
+        if (fields.Count == 0) return false;
+        var text = new StringBuilder();
+        AppendBodyText(key, text);
+        var body = text.ToString();
+        foreach (var f in fields)
+            if (System.Text.RegularExpressions.Regex.IsMatch(body, $@"\b{System.Text.RegularExpressions.Regex.Escape(f.Name)}\b\s*=(?![=])"))
+                return true;
+        return false;
+    }
+
+    // Appends all statement/condition text of a body's structogram (recursively) into <paramref name="into"/>.
+    static void AppendBodyText(string key, StringBuilder into)
+    {
+        if (BodyFor(key) is not { Root.Count: > 0 } sd) return;
+        void Walk(List<Models.NsBlock> bs)
+        {
+            foreach (var b in bs)
+            {
+                into.Append(' ').Append(b.Text);
+                Walk(b.Body); Walk(b.Else);
+                foreach (var arm in b.Arms) Walk(arm.Body);
+            }
+        }
+        Walk(sd.Root);
+    }
+
+    // Sanitizes a name for use as a file/identifier stem.
+    static string Sanitize(string s)
+    {
+        var cleaned = new string((s ?? "").Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray()).Trim('_');
+        return cleaned.Length == 0 ? "Project" : cleaned;
     }
 
     private static int SortRank(CodeEntity e) => e.IsEntryPoint ? -1 : e.EntityType switch
@@ -101,23 +798,38 @@ public static class CodeExportService
 
     private static void EmitEntity(StringBuilder sb, CodeEntity e, ExportLanguage lang, string ind, Func<string, string> name)
     {
+        // A locally-instantiated object is created in a flow (real `new` in a body) — don't also emit a
+        // file-level "// instance:" note for it.
+        if (e.EntityType == CodeEntityType.Object && _localObjectIds.Contains(e.Id)) return;
+
         Doc(sb, e, ind, Cmt(lang));
 
-        // The entry point is flagged and, in languages where main must live inside a class
-        // (Java; classic C#), wrapped in a holder class. Elsewhere it stays a free function.
+        // In non-class languages the entry point stays a free function; just flag it.
+        // (C#/Java route their functions through EmitFunctionHolder instead.)
         if (e.EntityType == CodeEntityType.Function && e.IsEntryPoint)
-        {
             sb.AppendLine($"{ind}{Cmt(lang)} ▶ Entry point (main)");
-            if (lang is ExportLanguage.Java or ExportLanguage.CSharp)
-            {
-                sb.AppendLine($"{ind}public class Program");
-                sb.AppendLine($"{ind}{{");
-                EmitByLang(sb, e, lang, ind + "    ", name);
-                sb.AppendLine($"{ind}}}");
-                return;
-            }
-        }
+
         EmitByLang(sb, e, lang, ind, name);
+    }
+
+    // C#/Java holder: wraps every free function of a namespace in one class (entry point first). C# uses a
+    // `static class Functions` (all members are static anyway, and bare intra-file calls resolve inside it);
+    // Java keeps a plain `Program` class (Java has no top-level static classes).
+    private static void EmitFunctionHolder(StringBuilder sb, List<CodeEntity> funcs, ExportLanguage lang, string ind, Func<string, string> name)
+    {
+        var inner = ind + "    ";
+        sb.AppendLine(lang == ExportLanguage.CSharp ? $"{ind}public static class Functions" : $"{ind}public class Program");
+        sb.AppendLine($"{ind}{{");
+        bool first = true;
+        foreach (var f in funcs)
+        {
+            if (!first) sb.AppendLine();
+            first = false;
+            Doc(sb, f, inner, Cmt(lang));
+            if (f.IsEntryPoint) sb.AppendLine($"{inner}{Cmt(lang)} ▶ Entry point (main)");
+            EmitByLang(sb, f, lang, inner, name);
+        }
+        sb.AppendLine($"{ind}}}");
     }
 
     private static void EmitByLang(StringBuilder sb, CodeEntity e, ExportLanguage lang, string ind, Func<string, string> name)
@@ -126,8 +838,10 @@ public static class CodeExportService
         {
             case ExportLanguage.CSharp:     EmitCSharp(sb, e, ind, name); break;
             case ExportLanguage.Cpp:        EmitCpp(sb, e, ind, name); break;
+            case ExportLanguage.C:          EmitC(sb, e, ind, name); break;
             case ExportLanguage.Java:       EmitJava(sb, e, ind, name); break;
             case ExportLanguage.TypeScript: EmitTypeScript(sb, e, ind, name); break;
+            case ExportLanguage.JavaScript: EmitJavaScript(sb, e, ind, name); break;
             case ExportLanguage.Python:     EmitPython(sb, e, ind, name); break;
             case ExportLanguage.Kotlin:     EmitKotlin(sb, e, ind, name); break;
             case ExportLanguage.Swift:      EmitSwift(sb, e, ind, name); break;
@@ -170,12 +884,79 @@ public static class CodeExportService
     /// method body directly into <paramref name="sb"/> and returns true. Otherwise returns false
     /// (caller emits its default placeholder body).
     /// </summary>
+    /// <summary>
+    /// The structogram to use as the body for <paramref name="key"/>. The PAP (flowchart) is the authored
+    /// source, so if one exists it is converted LIVE — edits/relinks flow into codegen with no manual
+    /// "→ structogram" step and no stale saved structogram. A saved structogram is only a fallback: when there
+    /// is no flowchart, or when the flow can't be fully structured (arbitrary jumps) AND a hand-made structogram
+    /// exists to fall back on. Null → no body (caller emits a stub). Works without the AI plugin.
+    /// </summary>
+    private static Models.StructogramData? BodyFor(string key)
+    {
+        var sd = BodyForRaw(key);
+        // For flatten-namespace languages, strip project `Namespace.` prefixes from the pseudocode BEFORE the
+        // model sees it (`TestSpace.TestKlasse` → `TestKlasse`), so it can't reintroduce a prefix that won't
+        // resolve in a flat package/module. (Each BodyForRaw returns a fresh instance, so mutating is safe.)
+        if (sd is not null && _flattenNs.Count > 0) StripNamespacePrefixes(sd.Root);
+        return sd;
+    }
+
+    private static Models.StructogramData? BodyForRaw(string key)
+    {
+        if (_projForBodies is null) return null;
+
+        bool hasStruct = StructogramService.Exists(_projForBodies, key);
+        if (FlowChartService.Exists(_projForBodies, key))
+        {
+            var fc = FlowChartService.Load(_projForBodies, key);
+            if (fc.Nodes.Count > 0)
+            {
+                var sd = StructogramConverter.Convert(fc, "", out var unstructured);
+                // Clean conversion → the PAP wins. Partial → prefer a hand-made structogram if one exists,
+                // else use the partial result rather than nothing.
+                if ((unstructured.Count == 0 || !hasStruct) && sd.Root.Count > 0) return sd;
+            }
+        }
+        return hasStruct ? StructogramService.Load(_projForBodies, key) : null;
+    }
+
+    // Project namespace full-names to strip from body pseudocode (non-empty only for flatten-namespace languages).
+    private static HashSet<string> _flattenNs = new();
+
+    // Languages that emit every type at top level (no namespace qualifier on a type reference), so a
+    // `Namespace.Type` in the pseudocode must collapse to `Type`. (C#/C++/Java/PHP keep namespaces; Rust uses
+    // module paths; Verse keeps its own scoping — none of them strip.)
+    private static bool FlattensNamespaces(ExportLanguage l) =>
+        l is ExportLanguage.Go or ExportLanguage.JavaScript or ExportLanguage.TypeScript
+          or ExportLanguage.Kotlin or ExportLanguage.Swift or ExportLanguage.Python;
+
+    private static void SetFlatten(IEnumerable<CodeEntity> all, Func<CodeEntity, string> ns, ExportLanguage lang) =>
+        _flattenNs = FlattensNamespaces(lang)
+            ? all.Select(ns).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().ToHashSet()
+            : new HashSet<string>();
+
+    private static void StripNamespacePrefixes(List<Models.NsBlock> blocks)
+    {
+        foreach (var b in blocks)
+        {
+            b.Text = StripNsText(b.Text);
+            StripNamespacePrefixes(b.Body);
+            StripNamespacePrefixes(b.Else);
+            foreach (var arm in b.Arms) StripNamespacePrefixes(arm.Body);
+        }
+    }
+
+    private static string StripNsText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        foreach (var ns in _flattenNs)
+            text = System.Text.RegularExpressions.Regex.Replace(text, $@"\b{System.Text.RegularExpressions.Regex.Escape(ns)}\.", "");
+        return text;
+    }
+
     private static bool TryBracedBody(string key, StringBuilder sb, string ind)
     {
-        if (_projForBodies is null) return false;
-        if (!StructogramService.Exists(_projForBodies, key)) return false;
-        var sd = StructogramService.Load(_projForBodies, key);
-        if (sd.Root.Count == 0) return false;
+        if (BodyFor(key) is not { Root.Count: > 0 } sd) return false;
         RenderBracedSeq(sb, sd.Root, ind);
         return true;
     }
@@ -259,9 +1040,7 @@ public static class CodeExportService
 
     private static bool TryBracelessBody(string key, StringBuilder sb, string ind, ExportLanguage lang)
     {
-        if (_projForBodies is null || !StructogramService.Exists(_projForBodies, key)) return false;
-        var sd = StructogramService.Load(_projForBodies, key);
-        if (sd.Root.Count == 0) return false;
+        if (BodyFor(key) is not { Root.Count: > 0 } sd) return false;
         RenderBracelessSeq(sb, sd.Root, ind, lang);
         return true;
     }
@@ -346,9 +1125,7 @@ public static class CodeExportService
 
     private static bool TryPythonBody(string key, StringBuilder sb, string ind)
     {
-        if (_projForBodies is null || !StructogramService.Exists(_projForBodies, key)) return false;
-        var sd = StructogramService.Load(_projForBodies, key);
-        if (sd.Root.Count == 0) return false;
+        if (BodyFor(key) is not { Root.Count: > 0 } sd) return false;
         RenderPythonSeq(sb, sd.Root, ind);
         return true;
     }
@@ -413,9 +1190,7 @@ public static class CodeExportService
 
     private static bool TryRustBody(string key, StringBuilder sb, string ind)
     {
-        if (_projForBodies is null || !StructogramService.Exists(_projForBodies, key)) return false;
-        var sd = StructogramService.Load(_projForBodies, key);
-        if (sd.Root.Count == 0) return false;
+        if (BodyFor(key) is not { Root.Count: > 0 } sd) return false;
         RenderRustSeq(sb, sd.Root, ind);
         return true;
     }
@@ -491,7 +1266,9 @@ public static class CodeExportService
             {
                 var (ins, ret) = FuncSig(e);
                 var ps = string.Join(", ", ins.Select(p => $"{Conv(p.Convention)}{p.DataType} {p.Name}"));
-                sb.AppendLine($"{ind}public static {ret} {e.Name}({ps})");
+                // C#'s entry point must be named `Main`, whatever the author called the diagram.
+                var fn = e.IsEntryPoint ? "Main" : e.Name;
+                sb.AppendLine($"{ind}public static {ret} {fn}({ps})");
                 sb.AppendLine($"{ind}{{");
                 if (!TryBracedBody(e.Id, sb, ind + "    ") && ret.Trim() is not ("void" or ""))
                     sb.AppendLine($"{ind}    throw new System.NotImplementedException();");
@@ -549,6 +1326,31 @@ public static class CodeExportService
 
     // ── C++ ─────────────────────────────────────────────────────────────────
 
+    // Forward-declares the free functions (namespace-wrapped) so any function can call any other regardless
+    // of emission order — the entry point, emitted last, then sees them all.
+    private static void EmitCppForward(StringBuilder sb, List<CodeEntity> all, Func<CodeEntity, string> nsFull)
+    {
+        string Conv(PassingConvention c) => c switch { PassingConvention.Reference => "&", PassingConvention.Pointer => "*", _ => "" };
+        var funcs = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        if (funcs.Count == 0) return;
+
+        sb.AppendLine("// ── Forward declarations ──");
+        foreach (var grp in funcs.GroupBy(nsFull).OrderBy(g => g.Key))
+        {
+            bool hasNs = !string.IsNullOrWhiteSpace(grp.Key);
+            string ind = hasNs ? "    " : "";
+            if (hasNs) sb.AppendLine($"namespace {grp.Key} {{");
+            foreach (var e in grp)
+            {
+                var (ins, ret) = FuncSig(e);
+                var ps = string.Join(", ", ins.Select(p => $"{p.DataType}{Conv(p.Convention)} {p.Name}"));
+                sb.AppendLine($"{ind}{ret} {e.Name}({ps});");
+            }
+            if (hasNs) sb.AppendLine("}");
+        }
+        sb.AppendLine();
+    }
+
     private static void EmitCpp(StringBuilder sb, CodeEntity e, string ind, Func<string, string> name)
     {
         string Conv(PassingConvention c) => c switch { PassingConvention.Reference => "&", PassingConvention.Pointer => "*", _ => "" };
@@ -562,7 +1364,12 @@ public static class CodeExportService
             {
                 var (ins, ret) = FuncSig(e);
                 var ps = string.Join(", ", ins.Select(p => $"{p.DataType}{Conv(p.Convention)} {p.Name}"));
-                sb.AppendLine($"{ind}{ret} {e.Name}({ps}) {{");
+                // C++'s entry point must be `int main(...)`; other functions keep their signature.
+                var fn = e.IsEntryPoint ? "main" : e.Name;
+                var rt = e.IsEntryPoint ? "int" : ret;
+                sb.AppendLine($"{ind}{rt} {fn}({ps}) {{");
+                TryBracedBody(e.Id, sb, inner);
+                if (e.IsEntryPoint) sb.AppendLine($"{inner}return 0;");
                 sb.AppendLine($"{ind}}}");
                 break;
             }
@@ -584,38 +1391,153 @@ public static class CodeExportService
                     sb.AppendLine($"{ind}{vis.ToString().ToLowerInvariant()}:");
                     foreach (var f in fields)
                         sb.AppendLine($"{inner}{(f.IsStatic ? "static " : "")}{f.DataType} {f.Name};");
+                    var minner = inner + "    ";
                     foreach (var m in methods)
                     {
-                        var ps = string.Join(", ", m.Parameters.Select(p => $"{p.DataType}{Conv(p.Convention)} {p.Name}"));
-                        if (m.Kind == MethodKind.Constructor) { sb.AppendLine($"{inner}{e.Name}({ps});"); continue; }
-                        if (m.Kind == MethodKind.Destructor)  { sb.AppendLine($"{inner}{(bases.Count > 0 ? "virtual " : "")}~{e.Name}();"); continue; }
-                        sb.AppendLine($"{inner}{(iface ? "virtual " : "")}{(m.IsStatic ? "static " : "")}{m.ReturnType} {m.Name}({ps}){(iface ? " = 0;" : ";")}");
+                        var ps  = string.Join(", ", m.Parameters.Select(p => $"{p.DataType}{Conv(p.Convention)} {p.Name}"));
+                        var key = $"{e.Id}#{m.Id}";
+                        // Interface = pure virtual declaration; everything else is defined INLINE in the class
+                        // (single definition site — an in-class body plus an out-of-line one would redefine it).
+                        if (iface) { sb.AppendLine($"{inner}virtual {m.ReturnType} {m.Name}({ps}) = 0;"); continue; }
+                        string mhead = m.Kind switch
+                        {
+                            MethodKind.Constructor => $"{inner}{e.Name}({ps}) {{",
+                            MethodKind.Destructor  => $"{inner}{(bases.Count > 0 ? "virtual " : "")}~{e.Name}() {{",
+                            _                      => $"{inner}{(m.IsStatic ? "static " : "")}{m.ReturnType} {m.Name}({ps}) {{",
+                        };
+                        sb.AppendLine(mhead);
+                        TryBracedBody(key, sb, minner);
+                        sb.AppendLine($"{inner}}}");
                     }
                 }
                 sb.AppendLine($"{ind}}};");
-
-                // Out-of-line inline definitions for members that have a structogram body.
-                if (!iface && _projForBodies is not null)
-                {
-                    foreach (var m in e.Methods)
-                    {
-                        var key = $"{e.Id}#{m.Id}";
-                        if (!StructogramService.Exists(_projForBodies, key)) continue;
-                        var ps = string.Join(", ", m.Parameters.Select(p => $"{p.DataType}{Conv(p.Convention)} {p.Name}"));
-                        string sig = m.Kind switch
-                        {
-                            MethodKind.Constructor => $"{ind}inline {e.Name}::{e.Name}({ps}) {{",
-                            MethodKind.Destructor  => $"{ind}inline {e.Name}::~{e.Name}() {{",
-                            _                      => $"{ind}inline {m.ReturnType} {e.Name}::{m.Name}({ps}) {{"
-                        };
-                        sb.AppendLine();
-                        sb.AppendLine(sig);
-                        TryBracedBody(key, sb, ind + "    ");
-                        sb.AppendLine($"{ind}}}");
-                    }
-                }
                 break;
             }
+        }
+    }
+
+    // ── C (structs + free functions; no classes/interfaces) ───────────────────
+
+    // Maps a few common type names to C; anything else passes through as-is (user's responsibility).
+    private static string CType(string t) => (t ?? "").Trim() switch
+    {
+        "string" or "String" => "const char*",
+        "" => "void",
+        var s => s,
+    };
+
+    // C forward-declaration header: enum typedefs, opaque struct typedefs, and every function/method prototype,
+    // so code emitted later (or earlier, like main) can reference anything regardless of order.
+    private static void EmitCForward(StringBuilder sb, List<CodeEntity> all, Func<string, string> name)
+    {
+        var funcs   = all.Where(e => e.EntityType == CodeEntityType.Function).ToList();
+        var enums   = all.Where(e => e.EntityType == CodeEntityType.Enum).ToList();
+        var classes = all.Where(e => e.EntityType is CodeEntityType.Class or CodeEntityType.Struct).ToList();
+        if (funcs.Count + enums.Count + classes.Count == 0) return;
+
+        sb.AppendLine("// ── Forward declarations ──");
+        // Enums can't be forward-declared in C, so define them fully here (and skip them in the body).
+        foreach (var e in enums)
+            sb.AppendLine($"typedef enum {{ {string.Join(", ", e.EnumValues)} }} {e.Name};");
+        // An opaque typedef names the struct type everywhere; the full body comes later.
+        foreach (var e in classes)
+            sb.AppendLine($"typedef struct {e.Name} {e.Name};");
+        foreach (var e in funcs)
+        {
+            var (ins, ret) = FuncSig(e);
+            var ps = ins.Count == 0 ? "void" : string.Join(", ", ins.Select(p => $"{CType(p.DataType)} {p.Name}"));
+            var fn = e.IsEntryPoint ? "main" : e.Name;
+            var rt = e.IsEntryPoint ? "int" : CType(ret);
+            sb.AppendLine($"{rt} {fn}({(e.IsEntryPoint ? "void" : ps)});");
+        }
+        foreach (var e in classes)
+            foreach (var m in e.Methods)
+            {
+                var extra = string.Join(", ", m.Parameters.Select(p => $"{CType(p.DataType)} {p.Name}"));
+                if (m.Kind == MethodKind.Constructor)     sb.AppendLine($"{e.Name}* {e.Name}_new({(extra.Length == 0 ? "void" : extra)});");
+                else if (m.Kind == MethodKind.Destructor) sb.AppendLine($"void {e.Name}_free({e.Name}* self);");
+                else                                      sb.AppendLine($"{CType(m.ReturnType)} {e.Name}_{m.Name}({e.Name}* self{(extra.Length == 0 ? "" : ", " + extra)});");
+            }
+        sb.AppendLine();
+    }
+
+    private static void EmitC(StringBuilder sb, CodeEntity e, string ind, Func<string, string> name)
+    {
+        var inner = ind + "    ";
+        switch (e.EntityType)
+        {
+            case CodeEntityType.Enum:
+                break;   // already emitted as a full typedef in the forward-declaration header
+            case CodeEntityType.Function:
+            {
+                var (ins, ret) = FuncSig(e);
+                var ps = ins.Count == 0 ? "void" : string.Join(", ", ins.Select(p => $"{CType(p.DataType)} {p.Name}"));
+                // C's entry point is `int main(void)`; other functions keep their signature.
+                var fn = e.IsEntryPoint ? "main" : e.Name;
+                var rt = e.IsEntryPoint ? "int" : CType(ret);
+                sb.AppendLine($"{ind}{rt} {fn}({(e.IsEntryPoint ? "void" : ps)}) {{");
+                if (!TryBracedBody(e.Id, sb, inner))
+                {
+                    if (e.IsEntryPoint) sb.AppendLine($"{inner}return 0;");
+                    else if (rt != "void") sb.AppendLine($"{inner}/* TODO: implement */");
+                }
+                else if (e.IsEntryPoint) sb.AppendLine($"{inner}return 0;");
+                sb.AppendLine($"{ind}}}");
+                break;
+            }
+            case CodeEntityType.Object:
+                sb.AppendLine($"{ind}// instance: {(string.IsNullOrEmpty(e.InstanceOfId) ? "/* type */" : name(e.InstanceOfId))} {e.Name};");
+                break;
+            case CodeEntityType.Interface:
+                sb.AppendLine($"{ind}// interface {e.Name} — C has no interfaces (use a struct of function pointers).");
+                break;
+            default:   // Class / Struct → a struct of fields + methods as free functions taking the struct.
+                EmitCStruct(sb, e, ind, name);
+                EmitCMethods(sb, e, ind, name);
+                break;
+        }
+    }
+
+    // The struct body only (the typedef lives in the forward header). Reused by the multi-file C header.
+    private static void EmitCStruct(StringBuilder sb, CodeEntity e, string ind, Func<string, string> name)
+    {
+        var inner = ind + "    ";
+        sb.AppendLine($"{ind}struct {e.Name} {{");
+        if (!string.IsNullOrEmpty(e.BaseClassId))
+            sb.AppendLine($"{inner}{name(e.BaseClassId)} base;   /* inheritance → embedded base struct */");
+        foreach (var f in e.Fields)
+            sb.AppendLine($"{inner}{CType(f.DataType)} {f.Name};");
+        sb.AppendLine($"{ind}}};");
+    }
+
+    // The method definitions (free functions taking the struct). Reused by the multi-file per-class .c file.
+    private static void EmitCMethods(StringBuilder sb, CodeEntity e, string ind, Func<string, string> name)
+    {
+        var inner = ind + "    ";
+        foreach (var m in e.Methods)
+        {
+            var extra = string.Join(", ", m.Parameters.Select(p => $"{CType(p.DataType)} {p.Name}"));
+            if (m.Kind == MethodKind.Constructor)
+            {
+                sb.AppendLine($"{ind}{e.Name}* {e.Name}_new({(extra.Length == 0 ? "void" : extra)}) {{");
+                sb.AppendLine($"{inner}{e.Name}* self = ({e.Name}*)malloc(sizeof({e.Name}));");
+                TryBracedBody($"{e.Id}#{m.Id}", sb, inner);
+                sb.AppendLine($"{inner}return self;");
+                sb.AppendLine($"{ind}}}");
+                continue;
+            }
+            if (m.Kind == MethodKind.Destructor)
+            {
+                sb.AppendLine($"{ind}void {e.Name}_free({e.Name}* self) {{");
+                if (!TryBracedBody($"{e.Id}#{m.Id}", sb, inner)) sb.AppendLine($"{inner}free(self);");
+                sb.AppendLine($"{ind}}}");
+                continue;
+            }
+            var self = $"{e.Name}* self" + (extra.Length == 0 ? "" : ", " + extra);
+            var rt = CType(m.ReturnType);
+            sb.AppendLine($"{ind}{rt} {e.Name}_{m.Name}({self}) {{");
+            if (!TryBracedBody($"{e.Id}#{m.Id}", sb, inner) && rt != "void") sb.AppendLine($"{inner}/* TODO: implement */");
+            sb.AppendLine($"{ind}}}");
         }
     }
 
@@ -634,7 +1556,9 @@ public static class CodeExportService
             {
                 var (ins, ret) = FuncSig(e);
                 var ps = string.Join(", ", ins.Select(p => $"{p.DataType} {p.Name}"));
-                sb.AppendLine($"{ind}public static {ret} {e.Name}({ps}) {{");
+                // Java's entry point must be exactly `public static void main(String[] args)`; helpers keep theirs.
+                var fn = e.IsEntryPoint ? "main" : e.Name;
+                sb.AppendLine($"{ind}public static {(e.IsEntryPoint ? "void" : ret)} {fn}({(e.IsEntryPoint ? "String[] args" : ps)}) {{");
                 if (!TryBracedBody(e.Id, sb, ind + "    ") && ret.Trim() is not ("void" or ""))
                     sb.AppendLine($"{ind}    throw new UnsupportedOperationException();");
                 sb.AppendLine($"{ind}}}");
@@ -741,6 +1665,63 @@ public static class CodeExportService
         }
     }
 
+    // ── JavaScript (TypeScript without the types) ─────────────────────────────
+
+    private static void EmitJavaScript(StringBuilder sb, CodeEntity e, string ind, Func<string, string> name)
+    {
+        var inner = ind + "    ";
+        switch (e.EntityType)
+        {
+            case CodeEntityType.Enum:
+                // JS has no enum → a frozen object of incrementing values.
+                var vals = string.Join(", ", e.EnumValues.Select((v, i) => $"{v}: {i}"));
+                sb.AppendLine($"{ind}export const {e.Name} = Object.freeze({{ {vals} }});");
+                break;
+            case CodeEntityType.Function:
+            {
+                var (ins, ret) = FuncSig(e);
+                var ps = string.Join(", ", ins.Select(p => p.Name));
+                sb.AppendLine($"{ind}export function {e.Name}({ps}) {{");
+                if (!TryBracedBody(e.Id, sb, ind + "    ") && ret.Trim() is not ("void" or ""))
+                    sb.AppendLine($"{ind}    throw new Error(\"Not implemented\");");
+                sb.AppendLine($"{ind}}}");
+                break;
+            }
+            case CodeEntityType.Object:
+                sb.AppendLine($"{ind}// instance: const {e.Name} = new {(string.IsNullOrEmpty(e.InstanceOfId) ? "/* type */" : name(e.InstanceOfId))}();");
+                break;
+            default:
+            {
+                bool iface = e.EntityType == CodeEntityType.Interface;
+                // JS has no interfaces → a class shell (duck-typed) with a note.
+                if (iface) sb.AppendLine($"{ind}// interface {e.Name} — JS has no interfaces; implement by duck typing.");
+                var ext = string.IsNullOrEmpty(e.BaseClassId) ? "" : " extends " + name(e.BaseClassId);
+                sb.AppendLine($"{ind}export class {e.Name}{ext} {{");
+                if (!iface)
+                    foreach (var f in e.Fields)
+                        sb.AppendLine($"{inner}{(f.IsStatic ? "static " : "")}{f.Name};");   // bare field (bodies reference the plain name)
+                foreach (var m in e.Methods)
+                {
+                    var ps = string.Join(", ", m.Parameters.Select(p => p.Name));
+                    if (!iface && m.Kind == MethodKind.Constructor)
+                    {
+                        sb.AppendLine($"{inner}constructor({ps}) {{");
+                        TryBracedBody($"{e.Id}#{m.Id}", sb, inner + "    ");
+                        sb.AppendLine($"{inner}}}");
+                        continue;
+                    }
+                    if (!iface && m.Kind == MethodKind.Destructor) { sb.AppendLine($"{inner}// destructor — no JS equivalent (consider dispose())"); continue; }
+                    sb.AppendLine($"{inner}{(m.IsStatic ? "static " : "")}{m.Name}({ps}) {{");
+                    if (!TryBracedBody($"{e.Id}#{m.Id}", sb, inner + "    ") && m.ReturnType.Trim() is not ("void" or ""))
+                        sb.AppendLine($"{inner}    throw new Error(\"Not implemented\");");
+                    sb.AppendLine($"{inner}}}");
+                }
+                sb.AppendLine($"{ind}}}");
+                break;
+            }
+        }
+    }
+
     // ── Python ────────────────────────────────────────────────────────────────
 
     private static string PythonImports(List<CodeEntity> all)
@@ -832,7 +1813,7 @@ public static class CodeExportService
             {
                 var (ins, ret) = FuncSig(e);
                 var ps = string.Join(", ", ins.Select(p => $"{p.Name}: {p.DataType}"));
-                sb.AppendLine($"{ind}fun {e.Name}({ps}){Ret(ret)} {{");
+                sb.AppendLine($"{ind}fun {(e.IsEntryPoint ? "main" : e.Name)}({ps}){Ret(ret)} {{");
                 if (!TryBracelessBody(e.Id, sb, ind + "    ", ExportLanguage.Kotlin)) sb.AppendLine($"{ind}    TODO(\"Not implemented\")");
                 sb.AppendLine($"{ind}}}");
                 break;
@@ -894,7 +1875,8 @@ public static class CodeExportService
             case CodeEntityType.Function:
             {
                 var (ins, ret) = FuncSig(e);
-                var ps = string.Join(", ", ins.Select(p => $"{p.Name}: {p.DataType}"));
+                // Params use the `_` (no argument label) style so calls match the label-free pseudocode: f(a, b).
+                var ps = string.Join(", ", ins.Select(p => $"_ {p.Name}: {p.DataType}"));
                 sb.AppendLine($"{ind}func {e.Name}({ps}){Ret(ret)} {{");
                 if (!TryBracelessBody(e.Id, sb, ind + "    ", ExportLanguage.Swift)) sb.AppendLine($"{ind}    fatalError(\"Not implemented\")");
                 sb.AppendLine($"{ind}}}");
@@ -917,7 +1899,8 @@ public static class CodeExportService
                         sb.AppendLine($"{inner}{V(f.Visibility)}{(f.IsStatic ? "static " : "")}var {f.Name}: {f.DataType}");
                 foreach (var m in e.Methods)
                 {
-                    var ps = string.Join(", ", m.Parameters.Select(p => $"{p.Name}: {p.DataType}"));
+                    // `_` = no argument label, so callers write obj.method(a, b) matching the label-free pseudocode.
+                    var ps = string.Join(", ", m.Parameters.Select(p => $"_ {p.Name}: {p.DataType}"));
                     if (!iface && m.Kind == MethodKind.Constructor)
                     {
                         sb.AppendLine($"{inner}init({ps}) {{");
@@ -1035,7 +2018,7 @@ public static class CodeExportService
                 var (ins, ret) = FuncSig(e);
                 var ps = string.Join(", ", ins.Select(p => $"{p.Name} {Conv(p.Convention)}{p.DataType}"));
                 var r  = ret.Trim() is "void" or "" ? "" : " " + ret;
-                sb.AppendLine($"{ind}func {e.Name}({ps}){r} {{");
+                sb.AppendLine($"{ind}func {(e.IsEntryPoint ? "main" : e.Name)}({ps}){r} {{");
                 if (!TryBracelessBody(e.Id, sb, ind + "    ", ExportLanguage.Go)) sb.AppendLine($"{ind}    panic(\"not implemented\")");
                 sb.AppendLine($"{ind}}}");
                 break;
@@ -1102,7 +2085,7 @@ public static class CodeExportService
             {
                 var (ins, ret) = FuncSig(e);
                 var ps = string.Join(", ", ins.Select(p => $"{p.Name}: {p.DataType}"));
-                sb.AppendLine($"{ind}pub fn {e.Name}({ps}){Ret(ret)} {{");
+                sb.AppendLine($"{ind}pub fn {(e.IsEntryPoint ? "main" : e.Name)}({ps}){Ret(ret)} {{");
                 if (!TryRustBody(e.Id, sb, ind + "    ")) sb.AppendLine($"{ind}    unimplemented!()");
                 sb.AppendLine($"{ind}}}");
                 break;
@@ -1129,10 +2112,13 @@ public static class CodeExportService
                 foreach (var f in e.Fields)
                     sb.AppendLine($"{inner}{(f.Visibility == CodeVisibility.Public ? "pub " : "")}{f.Name}: {f.DataType},");
                 sb.AppendLine($"{ind}}}");
-                if (e.Methods.Count > 0)
+                // Methods that mutate a field need `&mut self`; a pure reader keeps `&self`. We don't know which,
+                // so a setter-shaped method (assigns a field in its body) gets `&mut self`, else `&self`.
+                var nonDtor = e.Methods.Where(m => m.Kind != MethodKind.Destructor).ToList();
+                if (nonDtor.Count > 0)
                 {
                     sb.AppendLine($"{ind}impl {e.Name} {{");
-                    foreach (var m in e.Methods)
+                    foreach (var m in nonDtor)
                     {
                         if (m.Kind == MethodKind.Constructor)
                         {
@@ -1142,16 +2128,21 @@ public static class CodeExportService
                             sb.AppendLine($"{inner}}}");
                             continue;
                         }
-                        if (m.Kind == MethodKind.Destructor)
-                        {
-                            sb.AppendLine($"{inner}// destructor — implement the Drop trait: impl Drop for {e.Name} {{ fn drop(&mut self) {{ }} }}");
-                            continue;
-                        }
-                        var ps = string.Join(", ", new[] { "&self" }.Concat(m.Parameters.Select(p => $"{p.Name}: {p.DataType}")));
+                        var self = MutatesSelf($"{e.Id}#{m.Id}", e.Fields) ? "&mut self" : "&self";
+                        var ps = string.Join(", ", new[] { self }.Concat(m.Parameters.Select(p => $"{p.Name}: {p.DataType}")));
                         sb.AppendLine($"{inner}{(m.Visibility == CodeVisibility.Public ? "pub " : "")}fn {m.Name}({ps}){Ret(m.ReturnType)} {{");
                         if (!TryRustBody($"{e.Id}#{m.Id}", sb, inner + "    ")) sb.AppendLine($"{inner}    unimplemented!()");
                         sb.AppendLine($"{inner}}}");
                     }
+                    sb.AppendLine($"{ind}}}");
+                }
+                // Rust destructors ARE the Drop trait — a SEPARATE impl block, never nested inside `impl {e.Name}`.
+                if (e.Methods.FirstOrDefault(m => m.Kind == MethodKind.Destructor) is { } dtor)
+                {
+                    sb.AppendLine($"{ind}impl Drop for {e.Name} {{");
+                    sb.AppendLine($"{inner}fn drop(&mut self) {{");
+                    TryRustBody($"{e.Id}#{dtor.Id}", sb, inner + "    ");
+                    sb.AppendLine($"{inner}}}");
                     sb.AppendLine($"{ind}}}");
                 }
                 break;

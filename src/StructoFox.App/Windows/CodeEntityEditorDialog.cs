@@ -139,6 +139,34 @@ public class CodeEntityEditorDialog : Window
         instanceSection.Children.Add(instCombo);
         form.Children.Add(instanceSection);
 
+        // Object usage: where this instance is created / destroyed / used, scanned across every diagram.
+        // Read-only and computed on open (re-open to refresh after editing diagrams).
+        var usageSection = new StackPanel();
+        usageSection.Children.Add(FieldLabel(Loc.S("CodeEdit_ObjectUsage")));
+        var usageBody = new StackPanel { Spacing = 2 };
+        usageSection.Children.Add(usageBody);
+        void RefreshUsage()
+        {
+            usageBody.Children.Clear();
+            if (entity.EntityType != CodeEntityType.Object) return;
+            var uses = ObjectUsageScanner.Scan(_projFolder, entity);
+            void Line(string labelKey, ObjectUsageScanner.UseKind kind)
+            {
+                var owners = uses.Where(u => u.Kind == kind).Select(u => u.OwnerLabel)
+                                 .Distinct().OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+                usageBody.Children.Add(new TextBlock
+                {
+                    Text = Loc.S(labelKey) + " " + (owners.Count == 0 ? Loc.S("Common_None") : string.Join(", ", owners)),
+                    TextWrapping = TextWrapping.Wrap, FontSize = 11, Opacity = owners.Count == 0 ? 0.5 : 1.0,
+                });
+            }
+            Line("CodeEdit_ObjCreated",   ObjectUsageScanner.UseKind.Create);
+            Line("CodeEdit_ObjDestroyed", ObjectUsageScanner.UseKind.Destroy);
+            Line("CodeEdit_ObjUsed",      ObjectUsageScanner.UseKind.Use);
+        }
+        RefreshUsage();
+        form.Children.Add(usageSection);
+
         // ── Methods editor (defined before fields so a field's right-click can add accessors) ──
         var workMethods = entity.Methods.Select(m => new CodeMethod
         {
@@ -214,10 +242,6 @@ public class CodeEntityEditorDialog : Window
                     _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, key, title, _themePath);
                 };
                 topRow.Children.Add(flowM);
-
-                var assignM = Btn("🗺", Loc.S("CodeEdit_AssignBoardTip"));
-                assignM.Click += async (_, _) => await AssignBoardToKey($"{entity.Id}#{m.Id}");
-                topRow.Children.Add(assignM);
                 editor.Children.Add(topRow);
 
                 var paramStack = new StackPanel { Margin = new(16, 2, 0, 0) };
@@ -463,6 +487,7 @@ public class CodeEntityEditorDialog : Window
             bool isClassish = t is CodeEntityType.Class or CodeEntityType.Struct;
             inheritSection.IsVisible  = isClassish;
             instanceSection.IsVisible = t == CodeEntityType.Object;
+            usageSection.IsVisible    = t == CodeEntityType.Object;
             fieldsSection.IsVisible   = isClassish;
             methodsSection.IsVisible  = isClassish || t == CodeEntityType.Interface;
             enumSection.IsVisible     = t == CodeEntityType.Enum;
@@ -647,20 +672,6 @@ public class CodeEntityEditorDialog : Window
         if (!string.IsNullOrEmpty(extraWarn)) msg += "\n\n" + extraWarn;
         var res = await MessageDialog.Show(this, msg, Loc.S("CodeEdit_DeleteTitle"), DialogButtons.YesNo);
         return res == DialogResult.Yes;
-    }
-
-    // Assigns an existing project board to author this method's body (sets the board's TargetKey).
-    async Task AssignBoardToKey(string key)
-    {
-        var boards = CodeBoardRegistryService.Load(_projFolder);
-        if (boards.Count == 0) { await MessageDialog.Show(this, Loc.S("Boards_NoBoards"), Loc.S("Boards_Assign")); return; }
-        var pick = await PickListDialog.Show(this, Loc.S("CodeEdit_AssignBoardTitle"), boards.Select(b => (b.Id, b.Name)).ToList());
-        if (pick is null) return;
-        // Refuse boards that carry classes/objects — they're architecture views, not function bodies.
-        if (CodeBoardCodeGen.ContainsNonFunction(_projFolder, pick))
-        { await MessageDialog.Show(this, Loc.S("Boards_HasNonFunc"), Loc.S("Boards_Assign")); return; }
-        boards.First(b => b.Id == pick).TargetKey = key;
-        CodeBoardRegistryService.Save(_projFolder, boards);
     }
 
     // A warning line if any board is assigned to the given diagram key, else null.

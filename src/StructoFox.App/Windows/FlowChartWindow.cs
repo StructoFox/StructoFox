@@ -127,6 +127,8 @@ public class FlowChartWindow : Window
         if (isNew) { HeaderTemplateService.ApplyDefault(isPap: true, _data.Style); FlowChartService.Save(projFolder, key, _data); }
         _style      = _data.Style;   // persisted with the diagram
         _snapshot   = Serialize(_data);   // baseline for undo
+        // Register any objects already instantiated in this diagram ("x = new Class()") on open, too.
+        try { ObjectUsageScanner.RecognizeInstantiations(projFolder, _data.Nodes.Select(n => n.Text)); } catch { }
 
         Title                 = string.Format(Loc.S("Flow_Title"),
                                     string.IsNullOrEmpty(title) ? Loc.S("Common_Untitled") : title);
@@ -155,6 +157,9 @@ public class FlowChartWindow : Window
             if (_undo.Count > 100) _undo.RemoveAt(0);
             _redo.Clear();
             _snapshot = cur;
+            // Recognize object instantiations ("x = new Class()") written into nodes and register the objects.
+            try { ObjectUsageScanner.RecognizeInstantiations(_projFolder, _data.Nodes.Select(n => n.Text)); }
+            catch { /* recognition is best-effort; never block a save */ }
         }
         FlowChartService.Save(_projFolder, _key, _data);
     }
@@ -232,6 +237,10 @@ public class FlowChartWindow : Window
         _canvas = new Canvas
         {
             Width = 3000, Height = 2000, ClipToBounds = false,
+            // Pin top-left: with an explicit Width, the default Stretch alignment would CENTRE the canvas inside
+            // a wider header band, so growing/shrinking the surface would slide every node sideways. Left/Top
+            // keeps the origin fixed (only matters when the canvas is narrower than a header band).
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
             Background = new SolidColorBrush(Color.Parse(_style.BackgroundColor)),  // diagram surface, not app theme
         };
         // Decoration (title/watermark/logo) overlays the canvas IN the scrollable+zoomable content, so it
@@ -841,7 +850,44 @@ public class FlowChartWindow : Window
         viewBtn.Flyout = BuildViewFlyout();
         row.Children.Add(viewBtn);
 
+        // Project authoring language — drives the node-editor autocomplete's signature syntax. Per project.
+        row.Children.Add(new Border { Width = 12 });
+        var langLabel = new TextBlock { Text = Loc.S("Flow_LangLabel"), VerticalAlignment = VerticalAlignment.Center, Margin = new(0, 0, 4, 0) };
+        Ui.Theme(langLabel, TextBlock.ForegroundProperty, "SidebarTextBrush");
+        row.Children.Add(langLabel);
+        row.Children.Add(BuildLanguageCombo());
+
         return bar;
+    }
+
+    // Languages offered as the project's authoring language (autocomplete signature syntax). Shared with the
+    // new-project dialog so both pickers list the same set.
+    internal static readonly (ExportLanguage Lang, string Label)[] AuthorLanguages =
+    {
+        (ExportLanguage.CSharp, "C#"), (ExportLanguage.Cpp, "C++"), (ExportLanguage.C, "C"), (ExportLanguage.Java, "Java"),
+        (ExportLanguage.Python, "Python"), (ExportLanguage.TypeScript, "TypeScript"), (ExportLanguage.JavaScript, "JavaScript"),
+        (ExportLanguage.Go, "Go"), (ExportLanguage.Rust, "Rust"), (ExportLanguage.Kotlin, "Kotlin"), (ExportLanguage.Swift, "Swift"),
+        (ExportLanguage.Php, "PHP"),
+    };
+
+    // The per-project language picker; loads the current choice and persists a change to ProjectInfo.
+    ComboBox BuildLanguageCombo()
+    {
+        var combo = new ComboBox { MinWidth = 120, VerticalAlignment = VerticalAlignment.Center };
+        Ui.Theme(combo, TemplatedControl.BackgroundProperty,  "InputBgBrush");
+        Ui.Theme(combo, TemplatedControl.ForegroundProperty,  "SidebarTextBrush");
+        Ui.Theme(combo, TemplatedControl.BorderBrushProperty, "ControlBorderBrush");
+        ToolTip.SetTip(combo, Loc.S("Flow_LangTip"));
+        foreach (var (_, label) in AuthorLanguages) combo.Items.Add(label);
+        combo.SelectedIndex = Math.Max(0, Array.FindIndex(AuthorLanguages, x => x.Lang == ProjectLanguage()));
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedIndex < 0) return;
+            var info = ProjectService.Load(_projFolder) ?? ProjectService.Create(_projFolder, new DirectoryInfo(_projFolder).Name);
+            info.Language = AuthorLanguages[combo.SelectedIndex].Lang.ToString();
+            ProjectService.Save(_projFolder, info);
+        };
+        return combo;
     }
 
     Button? _zoomBtn;
@@ -1557,6 +1603,7 @@ public class FlowChartWindow : Window
             if (hi.Bottom) b = Math.Max(t + minH, Snap(p.Y));
             if (hi.Top)    t = Math.Min(b - minH, Snap(p.Y));
             n.X = l; n.Y = t; n.Width = r - l; n.Height = b - t;
+            GrowCanvasFor(n.X, n.Y, n.Width, n.Height);   // grow live like a move (no jump-to-fit on release)
             ReRenderNode(n.Id);
             UpdateConnectionsFor(n.Id);
             foreach (var g in _scaleHandles)
@@ -1573,7 +1620,7 @@ public class FlowChartWindow : Window
                     if ((c.FromId == hi.NodeId || c.ToId == hi.NodeId) && c.Waypoints.Count > 0) NormalizeWaypoints(c);
                 UpdateConnectionsFor(hi.NodeId);
             }
-            FitCanvas(); RenderCrossovers(); Save();
+            FitCanvas(keepPosition: true); RenderCrossovers(); Save();   // leave content where the user sized it (like a move)
             RefreshScaleHandles();
             e.Handled = true;
         };
@@ -1596,9 +1643,23 @@ public class FlowChartWindow : Window
         cm.Items.Add(edit);
         if (node.Kind == FlowNodeKind.Subroutine)
         {
-            var chart = new MenuItem { Header = Loc.S("Struct_ShowChart") };
-            chart.Click += (_, _) => ShowChartFlow(node);
-            cm.Items.Add(chart);
+            if (string.IsNullOrEmpty(node.RefId))
+            {
+                // Not linked yet → offer linking from the menu (previously only reachable via double-click).
+                var link = new MenuItem { Header = Loc.S("Sub_Link") };
+                link.Click += (_, _) => _ = RelinkSubroutine(node);
+                cm.Items.Add(link);
+            }
+            else
+            {
+                var chart = new MenuItem { Header = Loc.S("Struct_ShowChart") };
+                chart.Click += (_, _) => ShowChartFlow(node);
+                cm.Items.Add(chart);
+                // Re-point it at a different target (or adjust the call form) without redrawing the node.
+                var relink = new MenuItem { Header = Loc.S("Sub_Relink") };
+                relink.Click += (_, _) => _ = RelinkSubroutine(node);
+                cm.Items.Add(relink);
+            }
         }
 
         var style = new MenuItem { Header = Loc.S("Style_Open") };
@@ -1750,7 +1811,8 @@ public class FlowChartWindow : Window
         if (node.OffPageEntry) { _ = MessageDialog.Show(this, Loc.S("Flow_EntryReadOnly"), Loc.S("Flow_SymOffPage")); return; }
 
         var before = node.Text;
-        if (!await NodeTextDialog.Edit(this, node)) return;
+        var locals = LocalVariableScanner.TypedFromNodeTexts(AncestorNodeTexts(node));
+        if (!await NodeTextDialog.Edit(this, node, _projFolder, locals, ProjectLanguage())) return;
 
         // An off-page EXIT must keep a unique label and push it to its entry.
         if (IsOffPage(node) && !node.OffPageEntry)
@@ -1766,6 +1828,33 @@ public class FlowChartWindow : Window
         ApplyTextFormat(label, node);
         Save();
     }
+
+    // Texts of every node that can reach <paramref name="node"/> via connections (its ancestors), so the editor's
+    // autocomplete only suggests variables introduced EARLIER in the flow. Falls back to all other nodes when the
+    // node has no incoming path yet (freshly placed / unconnected).
+    IEnumerable<string> AncestorNodeTexts(FlowNode node)
+    {
+        var byId  = _data.Nodes.ToDictionary(n => n.Id);
+        var preds = _data.Connections
+            .Where(c => !string.IsNullOrEmpty(c.FromId) && !string.IsNullOrEmpty(c.ToId))
+            .ToLookup(c => c.ToId, c => c.FromId);
+
+        var seen  = new HashSet<string>();
+        var queue = new Queue<string>(preds[node.Id]);
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            if (!seen.Add(id)) continue;
+            foreach (var f in preds[id]) queue.Enqueue(f);
+        }
+        return seen.Count == 0
+            ? _data.Nodes.Where(n => n.Id != node.Id).Select(n => n.Text)
+            : seen.Where(byId.ContainsKey).Select(id => byId[id].Text);
+    }
+
+    // The project's authoring language (for autocomplete signature syntax); C# when unset/unknown.
+    ExportLanguage ProjectLanguage() =>
+        Enum.TryParse<ExportLanguage>(ProjectService.Load(_projFolder)?.Language, out var l) ? l : ExportLanguage.CSharp;
 
     // Applies a node's text and formatting (font, size, weight, style, decorations) to its label.
     // A zero-width space after each dot gives the layout a preferred break point, so long qualified names
@@ -3493,6 +3582,16 @@ public class FlowChartWindow : Window
         }
         _ = DiagramLauncher.ChooseAndOpen(this, _projFolder, node.RefId,
             SubroutineLinkDialog.RefName(_projFolder, node.RefId), _themePath);
+    }
+
+    // Re-points an already-linked subroutine node at a different target (or re-does its call form).
+    async Task RelinkSubroutine(FlowNode node)
+    {
+        var r = await SubroutineLinkDialog.Show(this, _projFolder, "", _key);
+        if (r is null || string.IsNullOrEmpty(r.Id)) return;
+        node.RefId = r.Id; node.Text = SubroutineLinkDialog.CallText(_projFolder, r); Save();
+        if (_nodeViews.TryGetValue(node.Id, out var v)) { _canvas!.Children.Remove(v); _nodeViews.Remove(node.Id); }
+        RenderNode(node); UpdateConnectionsFor(node.Id);
     }
 
     // ── Drag functions in from the cockpit (→ subroutine nodes) ──────────────

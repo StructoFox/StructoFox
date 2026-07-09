@@ -13,11 +13,12 @@ namespace StructoFox.App;
 /// </summary>
 public class NewProjectDialog : Window
 {
-    readonly TextBox _name   = new() { PlaceholderText = "MyProject", MinWidth = 280 };
-    readonly TextBox _folder = new() { MinWidth = 320 };
+    readonly TextBox  _name   = new() { PlaceholderText = "MyProject", MinWidth = 280, MaxLength = StructoFox.Core.ProjectService.MaxNameLength };
+    readonly TextBox  _folder = new() { MinWidth = 320 };
+    readonly ComboBox _lang   = new() { MinWidth = 160, HorizontalAlignment = HorizontalAlignment.Left };
 
-    public static Task<(string parent, string name)?> Show(Window owner, List<string> libraries)
-        => new NewProjectDialog(libraries).ShowDialog<(string parent, string name)?>(owner);
+    public static Task<(string parent, string name, string language)?> Show(Window owner, List<string> libraries)
+        => new NewProjectDialog(libraries).ShowDialog<(string parent, string name, string language)?>(owner);
 
     NewProjectDialog(List<string> libraries)
     {
@@ -55,12 +56,19 @@ public class NewProjectDialog : Window
         col.Children.Add(new TextBlock { Text = Loc.S("NewProj_Name") });
         col.Children.Add(_name);
 
+        // Code syntax for the autocomplete (per project; changeable later in the diagram toolbar).
+        col.Children.Add(new TextBlock { Text = Loc.S("NewProj_Syntax") });
+        foreach (var (_, label) in FlowChartWindow.AuthorLanguages) _lang.Items.Add(label);
+        _lang.SelectedIndex = 0;
+        col.Children.Add(_lang);
+
         var ok = Ui.Btn(Loc.S("Common_OK")); ok.IsDefault = true;
         ok.Click += (_, _) =>
         {
             var parent = (_folder.Text ?? "").Trim();
             var name   = (_name.Text ?? "").Trim();
-            if (parent.Length > 0 && name.Length > 0) Close((parent, name));
+            var lang   = FlowChartWindow.AuthorLanguages[Math.Max(0, _lang.SelectedIndex)].Lang.ToString();
+            if (parent.Length > 0 && name.Length > 0) Close((parent, name, lang));
         };
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true; cancel.Click += (_, _) => Close(null);
         col.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { cancel, ok } });

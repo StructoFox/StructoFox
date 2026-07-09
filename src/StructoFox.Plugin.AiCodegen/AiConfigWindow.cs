@@ -23,11 +23,15 @@ internal static class AiConfigWindow
 
         var cards = new WrapPanel { Orientation = Orientation.Horizontal };
 
+        // One settings instance for the window's lifetime: cards are edited/removed BY REFERENCE and then
+        // saved. (Reloading per action + matching by value broke on rename — a renamed card no longer matched
+        // its on-disk twin, so it was added a second time.)
+        var s = AiSettings.Load();
+
         void Rebuild()
         {
             cards.Children.Clear();
-            var s = AiSettings.Load();
-            foreach (var card in s.Cards) cards.Children.Add(BuildCard(ctx, card, Rebuild));
+            foreach (var card in s.Cards) cards.Children.Add(BuildCard(ctx, s, card, Rebuild));
             if (s.Cards.Count == 0)
                 cards.Children.Add(PluginUi.Dim(PluginLoc.T("cfg_empty")));
         }
@@ -38,7 +42,6 @@ internal static class AiConfigWindow
             var card = new AiModelCard();
             if (await EditDialog(ctx, card, isNew: true))
             {
-                var s = AiSettings.Load();
                 s.Cards.Add(card);
                 s.Save();
                 Rebuild();
@@ -62,7 +65,7 @@ internal static class AiConfigWindow
         win.Open(ctx);
     }
 
-    static Border BuildCard(IPluginContext ctx, AiModelCard card, Action rebuild)
+    static Border BuildCard(IPluginContext ctx, AiSettings s, AiModelCard card, Action rebuild)
     {
         var inner = new StackPanel { Spacing = 2 };
 
@@ -104,14 +107,24 @@ internal static class AiConfigWindow
 
         var menu = new ContextMenu();
         var edit = new MenuItem { Header = PluginLoc.T("menu_edit") };
-        edit.Click += async (_, _) => { if (await EditDialog(ctx, card, isNew: false)) { Persist(card); rebuild(); } };
+        // Edit a DRAFT copy and only swap it in on Save, so Cancel (even after "Describe") discards cleanly.
+        edit.Click += async (_, _) =>
+        {
+            var draft = card.Clone();
+            if (await EditDialog(ctx, draft, isNew: false))
+            {
+                var i = s.Cards.IndexOf(card);
+                if (i >= 0) s.Cards[i] = draft;
+                s.Save();
+                rebuild();
+            }
+        };
         var toggle = new MenuItem { Header = PluginLoc.T(card.Enabled ? "menu_disable" : "menu_enable") };
-        toggle.Click += (_, _) => { card.Enabled = !card.Enabled; Persist(card); rebuild(); };
+        toggle.Click += (_, _) => { card.Enabled = !card.Enabled; s.Save(); rebuild(); };
         var del = new MenuItem { Header = PluginLoc.T("menu_remove") };
         del.Click += (_, _) =>
         {
-            var s = AiSettings.Load();
-            s.Cards.RemoveAll(c => Same(c, card));
+            s.Cards.Remove(card);   // by reference — no value-matching, so duplicates/renames can't confuse it
             s.Save();
             rebuild();
         };
@@ -326,14 +339,4 @@ internal static class AiConfigWindow
         _            => [],
     };
 
-    static bool Same(AiModelCard a, AiModelCard b) =>
-        a.Provider == b.Provider && a.Model == b.Model && a.Name == b.Name;
-
-    static void Persist(AiModelCard card)
-    {
-        var s = AiSettings.Load();
-        var i = s.Cards.FindIndex(c => Same(c, card));
-        if (i >= 0) s.Cards[i] = card; else s.Cards.Add(card);
-        s.Save();
-    }
 }

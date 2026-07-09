@@ -28,7 +28,6 @@ public class CodeBoardWindow : Window
     readonly CodeBoard _board;
     readonly string?   _themePath;
     readonly Action<IEnumerable<CodeEntity>>? _onExport;
-    readonly string?   _bodyTargetKey;   // when set, this board defines a function/method body (Generate)
     CodeBoardData      _boardData;
 
     Canvas?       _canvas;
@@ -74,6 +73,7 @@ public class CodeBoardWindow : Window
 
     Button? _connectBtn;
     ContextMenu? _menu;   // the single open context menu, so opening a new one closes the old
+    Control? _emptyHint;  // centered "what is a board" overlay, shown only while the board has no cards
 
     bool    _scaleMode;                                    // resize cards via grips
     Button? _scaleBtn;
@@ -95,8 +95,6 @@ public class CodeBoardWindow : Window
         _board      = board;
         _themePath  = themePath;
         _onExport   = onExport;
-        // A board authors a body when it carries an assignment — the single source of truth.
-        _bodyTargetKey = string.IsNullOrWhiteSpace(board.TargetKey) ? null : board.TargetKey;
         _boardData  = CodeBoardDataService.Load(projFolder, board.Id);
         _snapshot   = System.Text.Json.JsonSerializer.Serialize(_boardData);   // baseline for undo
 
@@ -243,7 +241,44 @@ public class CodeBoardWindow : Window
 
         // Relations need card sizes; draw them once layout has settled.
         Dispatcher.UIThread.Post(RenderAllRelations, DispatcherPriority.Loaded);
+
+        // Empty-state: explain what a board is FOR, until the user puts something on it.
+        _emptyHint = BuildEmptyHint();
+        Grid.SetRow(_emptyHint, 1);
+        root.Children.Add(_emptyHint);
+        UpdateEmptyHint();
     }
+
+    // A non-interactive, centered card that explains the board's role. Hidden once any card is present.
+    Control BuildEmptyHint()
+    {
+        var stack = new StackPanel { Spacing = 8, MaxWidth = 480 };
+        stack.Children.Add(new TextBlock
+        {
+            Text = Loc.S("Board_EmptyTitle"), FontSize = 16, FontWeight = FontWeight.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text = Loc.S("Board_EmptyBody"), TextWrapping = TextWrapping.Wrap, Opacity = 0.85, FontSize = 12,
+        });
+        var card = new Border
+        {
+            Padding = new(22, 18), CornerRadius = new(10), MaxWidth = 520,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,   // never blocks canvas interaction (right-click, drag, …)
+            Child = stack,
+        };
+        Ui.Theme(card, Border.BackgroundProperty, "SidebarBgBrush");
+        Ui.Theme(card, Border.BorderBrushProperty, "ControlBorderBrush");
+        Ui.Theme(card, TextElement.ForegroundProperty, "SidebarTextBrush");
+        card.BorderThickness = new(1);
+        card.Opacity = 0.94;
+        return card;
+    }
+
+    // Show the explanation only while the board is empty.
+    void UpdateEmptyHint() { if (_emptyHint is not null) _emptyHint.IsVisible = _cards.Count == 0; }
 
     Border BuildToolbar()
     {
@@ -268,15 +303,6 @@ public class CodeBoardWindow : Window
         var delBtn = Btn(Loc.S("Code_RemoveCards"), Loc.S("Code_RemoveCardsTip"));
         delBtn.Click += (_, _) => RemoveSelectedFromBoard();
         row.Children.Add(delBtn);
-
-        // When this board authors a function/method body, offer to generate it from the wiring.
-        if (_bodyTargetKey is not null)
-        {
-            row.Children.Add(new Border { Width = 8 });
-            var genBtn = Btn(Loc.S("Code_GenBody"), Loc.S("Code_GenBodyTip"));
-            genBtn.Click += async (_, _) => await GenerateBody();
-            row.Children.Add(genBtn);
-        }
 
         if (_onExport is not null)
         {
@@ -690,6 +716,7 @@ public class CodeBoardWindow : Window
         _cards[entity.Id] = card;
 
         WireCard(card, entity);
+        UpdateEmptyHint();   // a card exists now → drop the empty-state explanation
         if (_scaleMode) RefreshScaleHandles();   // a card added while resizing gets grips too
 
         // Re-place ports (and any touching relations) whenever the card's measured size changes.
@@ -1539,9 +1566,6 @@ public class CodeBoardWindow : Window
     async Task AddEntityOfType(string entityTypeName, Point dropPoint)
     {
         if (!Enum.TryParse<CodeEntityType>(entityTypeName, out var et)) return;
-        // A body-authoring board only wires functions — keep classes/objects off it (avoids loops).
-        if (_bodyTargetKey is not null && et != CodeEntityType.Function)
-        { await MessageDialog.Show(this, Loc.S("Code_BodyFuncOnly"), Loc.S("Code_AddEntityTitle")); return; }
         var name = await PromptDialog.Show(this, Loc.S("Common_NameColon"), "", string.Format(Loc.S("Code_NewTypeTitle"), entityTypeName));
         if (string.IsNullOrWhiteSpace(name)) return;
 
@@ -1567,7 +1591,6 @@ public class CodeBoardWindow : Window
             {
                 _entities[e.Id] = e;
                 if (onBoard.Contains(e.Id)) continue;
-                if (_bodyTargetKey is not null && e.EntityType != CodeEntityType.Function) continue;   // body board = functions only
                 available.Add(e);
             }
         available = available.OrderBy(e => e.EntityType.ToString()).ThenBy(e => e.Name).ToList();
@@ -1692,30 +1715,12 @@ public class CodeBoardWindow : Window
         {
             if (_boardData.Positions.ContainsKey(id)) continue;       // already on the board
             if (!_entities.TryGetValue(id, out var ent)) continue;
-            if (_bodyTargetKey is not null && ent.EntityType != CodeEntityType.Function) continue;   // body board = functions only
             var pos = new CodeCardPosition { X = Math.Max(0, at.X + off), Y = Math.Max(0, at.Y + off) };
             _boardData.Positions[id] = pos;
             RenderCard(ent, pos);
             off += 26;
         }
         Save();
-    }
-
-    // ── Generate the target function/method body from the wiring ─────────────
-
-    // Translates the board's dataflow into the target's structogram (topologically ordered calls),
-    // then confirms. The structogram drives the normal code export afterwards.
-    async Task GenerateBody()
-    {
-        if (_bodyTargetKey is null) return;
-        // Make sure every entity is known (names/ports) before wiring them into a call sequence.
-        foreach (var t in CodeEntityService.EntityTypes)
-            foreach (var ent in CodeEntityService.LoadAll(_projFolder, t))
-                _entities[ent.Id] = ent;
-
-        var sd = CodeBoardCodeGen.GenerateBody(_board.Name, _boardData, _entities);
-        StructogramService.Save(_projFolder, _bodyTargetKey, sd);
-        await MessageDialog.Show(this, string.Format(Loc.S("Code_GenDone"), sd.Root.Count), Loc.S("Code_GenTitle"));
     }
 
     // ── Entity editor (shared standalone dialog) ─────────────────────────────
@@ -1797,6 +1802,7 @@ public class CodeBoardWindow : Window
         _selectedIds.Clear();
         if (any) FitCanvas();   // shrink the canvas back when edge cards were removed
         Save();
+        UpdateEmptyHint();   // board may be empty again → bring the explanation back
         if (_scaleMode) RefreshScaleHandles();   // drop grips of removed cards
         RefreshSelectionVisuals();
         if (any) _ = InfoDialog.Show(this, "board_remove", Loc.S("Board_RemoveInfo"), Loc.S("Code_RemoveFromBoard"));

@@ -25,7 +25,7 @@ public static class DiagramLauncher
         {
             Title                 = Loc.S("Diag_Title"),
             Width                 = 360,
-            Height                = 230,
+            Height                = 185,
             CanResize             = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
@@ -67,25 +67,8 @@ public static class DiagramLauncher
         };
         stack.Children.Add(nsBtn);
 
-        // Board option — opens THE board assigned to this function/method (one board kind, in the
-        // registry/gallery), creating it on first use. No separate ad-hoc per-key board.
-        var hasBoard = CodeBoardRegistryService.Load(projFolder).Any(b => b.TargetKey == key);
-        var boardBtn = ChoiceBtn(hasBoard ? Loc.S("Diag_BoardExists") : Loc.S("Diag_Board"));
-        ToolTip.SetTip(boardBtn, Loc.S("Diag_BoardTip"));
-        boardBtn.Click += (_, _) =>
-        {
-            dlg.Close();
-            var boards = CodeBoardRegistryService.Load(projFolder);
-            var board  = boards.FirstOrDefault(b => b.TargetKey == key);
-            if (board is null)
-            {
-                board = new CodeBoard { Name = title, TargetKey = key };
-                boards.Add(board);
-                CodeBoardRegistryService.Save(projFolder, boards);
-            }
-            DiagramWindows.OpenOrActivate(DiagramWindows.BoardId(projFolder, board.Id), () => new CodeBoardWindow(projFolder, board, themePath));
-        };
-        stack.Children.Add(boardBtn);
+        // (A body is authored as a PAP or structogram only — boards are a relationship/architecture view,
+        // not a code-body surface, so they are deliberately NOT offered here.)
 
         return dlg.ShowDialog(owner);
     }

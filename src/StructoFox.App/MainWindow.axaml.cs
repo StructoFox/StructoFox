@@ -31,7 +31,7 @@ public partial class MainWindow : Window
     static readonly FontFamily Emoji = new("Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji");
 
     /// <summary>Display version of the app, shown in the About box.</summary>
-    public const string Version = "0.5.2 ALPHA";
+    public const string Version = "0.9.0 BETA";
 
     string? _project;
     Section _section = Section.Class;
@@ -68,7 +68,11 @@ public partial class MainWindow : Window
     ContentControl _secList = new();       // the filtered list region (re-rendered without rebuilding the bar)
 
     // Builds the shell window and shows the project browser.
-    public MainWindow()
+    // Embedded (one-shot) mode: launched with a project path (e.g. from ClaudetRelay) → open that project's
+    // cockpit directly, with no way back to the home browser; closing the window quits the app.
+    readonly bool _embedded;
+
+    public MainWindow(string? projectPath = null)
     {
         InitializeComponent();
         Title = "StructoFox";
@@ -79,7 +83,32 @@ public partial class MainWindow : Window
         Ui.ThemeWindow(this);
 
         Content = BuildShell();
-        ShowHome();
+
+        _embedded = !string.IsNullOrWhiteSpace(projectPath);
+        if (_embedded)
+            // Defer until the window is shown — creating a new subproject may need a modal syntax dialog.
+            Opened += async (_, _) => await OpenEmbedded(projectPath!);
+        else
+            ShowHome();
+
+        // Back up the open project when the app is quit, too (not just on explicit close).
+        Closing += (_, _) => { if (_project is not null) TryAutoBackup(_project, interactive: false); };
+    }
+
+    // Opens the given folder as this project's cockpit; if it isn't a StructoFox project yet, creates it after
+    // asking for the code syntax. Used only in embedded mode (a project path was passed on the command line).
+    async Task OpenEmbedded(string path)
+    {
+        if (!ProjectService.IsProject(path))
+        {
+            Directory.CreateDirectory(path);
+            var lang = await SyntaxDialog.Pick(this);
+            if (lang is null) { Close(); return; }   // cancelled → nothing to open
+            var info = ProjectService.Create(path, new DirectoryInfo(path.TrimEnd('/', '\\')).Name);
+            info.Language = lang;
+            ProjectService.Save(path, info);
+        }
+        OpenProject(path);
     }
 
     // Top bar (row 0) over the swappable body (row 1).
@@ -142,17 +171,16 @@ public partial class MainWindow : Window
     {
         var cm = new ContextMenu();
 
-        var home = new MenuItem { Header = Loc.S("Menu_Home") };
-        home.Click += (_, _) => ShowHome();
-        cm.Items.Add(home);
-        if (_project is not null)
+        // "Close project" already takes you back to the project list; when no project is open you're already
+        // there — so a separate "Home" entry was redundant. Only show close (+ its divider) with a project open.
+        // In embedded mode there's no home to return to (the window IS the project), so it's hidden.
+        if (_project is not null && !_embedded)
         {
             var close = new MenuItem { Header = Loc.S("Menu_CloseProject") };
             close.Click += (_, _) => ShowHome();
             cm.Items.Add(close);
+            cm.Items.Add(new Separator());
         }
-
-        cm.Items.Add(new Separator());
 
         var theme = new MenuItem { Header = Loc.S("Menu_Theme") };
         foreach (var (name, path) in ThemeManager.Available())
@@ -183,26 +211,36 @@ public partial class MainWindow : Window
         var options = new MenuItem { Header = Loc.S("Menu_Options") };
 
         var normWarn = new MenuItem { Header = Loc.S("Opt_NormWarn"), ToggleType = MenuItemToggleType.CheckBox, IsChecked = AppSettings.NormWarn };
+        ToolTip.SetTip(normWarn, Loc.S("Opt_NormWarnTip"));
         normWarn.Click += (_, _) => AppSettings.Set(AppSettings.NormWarnKey, normWarn.IsChecked);
         options.Items.Add(normWarn);
         var normMark = new MenuItem { Header = Loc.S("Opt_NormMark"), ToggleType = MenuItemToggleType.CheckBox, IsChecked = AppSettings.NormMark };
+        ToolTip.SetTip(normMark, Loc.S("Opt_NormMarkTip"));
         normMark.Click += (_, _) => AppSettings.Set(AppSettings.NormMarkKey, normMark.IsChecked);
         options.Items.Add(normMark);
         options.Items.Add(new Separator());
 
         var defHeader = new MenuItem { Header = Loc.S("Menu_DefaultHeader") };
+        ToolTip.SetTip(defHeader, Loc.S("Menu_DefaultHeaderTip"));
         defHeader.Click += (_, _) => CrashHandler.Safe(() => _ = DefaultHeaderDialog.Show(this), "DefaultHeader");
         options.Items.Add(defHeader);
 
         var userInfo = new MenuItem { Header = Loc.S("Menu_UserInfo") };
+        ToolTip.SetTip(userInfo, Loc.S("Menu_UserInfoTip"));
         userInfo.Click += (_, _) => CrashHandler.Safe(() => _ = UserInfoDialog.Show(this), "UserInfo");
         options.Items.Add(userInfo);
+
+        var backup = new MenuItem { Header = Loc.S("Menu_Backup") };
+        ToolTip.SetTip(backup, Loc.S("Menu_BackupTip"));
+        backup.Click += (_, _) => CrashHandler.Safe(() => _ = BackupSettingsDialog.Show(this), "BackupSettings");
+        options.Items.Add(backup);
         options.Items.Add(new Separator());
 
         foreach (var (key, labelKey) in SuppressStore.Known)
         {
             var k = key;
             var mi = new MenuItem { Header = Loc.S(labelKey), ToggleType = MenuItemToggleType.CheckBox, IsChecked = !SuppressStore.IsSuppressed(key) };
+            ToolTip.SetTip(mi, Loc.S("Opt_SuppressTip"));
             mi.Click += (_, _) => { if (mi.IsChecked) SuppressStore.Unsuppress(k); else SuppressStore.Suppress(k); };
             options.Items.Add(mi);
         }
@@ -249,7 +287,7 @@ public partial class MainWindow : Window
         var box = new TextBox
         {
             Text = content, IsReadOnly = true, AcceptsReturn = true,
-            TextWrapping = TextWrapping.NoWrap, BorderThickness = new(0),
+            TextWrapping = TextWrapping.Wrap, BorderThickness = new(0),
             FontFamily = new FontFamily("Consolas, Menlo, monospace"),
         };
         var win = new Window
@@ -326,9 +364,29 @@ public partial class MainWindow : Window
     // Shows the project browser (no project open).
     void ShowHome() => CrashHandler.Safe(() =>
     {
+        if (_project is not null) TryAutoBackup(_project, interactive: true);   // closing the current project
         _project = null;
         _body.Content = BuildHome();
     }, "ShowHome");
+
+    // Auto-zips the project into the backup folder on close, if enabled and it changed since the last backup.
+    // When interactive (the app is staying open), a bad backup folder or a failed backup is reported to the user;
+    // on app exit that's skipped (a dialog can't reliably show while the window is closing).
+    void TryAutoBackup(string projectFolder, bool interactive) => CrashHandler.Safe(() =>
+    {
+        if (!AppSettings.BackupOnClose) return;
+        var root = AppSettings.BackupFolder;
+        if (string.IsNullOrWhiteSpace(root)) return;
+
+        if (BackupService.RootConflicts(root, projectFolder))
+        {
+            if (interactive) _ = MessageDialog.Show(this, Loc.S("Backup_ErrInside"), Loc.S("Backup_ErrTitle"));
+            return;
+        }
+        if (!BackupService.NeedsBackup(projectFolder, root)) return;   // nothing changed → nothing to do
+        if (BackupService.CreateBackup(projectFolder, root, AppSettings.BackupKeep) is null && interactive)
+            _ = MessageDialog.Show(this, string.Format(Loc.S("Backup_ErrFailed"), root), Loc.S("Backup_ErrTitle"));
+    }, "AutoBackup");
 
     // The landing surface: a two-column hub — sources nav on the left, hero + project list on the right.
     Control BuildHome()
@@ -857,7 +915,7 @@ public partial class MainWindow : Window
         {
             var res = await NewProjectDialog.Show(this, Libraries.Load());
             if (res is not { } r) return;
-            var (parent, name) = r;
+            var (parent, name, language) = r;
             if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(name)) return;
 
             var folder = Path.Combine(parent, SafeFolder(name));
@@ -876,7 +934,8 @@ public partial class MainWindow : Window
             }
 
             Libraries.Add(parent);   // register the chosen folder as a library (no-op if already one)
-            ProjectService.Create(folder, name);
+            var info = ProjectService.Create(folder, name);
+            if (!string.IsNullOrEmpty(language)) { info.Language = language; ProjectService.Save(folder, info); }
             OpenProject(folder);
             return;
         }
@@ -909,13 +968,10 @@ public partial class MainWindow : Window
         else { card.Width = 220; card.Margin = new(4); }
 
         var info = ProjectService.Load(path);
-        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        if (ThemeSwatch(info?.PreferredTheme) is { } sw) nameRow.Children.Add(sw);
-        var name = new TextBlock { Text = ProjectName(path), FontSize = big ? 20 : 14, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var name = new TextBlock { Text = ProjectName(path), FontSize = big ? 20 : 14, FontWeight = FontWeight.Bold };
         Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
-        nameRow.Children.Add(name);
 
-        var stack = new StackPanel { Spacing = 3, Children = { HeaderRow(nameRow, date) } };
+        var stack = new StackPanel { Spacing = 3, Children = { HeaderRow(ThemeSwatch(info?.PreferredTheme), name, date) } };
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, big ? 13 : 11));
         if (big) stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.55, TextWrapping = TextWrapping.Wrap });
 
@@ -933,9 +989,18 @@ public partial class MainWindow : Window
         rename.Click += async (_, _) => await RenameProject(path);
         var openFolder = new MenuItem { Header = Loc.S("Proj_OpenFolder") };
         openFolder.Click += (_, _) => OpenInExplorer(path);
+        // The project's generated-code folder (the codegen default). Create it on demand so it always opens.
+        var openCode = new MenuItem { Header = Loc.S("Proj_OpenCode") };
+        openCode.Click += (_, _) => CrashHandler.Safe(() =>
+        {
+            var code = System.IO.Path.Combine(path, "Code");
+            System.IO.Directory.CreateDirectory(code);
+            OpenInExplorer(code);
+        }, "OpenCodeFolder");
         var cm = new ContextMenu();
         cm.Items.Add(rename);
         cm.Items.Add(openFolder);
+        cm.Items.Add(openCode);
         c.ContextMenu = cm;
     }
 
@@ -944,8 +1009,10 @@ public partial class MainWindow : Window
     {
         var name = await PromptDialog.Show(this, Loc.S("Proj_RenamePrompt"), ProjectName(path), Loc.S("Proj_Rename"));
         if (string.IsNullOrWhiteSpace(name)) return;
+        name = name.Trim();
+        if (name.Length > ProjectService.MaxNameLength) name = name[..ProjectService.MaxNameLength];   // keep tiles tidy
         var info = ProjectService.Load(path) ?? ProjectService.Create(path, name);
-        info.Name = name.Trim();
+        info.Name = name;
         ProjectService.Save(path, info);
         _body.Content = BuildHome();
     }, "RenameProject");
@@ -962,17 +1029,25 @@ public partial class MainWindow : Window
             Process.Start(new ProcessStartInfo("xdg-open", $"\"{path}\"") { UseShellExecute = true });
     }, "OpenInExplorer");
 
-    // A card's top row: the name block on the left, the date tucked into the top-right corner.
-    Control HeaderRow(Control nameRow, DateTime date)
+    // A card's header: the date as a small line on top, the name BELOW it on its own full-width row (with the
+    // optional theme swatch). The name wraps rather than being clipped, so it never collides with the date.
+    Control HeaderRow(Control? swatch, TextBlock name, DateTime date)
     {
         var when = Dim(Friendly(date), 10);
-        when.VerticalAlignment = VerticalAlignment.Top;
-        when.Margin = new(8, 0, 0, 0);
-        var dock = new DockPanel();
-        DockPanel.SetDock(when, Dock.Right);
-        dock.Children.Add(when);
-        dock.Children.Add(nameRow);
-        return dock;
+        when.HorizontalAlignment = HorizontalAlignment.Right;
+
+        name.TextWrapping = TextWrapping.Wrap;   // full width, wraps to more lines instead of truncating
+
+        var nameRow = new Grid { ColumnDefinitions = new("Auto,*") };
+        if (swatch is not null)
+        {
+            swatch.Margin = new(0, 2, 6, 0);
+            swatch.VerticalAlignment = VerticalAlignment.Top;
+            Grid.SetColumn(swatch, 0); nameRow.Children.Add(swatch);
+        }
+        Grid.SetColumn(name, 1); nameRow.Children.Add(name);
+
+        return new StackPanel { Spacing = 2, Children = { when, nameRow } };
     }
 
     // A large, detail-rich tile: theme swatch + name, description, content counts, date and path.
@@ -982,13 +1057,10 @@ public partial class MainWindow : Window
         Ui.Theme(card, Border.BackgroundProperty, "ControlBgBrush");
 
         var info = ProjectService.Load(path);
-        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        if (ThemeSwatch(info?.PreferredTheme) is { } sw) nameRow.Children.Add(sw);
-        var name = new TextBlock { Text = ProjectName(path), FontSize = 18, FontWeight = FontWeight.Bold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var name = new TextBlock { Text = ProjectName(path), FontSize = 18, FontWeight = FontWeight.Bold };
         Ui.Theme(name, TextBlock.ForegroundProperty, "ContentTextBrush");
-        nameRow.Children.Add(name);
 
-        var stack = new StackPanel { Spacing = 4, Children = { HeaderRow(nameRow, date) } };
+        var stack = new StackPanel { Spacing = 4, Children = { HeaderRow(ThemeSwatch(info?.PreferredTheme), name, date) } };
         if (!string.IsNullOrWhiteSpace(info?.Description)) stack.Children.Add(Dim(info!.Description, 12));
         stack.Children.Add(new TextBlock { Text = path, FontSize = 11, FontFamily = Mono, Opacity = 0.5, TextWrapping = TextWrapping.Wrap });
 
@@ -1803,9 +1875,6 @@ public partial class MainWindow : Window
                 new TextBlock { Text = board.Name, FontWeight = FontWeight.Bold, FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis },
             },
         };
-        // Show the assignment, if any ("→ Class.Method"), so a body-authoring board reads as such.
-        if (_project is not null && !string.IsNullOrEmpty(board.TargetKey))
-            stack.Children.Add(Dim("→ " + CodeBoardRegistryService.TargetLabel(_project, board.TargetKey), 11));
         tile.Child = stack;
 
         // Handled like entity rows: left-click selects, double-click opens, right-click → menu (Open…).
@@ -1820,21 +1889,12 @@ public partial class MainWindow : Window
 
         var open = new MenuItem { Header = Loc.S("Boards_Open") };
         open.Click += (_, _) => OpenBoard(board);
-        var assign = new MenuItem { Header = Loc.S("Boards_Assign") };
-        assign.Click += async (_, _) => await AssignBoard(board);
         var rename = new MenuItem { Header = Loc.S("Boards_Rename") };
         rename.Click += async (_, _) => await RenameBoard(board);
         var delete = new MenuItem { Header = Loc.S("Boards_Delete") };
         delete.Click += async (_, _) => await DeleteBoard(board);
         var cm = new ContextMenu();
         cm.Items.Add(open);
-        cm.Items.Add(assign);
-        if (!string.IsNullOrEmpty(board.TargetKey))
-        {
-            var clear = new MenuItem { Header = Loc.S("Boards_ClearAssign") };
-            clear.Click += (_, _) => SetBoardTarget(board.Id, "");
-            cm.Items.Add(clear);
-        }
         cm.Items.Add(new Separator());
         cm.Items.Add(rename); cm.Items.Add(delete);
         tile.ContextMenu = cm;
@@ -1851,32 +1911,6 @@ public partial class MainWindow : Window
             else tile.BorderBrush = Brushes.Transparent;
         }
     }
-
-    // Picks a function/method for this board to author, then stores the assignment.
-    Task AssignBoard(CodeBoard board) => CrashHandler.SafeAsync(async () =>
-    {
-        if (_project is null) return;
-        // A board with classes/objects on it is an architecture view, not a function body.
-        if (CodeBoardCodeGen.ContainsNonFunction(_project, board.Id))
-        { await MessageDialog.Show(this, Loc.S("Boards_HasNonFunc"), Loc.S("Boards_Assign")); return; }
-        var targets = CodeBoardRegistryService.AssignableTargets(_project);
-        if (targets.Count == 0) { await MessageDialog.Show(this, Loc.S("Boards_NoTargets"), Loc.S("Boards_Assign")); return; }
-        var key = await PickListDialog.Show(this, Loc.S("Boards_AssignTitle"), targets.Select(t => (t.Key, t.Label)).ToList());
-        if (key is null) return;
-        SetBoardTarget(board.Id, key);
-    }, "AssignBoard");
-
-    // Writes a board's TargetKey and refreshes the gallery.
-    void SetBoardTarget(string boardId, string key) => CrashHandler.Safe(() =>
-    {
-        if (_project is null) return;
-        var boards = CodeBoardRegistryService.Load(_project);
-        var b = boards.FirstOrDefault(x => x.Id == boardId);
-        if (b is null) return;
-        b.TargetKey = key;
-        CodeBoardRegistryService.Save(_project, boards);
-        ShowSection(Section.Boards);
-    }, "SetBoardTarget");
 
     // Opens a board on its own canvas window; its export buttons open the exporter on the chosen entities.
     void OpenBoard(CodeBoard board) => CrashHandler.Safe(() =>

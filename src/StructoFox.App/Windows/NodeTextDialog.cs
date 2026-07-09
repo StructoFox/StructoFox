@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using StructoFox.Core;
 using StructoFox.Core.Models;
 
 namespace StructoFox.App;
@@ -21,13 +22,18 @@ public class NodeTextDialog : Window
     readonly ToggleButton  _strike    = Toggle("S");
     readonly FlowNode      _node;
 
-    // Opens the editor over an owner for a node; returns true if the user confirmed (node mutated).
-    public static Task<bool> Edit(Window owner, FlowNode node) => new NodeTextDialog(node).ShowDialog<bool>(owner);
+    // Opens the editor over an owner for a node; returns true if the user confirmed (node mutated). When a project
+    // context is supplied, the text box gets AI-free autocomplete (project entities + earlier-in-flow variables).
+    public static Task<bool> Edit(Window owner, FlowNode node,
+        string? projFolder = null, IReadOnlyDictionary<string, string>? locals = null, ExportLanguage lang = ExportLanguage.CSharp)
+        => new NodeTextDialog(node, projFolder, locals ?? new Dictionary<string, string>(), lang).ShowDialog<bool>(owner);
 
     // Builds the dialog and seeds the controls from the node's current text + formatting.
-    NodeTextDialog(FlowNode node)
+    NodeTextDialog(FlowNode node, string? projFolder, IReadOnlyDictionary<string, string> locals, ExportLanguage lang)
     {
         _node                 = node;
+        if (projFolder is not null)
+            CompletionBox.Attach(_text, s => CodeCompletionService.Suggest(projFolder, lang, locals, s));
         Title                 = Loc.S("NodeTxt_Title");
         SizeToContent         = SizeToContent.Height;
         Width                 = 420;

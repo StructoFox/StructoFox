@@ -13,6 +13,10 @@ public static class ProjectService
 {
     public const string Marker = "project.structofox";
 
+    /// <summary>Max length of a project's display name — keeps tiles/lists tidy (names wrap to at most a couple
+    /// of lines). Enforced by the new-project and rename inputs.</summary>
+    public const int MaxNameLength = 50;
+
     static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
 
     static string MarkerPath(string folder) => Path.Combine(folder, Marker);

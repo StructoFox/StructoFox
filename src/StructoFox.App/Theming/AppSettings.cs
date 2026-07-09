@@ -79,4 +79,21 @@ public static class AppSettings
     // The user's class (school) or department (company) — suggested in the header too.
     public const string UserDeptKey = "user_dept";
     public static string UserDepartment { get => GetStr(UserDeptKey, ""); set => SetStr(UserDeptKey, value); }
+
+    // ── Backup ──────────────────────────────────────────────────────────────
+    // Root folder for project backups (each project gets a subfolder). Empty = backups disabled.
+    public const string BackupFolderKey = "backup_folder";
+    public static string BackupFolder { get => GetStr(BackupFolderKey, ""); set => SetStr(BackupFolderKey, value); }
+
+    // Automatically zip the project into the backup folder when it's closed (if it changed since last backup).
+    public const string BackupOnCloseKey = "backup_on_close";
+    public static bool BackupOnClose { get => Get(BackupOnCloseKey, false); set => Set(BackupOnCloseKey, value); }
+
+    // How many backup zips to keep PER PROJECT (older ones are pruned). Default 5, always ≥ 1.
+    public const string BackupKeepKey = "backup_keep";
+    public static int BackupKeep
+    {
+        get => int.TryParse(GetStr(BackupKeepKey, "5"), out var v) && v > 0 ? v : 5;
+        set => SetStr(BackupKeepKey, Math.Max(1, value).ToString());
+    }
 }

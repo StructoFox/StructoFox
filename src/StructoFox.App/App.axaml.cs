@@ -25,9 +25,24 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            // A project-folder argument (positional path, or `--project <path>`) launches straight into that
+            // project's cockpit in embedded mode (e.g. when started from ClaudetRelay).
+            desktop.MainWindow = new MainWindow(ProjectPathArg(desktop.Args));
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    // The project folder to open on launch: the value after `--project`, else the first non-switch argument.
+    // Null when no path was given (→ normal home browser).
+    static string? ProjectPathArg(string[]? args)
+    {
+        if (args is null) return null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--project" && i + 1 < args.Length) return args[i + 1];
+            if (!args[i].StartsWith("--")) return args[i];
+        }
+        return null;
     }
 }

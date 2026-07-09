@@ -29,8 +29,9 @@ public class ExportWindow : Window
     // The ten supported languages with friendly labels (Id carries the enum name).
     static readonly (ExportLanguage Lang, string Label)[] Languages =
     {
-        (ExportLanguage.CSharp, "C#"), (ExportLanguage.Cpp, "C++"), (ExportLanguage.Java, "Java"),
-        (ExportLanguage.TypeScript, "TypeScript"), (ExportLanguage.Python, "Python"), (ExportLanguage.Kotlin, "Kotlin"),
+        (ExportLanguage.CSharp, "C#"), (ExportLanguage.Cpp, "C++"), (ExportLanguage.C, "C"), (ExportLanguage.Java, "Java"),
+        (ExportLanguage.TypeScript, "TypeScript"), (ExportLanguage.JavaScript, "JavaScript"),
+        (ExportLanguage.Python, "Python"), (ExportLanguage.Kotlin, "Kotlin"),
         (ExportLanguage.Swift, "Swift"), (ExportLanguage.Php, "PHP"), (ExportLanguage.Go, "Go"), (ExportLanguage.Rust, "Rust"),
         (ExportLanguage.Verse, "Verse"),
     };
