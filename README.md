@@ -85,6 +85,22 @@ setup, reading project data, custom themed UI, and localization — with the bun
 
 ---
 
+## Themes & ecosystem
+
+- **OXSUIT themes** — StructoFox is themed with the
+  [OXSUIT](https://github.com/Doombug75/OXSUIT) colour-theme XML standard: plain, portable
+  colour definitions. Drop `.oxsuit` files into `Themes/`; no restart required. Design your
+  own visually with the free
+  [**OXSUIT Theminator**](https://github.com/Doombug75/Theminator) — a standalone theme
+  editor and previewer.
+- **ClaudetRelay integration** — StructoFox is the code-planning companion to
+  [**ClaudetRelay**](https://github.com/Doombug75/ClaudetRelay), a multi-agent AI workspace.
+  In a ClaudetRelay project, the **Code** button launches StructoFox straight into that
+  project's cockpit — one flowchart/code editor, shared across both apps. StructoFox also
+  runs fully standalone.
+
+---
+
 ## Architecture
 
 ```
