@@ -24,6 +24,9 @@ and StructoFox turns it into real, buildable source code across many languages.
 
 **Status:** `0.9.0-beta` — feature-complete for a first release; hardening and polish.
 
+**Languages:** the UI ships fully in **English** and **German**; more can be added as
+drop-in language packs (`Languages/<code>.json`).
+
 ---
 
 ## Screenshots
