@@ -124,25 +124,11 @@ colour definitions → trivially cross-platform); drop `.oxsuit` files into `The
 
 ## Requirements
 
-- Windows 10 / 11 (built on **.NET 10** and **Avalonia 12**; the core is cross-platform,
-  a Linux/macOS front-end is planned).
+- **Windows** 10 / 11, **Linux** (x64), and **macOS** 12+ — built on **.NET 10** and
+  **Avalonia 12** (the Windows build needs the .NET 10 Runtime; the Linux/macOS builds are
+  self-contained).
 - Optional: an AI provider (local server or cloud API key) only if you use the AI plugin —
   everything else works without any AI.
-
----
-
-## Roadmap
-
-- [x] Platform-neutral core carved out of ClaudetRelay
-- [x] Avalonia UI shell — structure boards, flowchart & structogram editors
-- [x] OXSUIT theme loader for Avalonia
-- [x] Deterministic multi-file code generation (13 languages)
-- [x] AI code generation as a removable plugin
-- [x] AI-free node-editor autocomplete
-- [x] Plugin system + authoring guide
-- [ ] Linux / macOS front-end
-- [ ] Per-language help pages
-- [ ] AI command/syntax lookup plugin
 
 ---
 
