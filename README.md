@@ -22,7 +22,8 @@ and StructoFox turns it into real, buildable source code across many languages.
 > (structure, signatures, structograms) generate code with **no AI**; an optional AI
 > plugin fills only the gaps that can't be derived.
 
-**Status:** `0.9.0-beta` — feature-complete for a first release; hardening and polish.
+**Status:** `0.9.0-beta` — almost feature-complete for a first release; hardening and polish.
+UPCOMING FEATURE (last one planned): Export to jpg, png, tif, pdf.
 
 **Languages:** the UI ships fully in **English** and **German**; more can be added as
 drop-in language packs (`Languages/<code>.json`).
