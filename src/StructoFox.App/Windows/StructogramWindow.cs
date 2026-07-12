@@ -177,10 +177,19 @@ public class StructogramWindow : Window
         var codeBtn = Ui.Btn(Loc.S("Struct_CodeExport"), Loc.S("Struct_CodeExportTip"));
         codeBtn.Click += (_, _) => OpenCodeExport();
 
+        // Export the structogram as displayed (with decoration) to a single image file.
+        var imgBtn = Ui.Btn(Loc.S("ImgExport_Menu"), Loc.S("ImgExport_Tip"));
+        imgBtn.Click += async (_, _) =>
+        {
+            var body = BuildStructogramBody();
+            if (body is null) { await MessageDialog.Show(this, Loc.S("ImgExport_Empty"), Loc.S("ImgExport_Title")); return; }
+            await DiagramImageExporter.RunDialog(this, _data.Title, body, _data.Title, _style);
+        };
+
         bar.Child = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 10,
-            Children = { bgBtn, decorBtn, codeBtn, hint },
+            Children = { bgBtn, decorBtn, codeBtn, imgBtn, hint },
         };
 
         // Scrollable diagram host — the structogram can grow past the window. NOTE: no Padding here — a

@@ -1156,6 +1156,18 @@ public class FlowChartWindow : Window
         };
         panel.Children.Add(hops);
 
+        // Export the diagram as displayed (with decoration) to a single image file.
+        panel.Children.Add(new Separator());
+        var imgExport = Ui.Btn(Loc.S("ImgExport_Menu"));
+        imgExport.Click += async (_, _) =>
+        {
+            var bmp = RenderDiagramOnly(0, 1.0);
+            if (bmp is null) { await MessageDialog.Show(this, Loc.S("ImgExport_Empty"), Loc.S("ImgExport_Title")); return; }
+            var body = new Avalonia.Controls.Image { Source = bmp, Width = bmp.PixelSize.Width, Height = bmp.PixelSize.Height };
+            await DiagramImageExporter.RunDialog(this, _data.Title, body, _data.Title, _style);
+        };
+        panel.Children.Add(imgExport);
+
         return new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
     }
 
