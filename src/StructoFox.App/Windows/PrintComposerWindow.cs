@@ -8,6 +8,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using StructoFox.Core;
 using StructoFox.Core.Models;
 
@@ -260,7 +261,7 @@ public class PrintComposerWindow : Window
 
     // Renders one page off-screen to a bitmap at the given DPI — no selection chrome, no grid, diagrams re-rendered
     // crisp at the target density.
-    RenderTargetBitmap ExportPageBitmap(int page, double dpi)
+    RenderTargetBitmap ExportPageBitmap(int page, double dpi, List<DocumentExporter.PdfTextRun>? textSink = null)
     {
         var savedIndex = _pageIndex; var savedScale = _viewScale; var savedExport = _exporting; var savedDensity = _exportDensity;
         // Build the page at 1:1 DIP; the bitmap's own DPI scales it to the target resolution (so the PNG carries
@@ -276,20 +277,39 @@ public class PrintComposerWindow : Window
             var (w, h) = pg.SizePx;                     // DIP
             double sw = w * density, sh = h * density;  // scaled DIP == output pixels (rendered 1:1)
             var canvas = new Canvas { Width = sw, Height = sh, Background = new SolidColorBrush(Color.Parse(pg.Background)) };
-            // Items clipped to the printable area (inside the margins), scaled to the export size.
+            // Only DIAGRAMS (PAPs/structograms) are clipped to the printable area — that clip is what lets a big PAP
+            // be tiled manually across pages. Headers, text boxes, labels and decoration must NOT be clipped: they may
+            // sit slightly inside the margin and should still print in full (their own frame is the boundary).
             var pr = pg.PrintablePx;
-            var itemLayer = new Canvas { Width = sw, Height = sh,
+            var diagramLayer = new Canvas { Width = sw, Height = sh,
                 Clip = new RectangleGeometry(new Rect(pr.X * density, pr.Y * density, pr.W * density, pr.H * density)) };
+            var overlayLayer = new Canvas { Width = sw, Height = sh };   // headers / text / labels / decoration (unclipped)
             foreach (var item in pg.Items.OrderBy(i => i.ZOrder))
             {
                 var raw = BuildItemVisual(item);
                 if (raw is null) continue;
                 Canvas.SetLeft(raw, item.X * density); Canvas.SetTop(raw, item.Y * density);
-                itemLayer.Children.Add(raw);
+                (item is DiagramItem ? diagramLayer : overlayLayer).Children.Add(raw);
             }
-            canvas.Children.Add(itemLayer);
+            canvas.Children.Add(diagramLayer);
+            canvas.Children.Add(overlayLayer);
             canvas.Measure(new Size(sw, sh));
             canvas.Arrange(new Rect(0, 0, sw, sh));
+            // Collect a selectable text layer (for searchable PDF): every TextBlock's text + its on-canvas pixel
+            // rect. Covers free text + header/structogram text; diagram bitmaps have no TextBlocks, so they stay raster.
+            if (textSink is not null)
+                foreach (var tb in canvas.GetVisualDescendants().OfType<TextBlock>())
+                {
+                    var text = tb.Text;
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    if (tb.TransformToVisual(canvas) is not { } m) continue;
+                    var b = tb.Bounds;
+                    var p0 = m.Transform(new Point(0, 0));
+                    var p1 = m.Transform(new Point(b.Width, b.Height));
+                    textSink.Add(new DocumentExporter.PdfTextRun(text,
+                        Math.Min(p0.X, p1.X), Math.Min(p0.Y, p1.Y), Math.Abs(p1.Y - p0.Y)));
+                }
+
             var px = new PixelSize(Math.Max(1, (int)Math.Ceiling(sw)), Math.Max(1, (int)Math.Ceiling(sh)));
             var rtb = new RenderTargetBitmap(px, new Vector(96, 96));   // 1:1; DPI metadata written by SetPngMetadata
             rtb.Render(canvas);
@@ -306,25 +326,38 @@ public class PrintComposerWindow : Window
             SizeToContent = SizeToContent.WidthAndHeight, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         Ui.ThemeWindow(dlg);
         var dpiField = new TextBox { Width = 70, Text = Num(dpi) }; ThemeInput(dpiField);
+        // Format: PNG (per page) / TIFF (per page) / TIFF (multipage) / PDF.
+        var fmtCombo = Ui.Combo(240);
+        foreach (var f in new[] { Loc.S("Pc_FmtPngPages"), Loc.S("Pc_FmtTiffPages"), Loc.S("Pc_FmtTiffMulti"), Loc.S("Pc_FmtPdf") })
+            fmtCombo.Items.Add(f);
+        fmtCombo.SelectedIndex = Math.Clamp(_doc.Export.FormatIndex, 0, 3);
         bool ok = false;
         var okBtn = Ui.Btn(Loc.S("Common_Ok")); okBtn.Click += (_, _) => { ok = true; dlg.Close(); };
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.Click += (_, _) => dlg.Close();
         dlg.Content = new StackPanel { Margin = new(16), Spacing = 12, Children = {
+            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lbl(Loc.S("Pc_ExportFormat")), fmtCombo } },
             new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lbl(Loc.S("Pc_ExportDpi")), Spinner(dpiField, 36, 1200, 50) } },
             new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { cancel, okBtn } },
         } };
         await dlg.ShowDialog(this);
         if (!ok) return;
         dpi = (int)Math.Clamp(ParseNum(dpiField.Text, dpi), 36, 1200);
-        _doc.Export.Dpi = dpi;
+        int fmt = Math.Clamp(fmtCombo.SelectedIndex, 0, 3);
+        _doc.Export.Dpi = dpi; _doc.Export.FormatIndex = fmt;
 
+        var (ext, typeName) = fmt switch
+        {
+            1 or 2 => ("tif", "TIFF"),
+            3      => ("pdf", "PDF"),
+            _      => ("png", "PNG"),
+        };
         // A Save dialog: the document name is only the SUGGESTED file name — the user types their own name/location.
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = Loc.S("Pc_ExportTitle"),
-            SuggestedFileName = PrintDocumentService.Sanitize(_doc.Name) + ".png",
-            DefaultExtension = "png",
-            FileTypeChoices = new[] { new FilePickerFileType("PNG") { Patterns = new[] { "*.png" } } },
+            SuggestedFileName = PrintDocumentService.Sanitize(_doc.Name) + "." + ext,
+            DefaultExtension = ext,
+            FileTypeChoices = new[] { new FilePickerFileType(typeName) { Patterns = new[] { "*." + ext } } },
         });
         var chosen = file?.TryGetLocalPath();
         if (string.IsNullOrEmpty(chosen)) return;
@@ -332,14 +365,59 @@ public class PrintComposerWindow : Window
         var dir  = System.IO.Path.GetDirectoryName(chosen)!;
         var stem = System.IO.Path.GetFileNameWithoutExtension(chosen);
         int n = _doc.Pages.Count;
-        for (int i = 0; i < n; i++)
+        string author = string.IsNullOrWhiteSpace(AppSettings.UserName) ? Environment.UserName : AppSettings.UserName;
+        string copyright = string.IsNullOrWhiteSpace(author) ? "" : $"© {DateTime.Now:yyyy} {author}";
+        var meta = new DocumentExporter.ExportMeta(author, copyright, _doc.Name, DateTime.Now);
+
+        try
         {
-            var bmp = ExportPageBitmap(i, dpi);
-            var path = n == 1 ? chosen : System.IO.Path.Combine(dir, $"{stem}-{i + 1:00}.png");
-            try { bmp.Save(path); SetPngMetadata(path, dpi); } catch { /* skip a file that won't write */ }
-            bmp.Dispose();
+            if (fmt == 3)   // PDF: raster background + selectable text layer, all pages in one file
+            {
+                var pages = new List<(byte[], IReadOnlyList<DocumentExporter.PdfTextRun>)>();
+                for (int i = 0; i < n; i++)
+                {
+                    var texts = new List<DocumentExporter.PdfTextRun>();
+                    var bmp = ExportPageBitmap(i, dpi, texts);
+                    pages.Add((PngBytes(bmp), texts));
+                    bmp.Dispose();
+                }
+                DocumentExporter.SavePdf(chosen, pages, dpi, meta);
+            }
+            else if (fmt == 2)   // multipage TIFF (all pages, one file)
+            {
+                var pages = new List<byte[]>();
+                for (int i = 0; i < n; i++)
+                {
+                    var bmp = ExportPageBitmap(i, dpi);
+                    pages.Add(PngBytes(bmp));
+                    bmp.Dispose();
+                }
+                DocumentExporter.SaveTiffMultipage(chosen, pages, dpi, meta);
+            }
+            else                        // one file per page (PNG / TIFF)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var bmp  = ExportPageBitmap(i, dpi);
+                    var path = n == 1 ? chosen : System.IO.Path.Combine(dir, $"{stem}-{i + 1:00}.{ext}");
+                    if (fmt == 1) DocumentExporter.SaveTiff(path, PngBytes(bmp), dpi, meta);
+                    else { bmp.Save(path); SetPngMetadata(path, dpi); }
+                    bmp.Dispose();
+                }
+            }
+            Notify(string.Format(Loc.S("Pc_Exported"), n));
         }
-        Notify(string.Format(Loc.S("Pc_Exported"), n));
+        catch (Exception ex)
+        {
+            await MessageDialog.Show(this, $"Export failed:\n{ex.GetType().Name}: {ex.Message}", Loc.S("Pc_ExportTitle"));
+        }
+    }
+
+    static byte[] PngBytes(RenderTargetBitmap bmp)
+    {
+        using var ms = new System.IO.MemoryStream();
+        bmp.Save(ms);
+        return ms.ToArray();
     }
 
     // Injects PNG metadata Avalonia's encoder omits: DPI (pHYs) plus tEXt fields — Author, Creation Time,
@@ -358,7 +436,7 @@ public class PrintComposerWindow : Window
             var phys = new byte[9]; WriteBE(phys, 0, ppm); WriteBE(phys, 4, ppm); phys[8] = 1;
             extra.Add(MakeChunk("pHYs", phys));
             // tEXt: read by some image tools.
-            extra.Add(TextChunk("Software", "StructoFox"));
+            extra.Add(TextChunk("Software", "StructoFox / SkiaSharp"));
             extra.Add(TextChunk("Creation Time", DateTime.Now.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
             if (!string.IsNullOrWhiteSpace(author)) { extra.Add(TextChunk("Author", author)); extra.Add(TextChunk("Copyright", copyright)); }
             // XMP (iTXt): this is what Windows Explorer's Details tab reads for Author / Copyright / date / program.
@@ -396,7 +474,7 @@ public class PrintComposerWindow : Window
             "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">" +
             "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
             "<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:MicrosoftPhoto=\"http://ns.microsoft.com/photo/1.0/\">" +
-            "<xmp:CreatorTool>StructoFox</xmp:CreatorTool>" +
+            "<xmp:CreatorTool>StructoFox / SkiaSharp</xmp:CreatorTool>" +
             $"<MicrosoftPhoto:DateAcquired>{date}</MicrosoftPhoto:DateAcquired>" +
             (string.IsNullOrWhiteSpace(author) ? "" : $"<dc:creator><rdf:Seq><rdf:li>{Esc(author)}</rdf:li></rdf:Seq></dc:creator>") +
             (string.IsNullOrWhiteSpace(copyright) ? "" : $"<dc:rights><rdf:Alt><rdf:li xml:lang=\"x-default\">{Esc(copyright)}</rdf:li></rdf:Alt></dc:rights>") +
@@ -811,7 +889,7 @@ public class PrintComposerWindow : Window
         if (hd.MaxWidth > 1) inner.Width = Math.Min(hd.MaxWidth, hardMax);
         else                 inner.MaxWidth = hardMax;
         double s = hd.Scale * _viewScale;
-        return new LayoutTransformControl { LayoutTransform = new ScaleTransform(s, s), Child = inner };
+        return new LayoutTransformControl { LayoutTransform = new ScaleTransform(s, s), Child = inner, ClipToBounds = false };
     }
 
     static DiagramStyle CloneStyle(DiagramStyle s)
@@ -948,7 +1026,7 @@ public class PrintComposerWindow : Window
         if (di.Kind == DiagramKind.Structogram && DiagramRenderer.BuildControl(_projFolder, di.Kind, di.Key) is { } body)
         {
             var s = di.Scale * _viewScale;
-            return new LayoutTransformControl { LayoutTransform = new ScaleTransform(s, s), Child = body };
+            return new LayoutTransformControl { LayoutTransform = new ScaleTransform(s, s), Child = body, ClipToBounds = false };
         }
         if (_exporting)
         {
@@ -978,7 +1056,7 @@ public class PrintComposerWindow : Window
         var inner = DiagramRenderer.DecorControl(_projFolder, dc.Kind, dc.Key, dc.Pos);
         if (inner is null) return null;
         var s = dc.Scale * _viewScale;
-        return new LayoutTransformControl { LayoutTransform = new ScaleTransform(s, s), Child = inner };
+        return new LayoutTransformControl { LayoutTransform = new ScaleTransform(s, s), Child = inner, ClipToBounds = false };
     }
 
     // The context menu for an item: resize, (diagrams) update/edit source, delete.

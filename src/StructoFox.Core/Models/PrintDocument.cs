@@ -232,6 +232,8 @@ public sealed class LegendRow
 public class ExportSettings
 {
     public PrintExportFormat Format      { get; set; } = PrintExportFormat.Pdf;
+    /// <summary>Composer export-dialog choice: 0 = PNG per page, 1 = TIFF per page, 2 = multipage TIFF, 3 = PDF.</summary>
+    public int               FormatIndex { get; set; } = 0;
     public int               Dpi         { get; set; } = 200;
     /// <summary>PDF: false = JPEG-compress page images at <see cref="JpegQuality"/>; true = lossless (Flate).</summary>
     public bool              Lossless    { get; set; } = false;

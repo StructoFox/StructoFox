@@ -683,6 +683,7 @@ public partial class MainWindow : Window
         if (info is null || info.Name != "Sketchbook") ProjectService.Create(root, "Sketchbook");
         _project = root;
         _sketchMode = false;
+        _section = Section.Class;   // land on a section the restricted sketchbook rail actually shows
         _railButtons.Clear();
         _body.Content = BuildCockpit();
         ShowSection(_section);
@@ -1226,6 +1227,11 @@ public partial class MainWindow : Window
             // Code export now lives per-structogram (the "Code skeleton" button in the structogram editor), not as a
             // project section next to the entity libraries — it isn't a library and was easy to confuse with printing.
         };
+        // The sketchbook opened as a workspace tidies up the entities a board created there; Namespaces and Main make
+        // no sense for standalone sketches, and Boards are already on the sketchbook home — so hide those three.
+        if (_project is not null && IsSketchbook(_project))
+            items = items.Where(t => t.sec is not (Section.Namespace or Section.Main or Section.Boards)).ToArray();
+
         foreach (var (sec, icon, label) in items) stack.Children.Add(RailButton(sec, icon, label));
         var sectionsScroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         Grid.SetRow(sectionsScroll, 0); grid.Children.Add(sectionsScroll);

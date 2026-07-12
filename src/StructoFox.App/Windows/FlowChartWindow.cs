@@ -1188,13 +1188,6 @@ public class FlowChartWindow : Window
             System.IO.Path.GetFullPath(_projFolder), System.IO.Path.GetFullPath(SketchbookService.Root),
             StringComparison.OrdinalIgnoreCase);
 
-        if (!sketchbook && StructogramService.Exists(_projFolder, _key))
-        {
-            var res = await MessageDialog.Show(this,
-                Loc.S("Flow_ToStructogramOverwrite"), Loc.S("Flow_ToStructogramTitle"), DialogButtons.YesNo);
-            if (res != DialogResult.Yes) return;
-        }
-
         var title = string.IsNullOrEmpty(_data.Title) ? Loc.S("Common_Untitled") : _data.Title;
         var sd = StructogramConverter.Convert(_data, title, out var unstructured);
 
@@ -1211,13 +1204,48 @@ public class FlowChartWindow : Window
             return;
         }
 
-        // Sketchbook: register a new structogram sketch so it appears on the home. Project: keep the shared function
-        // key (the structogram stays linked to its PAP and shows under the entity).
-        string targetKey = sketchbook ? SketchbookService.Create(SketchType.Structogram, title).Id : _key;
+        // Where does the converted structogram go? Project: the shared function key (stays linked to the PAP).
+        // Sketchbook: its own sketch entry so it shows on the home — keyed by the title (via the same-named sketch).
+        string targetKey;
+        if (sketchbook)
+        {
+            var existing = SketchbookService.Load().FirstOrDefault(s =>
+                s.Type == SketchType.Structogram && string.Equals(s.Name, title, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                var choice = await AskStructogramExists();
+                if (choice is null) return;                                   // cancel
+                if (choice == "open") { OpenStructogram(existing.Id, existing.Name); return; }
+                targetKey = existing.Id;                                       // overwrite the existing sketch
+            }
+            else targetKey = SketchbookService.Create(SketchType.Structogram, title).Id;
+        }
+        else
+        {
+            if (StructogramService.Exists(_projFolder, _key))
+            {
+                var choice = await AskStructogramExists();
+                if (choice is null) return;
+                if (choice == "open") { OpenStructogram(_key, title); return; }
+            }
+            targetKey = _key;
+        }
+
         StructogramService.Save(_projFolder, targetKey, sd);
-        DiagramWindows.OpenOrActivate(DiagramWindows.StructId(_projFolder, targetKey),
-            () => new StructogramWindow(_projFolder, targetKey, title, _themePath));
+        OpenStructogram(targetKey, title);
     }
+
+    // Asks what to do when a structogram already exists: overwrite / open the existing one / cancel (null).
+    Task<string?> AskStructogramExists() => ChoiceDialog.Show(this,
+        Loc.S("Flow_ToStructogramTitle"), Loc.S("Flow_ToStructogramExists"),
+        new List<(string, string)>
+        {
+            ("open",      Loc.S("Flow_ToStructogramOpen")),
+            ("overwrite", Loc.S("Flow_ToStructogramOverwriteBtn")),
+        });
+
+    void OpenStructogram(string key, string name) => DiagramWindows.OpenOrActivate(
+        DiagramWindows.StructId(_projFolder, key), () => new StructogramWindow(_projFolder, key, name, _themePath));
 
     // Switches edit mode, cancelling any in-progress connection and clearing selection outside Select.
     void SetMode(EditMode mode)
