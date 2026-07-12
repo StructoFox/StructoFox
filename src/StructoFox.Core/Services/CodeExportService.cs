@@ -975,7 +975,7 @@ public static class CodeExportService
             case Models.NsBlockKind.Subroutine:
             case Models.NsBlockKind.Jump:
                 var s = StTerm(b.Text);
-                if (s.Length > 0) sb.AppendLine($"{ind}{s}");
+                AppendStmtLines(sb, ind, s);
                 break;
 
             case Models.NsBlockKind.If:
@@ -1020,6 +1020,16 @@ public static class CodeExportService
         }
     }
 
+    /// <summary>Emits a (possibly multi-line) statement with EVERY line indented. When the user splits an instruction
+    /// block with Enter, all its lines must sit at the block's indent — not just the first (the rest used to land at
+    /// column 0). Blank lines stay blank.</summary>
+    private static void AppendStmtLines(StringBuilder sb, string ind, string s)
+    {
+        if (string.IsNullOrEmpty(s)) return;
+        foreach (var line in s.Replace("\r\n", "\n").Split('\n'))
+            sb.AppendLine(line.Length == 0 ? "" : ind + line);
+    }
+
     /// <summary>Appends a statement terminator unless the text already ends in ; { or }.</summary>
     private static string StTerm(string text)
     {
@@ -1060,7 +1070,7 @@ public static class CodeExportService
             case Models.NsBlockKind.Subroutine:
             case Models.NsBlockKind.Jump:
                 var s = (b.Text ?? "").Trim();
-                if (s.Length > 0) sb.AppendLine($"{ind}{s}");
+                AppendStmtLines(sb, ind, s);
                 break;
 
             case Models.NsBlockKind.If:
@@ -1144,7 +1154,7 @@ public static class CodeExportService
             case Models.NsBlockKind.Subroutine:
             case Models.NsBlockKind.Jump:
                 var s = (b.Text ?? "").Trim();
-                if (s.Length > 0) sb.AppendLine($"{ind}{s}");
+                AppendStmtLines(sb, ind, s);
                 break;
 
             case Models.NsBlockKind.If:
@@ -1209,7 +1219,7 @@ public static class CodeExportService
             case Models.NsBlockKind.Subroutine:
             case Models.NsBlockKind.Jump:
                 var s = StTerm(b.Text);
-                if (s.Length > 0) sb.AppendLine($"{ind}{s}");
+                AppendStmtLines(sb, ind, s);
                 break;
 
             case Models.NsBlockKind.If:
@@ -2278,7 +2288,7 @@ public static class CodeExportService
             case Models.NsBlockKind.Subroutine:
             case Models.NsBlockKind.Jump:
                 var s = (b.Text ?? "").Trim();
-                if (s.Length > 0) sb.AppendLine($"{ind}{s}");
+                AppendStmtLines(sb, ind, s);
                 break;
 
             case Models.NsBlockKind.If:

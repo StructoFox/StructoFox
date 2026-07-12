@@ -104,6 +104,31 @@ public static class CodeBoardDataService
         }
         catch { }
     }
+
+    /// <summary>Moves a board's data file when the board is renamed to a new readable id.</summary>
+    public static void Rename(string projFolder, string oldId, string newId)
+    {
+        if (oldId == newId) return;
+        var from = BoardFilePath(projFolder, oldId);
+        if (!File.Exists(from)) return;
+        try
+        {
+            var to = BoardFilePath(projFolder, newId);
+            if (File.Exists(to)) File.Delete(to);
+            File.Move(from, to);
+        }
+        catch { }
+    }
+
+    /// <summary>Ids of every board-data file on disk — used to sweep boards when cascading an entity-key rename into
+    /// their card positions and relations.</summary>
+    public static List<string> AllBoardIds(string projFolder)
+    {
+        var dir = CodeEntityService.StructureFolder(projFolder);
+        if (!Directory.Exists(dir)) return [];
+        return Directory.EnumerateFiles(dir, "_board_*.json")
+            .Select(f => Path.GetFileNameWithoutExtension(f)["_board_".Length..]).ToList();
+    }
 }
 
 /// <summary>
@@ -142,6 +167,22 @@ public static class FlowChartService
         }
         catch { }
     }
+
+    /// <summary>Moves the diagram file from one key to another (readable-key rename). No-op if there's nothing to move.</summary>
+    public static void Rename(string projFolder, string oldKey, string newKey)
+    {
+        if (oldKey == newKey) return;
+        var from = FlowFilePath(projFolder, oldKey);
+        if (!File.Exists(from)) return;
+        try
+        {
+            var to = FlowFilePath(projFolder, newKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            if (File.Exists(to)) File.Delete(to);
+            File.Move(from, to);
+        }
+        catch { }
+    }
 }
 
 /// <summary>
@@ -176,6 +217,32 @@ public static class StructogramService
             File.WriteAllText(FilePath(projFolder, key), JsonSerializer.Serialize(data, WriteOpts));
         }
         catch { }
+    }
+
+    /// <summary>Moves the structogram file from one key to another (readable-key rename).</summary>
+    public static void Rename(string projFolder, string oldKey, string newKey)
+    {
+        if (oldKey == newKey) return;
+        var from = FilePath(projFolder, oldKey);
+        if (!File.Exists(from)) return;
+        try
+        {
+            var to = FilePath(projFolder, newKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            if (File.Exists(to)) File.Delete(to);
+            File.Move(from, to);
+        }
+        catch { }
+    }
+
+    /// <summary>Filename-derived keys of every structogram on disk (the '#'-collapsed safe form; Load/Save round-trip
+    /// with these unchanged). Used to sweep all structograms when cascading a rename into their subroutine LinkKeys.</summary>
+    public static List<string> AllFileKeys(string projFolder)
+    {
+        var dir = Path.Combine(CodeEntityService.StructureFolder(projFolder), "struct");
+        if (!Directory.Exists(dir)) return [];
+        return Directory.EnumerateFiles(dir, "_struct_*.json")
+            .Select(f => Path.GetFileNameWithoutExtension(f)["_struct_".Length..]).ToList();
     }
 }
 

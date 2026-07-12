@@ -40,6 +40,37 @@ public static class DiagramDecor
         return outer;
     }
 
+    /// <summary>The decoration blocks as SEPARATE, positioned controls (for the print composer, which places each
+    /// as its own movable item). Decorations sharing a position are merged into one block (a title-block table);
+    /// decorations at different positions come back separately. Excludes the watermark (a full-canvas overlay).</summary>
+    public static List<(DecorPos Pos, Control Ctrl)> EnumeratePieces(string title, DiagramStyle style)
+    {
+        var items = new List<(DecorPos pos, Kind kind)>();
+        if (HasLogo(style))                                       items.Add((style.LogoPosition,  Kind.Logo));
+        if (style.ShowTitle && !string.IsNullOrWhiteSpace(title)) items.Add((style.TitlePosition, Kind.Title));
+        if (HasInfo(style))                                       items.Add((style.InfoPosition,  Kind.Info));
+
+        var result = new List<(DecorPos, Control)>();
+        foreach (var grp in items.GroupBy(i => i.pos))
+            if (BuildSlot(grp.Select(i => i.kind).ToList(), title, style, null) is { } ctrl)
+                result.Add((grp.Key, ctrl));
+        return result;
+    }
+
+    /// <summary>Just the decoration POSITIONS present (no controls built) — so position detection can't be lost to a
+    /// control-build failure (e.g. a broken logo). Same grouping rule: same position = one merged block.</summary>
+    public static List<DecorPos> EnumeratePositions(string title, DiagramStyle style)
+    {
+        var positions = new List<DecorPos>();
+        if (HasLogo(style))                                       positions.Add(style.LogoPosition);
+        if (style.ShowTitle && !string.IsNullOrWhiteSpace(title)) positions.Add(style.TitlePosition);
+        if (HasInfo(style))                                       positions.Add(style.InfoPosition);
+        return positions.Distinct().ToList();
+    }
+
+    /// <summary>Is this decoration position a top band (vs a bottom band)?</summary>
+    public static bool IsTopBand(DecorPos p) => IsTop(p);
+
     static bool IsTop(DecorPos p)  => p is DecorPos.TopLeft or DecorPos.TopCenter or DecorPos.TopRight;
     static HorizontalAlignment HAlign(DecorPos p) => p switch
     {
@@ -85,25 +116,38 @@ public static class DiagramDecor
         if (kinds.Contains(Kind.Info) && kinds.Count > 1)
         {
             // One continuous title block: logo / title as bordered cells, then the info table inner.
+            // A Grid (not a horizontal StackPanel): logo/title = Auto, info = Star, so when the block gets a
+            // MaxWidth the info table inherits a bounded width and its cells WRAP instead of being clipped.
             var info = InfoInner(style, text, line);
-            var rowp = new StackPanel { Orientation = Orientation.Horizontal };
+            var rowp = new Grid();
+            var cells = new List<Control>();
             foreach (var k in kinds)
             {
                 if (k == Kind.Logo && LogoImage(style) is { } lg)
                 {
+                    // The logo cell has a FIXED width (LogoBoxWidth); the logo scales to fit inside it (Uniform),
+                    // so it can never inflate the block width — and its height can't feed back into the row height.
+                    double boxW = style.LogoBoxWidth > 1 ? style.LogoBoxWidth : LogoHeight;
                     lg.VerticalAlignment = VerticalAlignment.Center;
-                    lg.Height = LogoHeight;   // start scaled (never native) so it can't inflate the row height
-                    // Then track the info table's actual content height so the logo lines up with the rows.
-                    info.PropertyChanged += (_, e) =>
-                    { if (e.Property == Visual.BoundsProperty && info.Bounds.Height > 0) lg.Height = info.Bounds.Height; };
-                    rowp.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
-                        Padding = new(6, 0), Child = lg, VerticalAlignment = VerticalAlignment.Stretch });
+                    lg.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    lg.Stretch = Stretch.Uniform;               // fill the cell width; height follows the aspect ratio
+                    lg.Width = boxW - 2; lg.Height = double.NaN;
+                    cells.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0), Width = boxW,
+                        Padding = new(1), Child = lg, VerticalAlignment = VerticalAlignment.Stretch });
                 }
                 else if (k == Kind.Title && BuildTitle(title, style, onEdit) is { } tt)
-                    rowp.Children.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
+                    cells.Add(new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0),
                         Padding = new(10, 6), Child = tt, VerticalAlignment = VerticalAlignment.Stretch });
                 else if (k == Kind.Info)
-                    rowp.Children.Add(info);
+                    cells.Add(info);
+            }
+            for (int i = 0; i < cells.Count; i++)
+            {
+                // The info table is the flexible (Star) column; logo/title stay at their natural (Auto) width.
+                bool isInfo = ReferenceEquals(cells[i], info);
+                rowp.ColumnDefinitions.Add(new ColumnDefinition(isInfo ? new GridLength(1, GridUnitType.Star) : GridLength.Auto));
+                cells[i].SetValue(Grid.ColumnProperty, i);
+                rowp.Children.Add(cells[i]);
             }
             return new Border { BorderBrush = line, BorderThickness = new(1), Child = rowp,
                 Background = new SolidColorBrush(Color.FromArgb(0x14, 0x80, 0x80, 0x80)) };
@@ -174,7 +218,7 @@ public static class DiagramDecor
         !string.IsNullOrWhiteSpace(s.InfoName) || !string.IsNullOrWhiteSpace(s.InfoProject) ||
         !string.IsNullOrWhiteSpace(s.InfoProjectNo) || !string.IsNullOrWhiteSpace(s.InfoVersion) ||
         !string.IsNullOrWhiteSpace(s.InfoDate) || !string.IsNullOrWhiteSpace(s.InfoAuthor) ||
-        !string.IsNullOrWhiteSpace(s.InfoExtra));
+        !string.IsNullOrWhiteSpace(s.InfoExtra) || !string.IsNullOrWhiteSpace(s.InfoPage));
 
     // The info field wrapped in its own outer frame (used when it stands alone in a slot).
     static Control InfoBox(DiagramStyle style, IBrush text, IBrush line) => new Border
@@ -187,14 +231,27 @@ public static class DiagramDecor
     // The info field's INNER content (no outer frame), so it can be embedded into a merged title block.
     static Control InfoInner(DiagramStyle style, IBrush text, IBrush line)
     {
+        // When a page number is set, the Version cell splits into [Page | Version] (page to the left of version).
+        Control versionCell = string.IsNullOrWhiteSpace(style.InfoPage)
+            ? Cell("Decor_InfoVersion", style.InfoVersion, new(0, 0, 1, 0), text, line)
+            : Cols(line, "1,1",
+                Cell("Decor_InfoPage",    style.InfoPage,    new(0, 0, 1, 0), text, line),
+                Cell("Decor_InfoVersion", style.InfoVersion, new(0, 0, 1, 0), text, line));
         var rightTop = Cols(line, "1,1,1",
-            Cell("Decor_InfoVersion",   style.InfoVersion,   new(0, 0, 1, 0), text, line),
+            versionCell,
             Cell("Decor_InfoProjectNo", style.InfoProjectNo, new(0, 0, 1, 0), text, line),
             Cell("Decor_InfoProject",   style.InfoProject,   new(0), text, line));
-        var rightBottom = Cols(line, "1,1,1",
-            Cell("Decor_InfoDate",    style.InfoDate,       new(0, 0, 1, 0), text, line),
-            Cell("Decor_InfoAuthor",  style.InfoAuthor,     new(0, 0, 1, 0), text, line),
-            Cell("Decor_InfoDept",    style.InfoDepartment, new(0), text, line));
+        // Department is dropped entirely when empty — the bottom row then collapses to Date | Author (Author becomes
+        // the last cell, so it loses its right divider).
+        bool hasDept = !string.IsNullOrWhiteSpace(style.InfoDepartment);
+        var rightBottom = hasDept
+            ? Cols(line, "1,1,1",
+                Cell("Decor_InfoDate",   style.InfoDate,       new(0, 0, 1, 0), text, line),
+                Cell("Decor_InfoAuthor", style.InfoAuthor,     new(0, 0, 1, 0), text, line),
+                Cell("Decor_InfoDept",   style.InfoDepartment, new(0),          text, line))
+            : Cols(line, "1,1",
+                Cell("Decor_InfoDate",   style.InfoDate,       new(0, 0, 1, 0), text, line),
+                Cell("Decor_InfoAuthor", style.InfoAuthor,     new(0),          text, line));
         var rightTopWrap = new Border { BorderBrush = line, BorderThickness = new(0, 0, 0, 1), Child = rightTop };
 
         var right = new Grid();
@@ -203,7 +260,7 @@ public static class DiagramDecor
         rightTopWrap.SetValue(Grid.RowProperty, 0); right.Children.Add(rightTopWrap);
         rightBottom.SetValue(Grid.RowProperty, 1); right.Children.Add(rightBottom);
 
-        var name = new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0), MinWidth = 170,
+        var name = new Border { BorderBrush = line, BorderThickness = new(0, 0, 1, 0), MinWidth = 170, MaxWidth = 260,
             Child = Cell("Decor_InfoName", style.InfoName, new(0), text, line) };
         var main = Cols(line, "auto,1", name, right);
 

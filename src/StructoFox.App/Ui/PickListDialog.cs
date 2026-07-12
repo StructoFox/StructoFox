@@ -10,12 +10,12 @@ namespace StructoFox.App;
 /// </summary>
 public static class PickListDialog
 {
-    public static Task<string?> Show(Window owner, string title, List<(string Id, string Label)> items)
+    public static Task<string?> Show(Window owner, string title, List<(string Id, string Label)> items, string? body = null)
     {
         var dlg = new Window
         {
-            Title = title, Width = 380, Height = 460,
-            CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = title, Width = 420, Height = 480,
+            CanResize = true, WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
         Ui.ThemeWindow(dlg);
 
@@ -32,10 +32,21 @@ public static class PickListDialog
         var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.IsCancel = true; cancel.Click += (_, _) => dlg.Close();
         list.DoubleTapped += (_, _) => Commit();
 
-        var grid = new Grid { Margin = new(12), RowDefinitions = new RowDefinitions("*,Auto") };
-        Grid.SetRow(list, 0); grid.Children.Add(list);
+        // Optional message body above the list (wrapping + scrollable), so a long "used by …" list stays readable
+        // instead of being crammed into the title bar.
+        var grid = new Grid { Margin = new(12), RowDefinitions = new RowDefinitions(body is null ? "*,Auto" : "Auto,*,Auto") };
+        int listRow = 0;
+        if (body is not null)
+        {
+            var msg = new TextBlock { Text = body, TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new(0, 0, 0, 8) };
+            Ui.Theme(msg, TextBlock.ForegroundProperty, "SidebarTextBrush");
+            var scroll = new ScrollViewer { Content = msg, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            Grid.SetRow(scroll, 0); grid.Children.Add(scroll);
+            listRow = 1;
+        }
+        Grid.SetRow(list, listRow); grid.Children.Add(list);
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new(0, 8, 0, 0), Children = { cancel, ok } };
-        Grid.SetRow(btnRow, 1); grid.Children.Add(btnRow);
+        Grid.SetRow(btnRow, listRow + 1); grid.Children.Add(btnRow);
         dlg.Content = grid;
 
         return dlg.ShowDialog<string?>(owner).ContinueWith(_ => result, TaskScheduler.FromCurrentSynchronizationContext());

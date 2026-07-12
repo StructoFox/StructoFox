@@ -214,7 +214,7 @@ public class CodeEntityEditorDialog : Window
                     Ui.Theme(retLbl, TextBlock.ForegroundProperty, "SidebarTextBrush");
                     topRow.Children.Add(retLbl);
 
-                    var ret = SmallBox(80, m.ReturnType);
+                    var ret = TypeBox(80, m.ReturnType);
                     ret.TextChanged += (_, _) => { workMethods[ci].ReturnType = ret.Text ?? ""; UpdateSummary(); };
                     topRow.Children.Add(ret);
 
@@ -261,7 +261,7 @@ public class CodeEntityEditorDialog : Window
                         var pName = SmallBox(90, p.Name);
                         pName.TextChanged += (_, _) => { m.Parameters[cj].Name = pName.Text ?? ""; UpdateSummary(); };
                         prow.Children.Add(pName);
-                        var pType = SmallBox(80, p.DataType);
+                        var pType = TypeBox(80, p.DataType);
                         pType.TextChanged += (_, _) => { m.Parameters[cj].DataType = pType.Text ?? ""; UpdateSummary(); };
                         prow.Children.Add(pType);
                         var delP = Btn("✕");
@@ -349,7 +349,7 @@ public class CodeEntityEditorDialog : Window
                 nm.TextChanged += (_, _) => { workFields[ci].Name = nm.Text ?? ""; UpdateSummary(); };
                 row.Children.Add(nm);
 
-                var ty = SmallBox(90, f.DataType);
+                var ty = TypeBox(90, f.DataType);
                 ty.TextChanged += (_, _) => { workFields[ci].DataType = ty.Text ?? ""; UpdateSummary(); };
                 row.Children.Add(ty);
 
@@ -387,10 +387,13 @@ public class CodeEntityEditorDialog : Window
             for (int i = 0; i < workEnum.Count; i++)
             {
                 var ci = i;
-                var summary = ItemSummaryText("• " + workEnum[ci]);
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new(8, 2, 4, 6) };
+                var summary = ItemSummaryText($"{ci} = {workEnum[ci]}");   // show the value's index (0-based)
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new(8, 2, 4, 6) };
+                var idxLbl = new TextBlock { Text = $"{ci} =", VerticalAlignment = VerticalAlignment.Center, MinWidth = 26, Opacity = 0.7 };
+                Ui.Theme(idxLbl, TextBlock.ForegroundProperty, "SidebarTextBrush");
                 var nm  = SmallBox(160, workEnum[ci]);
-                nm.TextChanged += (_, _) => { workEnum[ci] = nm.Text ?? ""; summary.Text = "• " + nm.Text; };
+                nm.TextChanged += (_, _) => { workEnum[ci] = nm.Text ?? ""; summary.Text = $"{ci} = {nm.Text}"; };
+                row.Children.Add(idxLbl);
                 row.Children.Add(nm);
                 enumStack.Children.Add(ItemRow(summary, row, () => { workEnum.RemoveAt(ci); RebuildEnumRows(); }));
             }
@@ -430,7 +433,7 @@ public class CodeEntityEditorDialog : Window
                 nm.TextChanged += (_, _) => { workPorts[ci].Name = nm.Text ?? ""; UpdateSummary(); };
                 row.Children.Add(nm);
 
-                var ty = SmallBox(80, port.DataType);
+                var ty = TypeBox(80, port.DataType);
                 ty.TextChanged += (_, _) => { workPorts[ci].DataType = ty.Text ?? ""; UpdateSummary(); };
                 row.Children.Add(ty);
 
@@ -506,25 +509,84 @@ public class CodeEntityEditorDialog : Window
         bottomRow.Children.Add(cancelBtn);
 
         var saveBtn = Ui.Btn(Loc.S("Common_Save")); saveBtn.IsDefault = true;
-        saveBtn.Click += (_, _) =>
+        saveBtn.Click += async (_, _) =>
         {
             OldType = entity.EntityType;
+            var oldKey = entity.Id;
 
             entity.Name         = (nameBox.Text ?? "").Trim();
-            entity.EntityType   = typeCombo.SelectedItem is CodeEntityType et ? et : entity.EntityType;
+            var newType = typeCombo.SelectedItem is CodeEntityType et ? et : entity.EntityType;
+            entity.EntityType   = newType;
             entity.Namespace    = (nsCombo.SelectedItem as ComboItem)?.Id ?? "";
             entity.Description  = (descBox.Text ?? "").Trim();
             entity.BaseClassId  = (baseCombo.SelectedItem as ComboItem)?.Id ?? "";
             entity.ImplementsIds = implChecks.Where(c => c.Cb.IsChecked == true).Select(c => c.Id).ToList();
             entity.InstanceOfId  = (instCombo.SelectedItem as ComboItem)?.Id ?? "";
             entity.Fields       = workFields;
-            entity.Methods      = workMethods;
             entity.EnumValues   = workEnum.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
             entity.Ports        = workPorts;
 
-            if (OldType != entity.EntityType)
-                CodeEntityService.Delete(_projFolder, OldType.ToString(), entity.Id);
-            CodeEntityService.Save(_projFolder, entity.EntityType.ToString(), entity);
+            // Give each method a readable, unique-within-entity key from its name (ctor = class name, dtor = ~class),
+            // recording renames of existing ones so their diagrams/board targets follow.
+            var methodRenames = new List<(string oldMk, string newMk)>();
+            var usedMk = new List<string>();
+            foreach (var m in workMethods)
+            {
+                var display = m.Kind switch
+                {
+                    MethodKind.Constructor => entity.Name,
+                    MethodKind.Destructor  => "~" + entity.Name,
+                    _                      => m.Name,
+                };
+                var newMk = NameKeys.From(display, usedMk);
+                usedMk.Add(newMk);
+                if (m.Id != newMk) methodRenames.Add((m.Id, newMk));
+                m.Id = newMk;
+            }
+            entity.Methods = workMethods;
+
+            // Readable, unique entity key from the name (within the target type's folder).
+            var takenKeys = _known.Values.Where(e => e.EntityType == newType && e.Id != oldKey).Select(e => e.Id);
+            var newKey = NameKeys.From(entity.Name, takenKeys);
+
+            // Cascade: method renames first (under the OLD entity key), then the entity rename moves everything.
+            foreach (var (om, nm) in methodRenames)
+                ProjectKeyRenameService.RenameMethod(_projFolder, oldKey, om, nm);
+
+            if (newKey != oldKey)
+            {
+                var mkeys = entity.Methods.Select(m => m.Id).ToList();
+                var referrers = ProjectUsageService.FindReferrers(_projFolder, oldKey);
+                if (referrers.Count == 0)
+                {
+                    ProjectKeyRenameService.RenameEntity(_projFolder, oldKey, newKey, mkeys);
+                }
+                else
+                {
+                    // Something links to this entity → ask what to do with the links (list them in the body).
+                    var lines = string.Join("\n", referrers.Select(u => $"•  {u.Referrer}  ({Loc.S("Usage_" + u.Kind)})"));
+                    var body  = string.Format(Loc.S("Link_UsedByRename"), lines);
+                    var choice = await ChoiceDialog.Show(this, Loc.S("Link_Title"), body, new List<(string, string)>
+                    {
+                        ("rename", Loc.S("Link_ActionRename")),
+                        ("leave",  Loc.S("Link_ActionLeave")),
+                        ("delete", Loc.S("Link_ActionDelete")),
+                    });
+                    if (choice is null) return;   // cancelled → don't save the rename
+                    if (choice == "rename")
+                        ProjectKeyRenameService.RenameEntity(_projFolder, oldKey, newKey, mkeys);
+                    else
+                    {
+                        ProjectKeyRenameService.RenameEntity(_projFolder, oldKey, newKey, mkeys, updateReferrers: false);
+                        if (choice == "delete") ProjectUsageService.RemoveReferences(_projFolder, oldKey);
+                    }
+                }
+            }
+            entity.Id = newKey;
+
+            if (OldType != newType || oldKey != newKey)
+                CodeEntityService.Delete(_projFolder, OldType.ToString(), oldKey);
+            CodeEntityService.Save(_projFolder, newType.ToString(), entity);
 
             Saved = true;
             Close(true);
@@ -762,6 +824,46 @@ public class CodeEntityEditorDialog : Window
         Ui.Theme(b, TextBox.ForegroundProperty,  "SidebarTextBrush");
         Ui.Theme(b, TextBox.BorderBrushProperty, "ControlBorderBrush");
         return b;
+    }
+
+    // A SmallBox with type-name autocomplete: built-in primitives + this project's declared Classes/Structs/
+    // Interfaces/Enums, so field/parameter/return/port types can be picked instead of retyped.
+    TextBox TypeBox(double width, string value)
+    {
+        var b = SmallBox(width, value);
+        CompletionBox.Attach(b, TypeCompletions);
+        return b;
+    }
+
+    static readonly string[] TypePrimitives =
+        { "int", "long", "short", "byte", "float", "double", "decimal", "bool", "char", "string", "void", "object", "var" };
+
+    IReadOnlyList<Completion> TypeCompletions(string before)
+    {
+        int i = before.Length;
+        while (i > 0 && (char.IsLetterOrDigit(before[i - 1]) || before[i - 1] == '_')) i--;
+        var token = before[i..];
+        if (token.Length == 0) return System.Array.Empty<Completion>();
+
+        var res = new List<Completion>();
+        foreach (var prim in TypePrimitives)
+            if (prim.StartsWith(token, StringComparison.OrdinalIgnoreCase))
+                res.Add(new Completion { Label = prim, Insert = prim, Kind = CompletionKind.Class });
+
+        foreach (var e in _known.Values)
+        {
+            CompletionKind? kind = e.EntityType switch
+            {
+                CodeEntityType.Class     => CompletionKind.Class,
+                CodeEntityType.Struct    => CompletionKind.Struct,
+                CodeEntityType.Interface => CompletionKind.Interface,
+                CodeEntityType.Enum      => CompletionKind.Enum,
+                _                        => null,
+            };
+            if (kind is { } k && e.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase))
+                res.Add(new Completion { Label = e.Name, Insert = e.Name, Detail = e.EntityType.ToString(), Kind = k });
+        }
+        return res.Take(40).ToList();
     }
 
     ComboBox SmallCombo(double width)

@@ -172,10 +172,15 @@ public class StructogramWindow : Window
         var decorBtn = Ui.Btn(Loc.S("Decor_Open"), Loc.S("Decor_OpenTip"));
         decorBtn.Click += (_, _) => _ = OpenDecor();
 
+        // Code skeleton: send THIS structogram's function/method into the code exporter (copyable). Only meaningful
+        // for structograms tied to a code entity (a project) — not standalone sketchbook sketches.
+        var codeBtn = Ui.Btn(Loc.S("Struct_CodeExport"), Loc.S("Struct_CodeExportTip"));
+        codeBtn.Click += (_, _) => OpenCodeExport();
+
         bar.Child = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 10,
-            Children = { bgBtn, decorBtn, hint },
+            Children = { bgBtn, decorBtn, codeBtn, hint },
         };
 
         // Scrollable diagram host — the structogram can grow past the window. NOTE: no Padding here — a
@@ -313,6 +318,42 @@ public class StructogramWindow : Window
         Title = string.Format(Loc.S("Struct_Title"), string.IsNullOrEmpty(newTitle) ? Loc.S("Common_Untitled") : newTitle);
     }
 
+    // Opens the code exporter for JUST this structogram: resolves the function/method its key refers to and passes
+    // that single entity (a method key trims the owning entity down to the one method). No AI — a plain skeleton with
+    // the body coming from this structogram. Standalone sketchbook structograms have no code entity → info dialog.
+    void OpenCodeExport() => CrashHandler.Safe(() =>
+    {
+        var byId = new Dictionary<string, CodeEntity>();
+        foreach (var t in Enum.GetValues<CodeEntityType>())
+            foreach (var ent in CodeEntityService.LoadAll(_projFolder, t.ToString()))
+                byId[ent.Id] = ent;
+
+        CodeEntity? target = null;
+        int hash = _key.IndexOf('#');
+        if (hash >= 0)
+        {
+            // "entityId#methodId": keep only that one method of the freshly-loaded owning entity.
+            var ownerId = _key[..hash]; var methodId = _key[(hash + 1)..];
+            if (byId.TryGetValue(ownerId, out var owner))
+            {
+                owner.Methods = owner.Methods.Where(m => m.Id == methodId).ToList();
+                target = owner;
+            }
+        }
+        else if (byId.TryGetValue(_key, out var fn))
+            target = fn;
+
+        // Standalone (e.g. sketchbook) structogram with no code entity: synthesise a free FUNCTION whose id IS this
+        // structogram's key, so the exporter pulls THIS structogram as its body (functions fetch bodies by e.Id).
+        // Gives a copy-paste-ready function skeleton even for a quick one-off diagram.
+        target ??= new CodeEntity
+        {
+            Id = _key, EntityType = CodeEntityType.Function,
+            Name = string.IsNullOrWhiteSpace(_data.Title) ? "Function" : _data.Title.Trim(),
+        };
+        new ExportWindow(_projFolder, new[] { target }, target.Name).Show();
+    }, "StructCodeExport");
+
     // Re-renders the whole tree from the model — cheap enough to do on every change. The decoration overlay
     // (title/watermark/logo) is composited on top, INSIDE the canvas, so it travels with the diagram.
     void Rebuild()
@@ -320,6 +361,50 @@ public class StructogramWindow : Window
         if (_hostBorder is null) return;
         var diagram = RenderSequence(_data.Root, isRoot: true);
         _hostBorder.Child = DiagramDecor.Compose(diagram, _data.Title, _style, () => _ = OpenDecor());
+    }
+
+    /// <summary>The structogram body as a LIVE control (no decoration, no "＋" add row) — text/lines stay crisp at any
+    /// scale, so the print composer places it as a scaled control instead of a bitmap. Null if empty. UI thread.</summary>
+    public Control? BuildStructogramBody()
+    {
+        if (_data.Root.Count == 0) return null;
+        return new Border
+        {
+            Background = Brushes.Transparent, Child = RenderSequence(_data.Root, isRoot: false),
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+        };
+    }
+
+    /// <summary>Renders JUST the structogram body (no decoration, no "＋" add row), transparent + tight to the
+    /// content, at <paramref name="scale"/> (1.0 = 96 DPI). The bitmap is DPI-NEUTRAL (96) so embedding it in the
+    /// DPI-scaled print export doesn't double-scale (same rule as the flowchart renderer). Null if empty. UI thread.</summary>
+    public Avalonia.Media.Imaging.RenderTargetBitmap? RenderStructogramOnly(double scale = 1.0)
+    {
+        try
+        {
+            if (_data.Root.Count == 0) return null;
+            var host = new Border
+            {
+                Background = Brushes.Transparent, Child = RenderSequence(_data.Root, isRoot: false),
+                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            };
+            host.Measure(Size.Infinity);
+            var size = host.DesiredSize;
+            if (size.Width < 1 || size.Height < 1) return null;
+            host.Arrange(new Rect(size));
+
+            int pw = Math.Max(1, (int)Math.Ceiling(size.Width  * scale));
+            int ph = Math.Max(1, (int)Math.Ceiling(size.Height * scale));
+            var full = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize(pw, ph), new Vector(96 * scale, 96 * scale));
+            full.Render(host);
+            // Copy into a DPI-neutral (96) bitmap sized purely in pixels — the caller controls the footprint by pixels.
+            var crop = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize(pw, ph), new Vector(96, 96));
+            using (var ctx = crop.CreateDrawingContext())
+                ctx.DrawImage(full, new Rect(0, 0, pw, ph), new Rect(0, 0, pw, ph));
+            full.Dispose();
+            return crop;
+        }
+        catch { return null; }
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────

@@ -39,16 +39,67 @@ public static class SketchbookService
     static readonly JsonSerializerOptions WriteOpts = new() { WriteIndented = true };
     static readonly JsonSerializerOptions ReadOpts  = new() { PropertyNameCaseInsensitive = true };
 
-    /// <summary>All sketches, newest first.</summary>
+    /// <summary>All sketches, newest first. Self-heals: diagram files present on disk but missing from the index
+    /// (e.g. PAPs/structograms/boards copied in from another machine) are picked up and added.</summary>
     public static List<Sketch> Load()
     {
         try
         {
-            if (!File.Exists(IndexPath)) return [];
-            var list = JsonSerializer.Deserialize<List<Sketch>>(File.ReadAllText(IndexPath), ReadOpts) ?? [];
+            var list = File.Exists(IndexPath)
+                ? JsonSerializer.Deserialize<List<Sketch>>(File.ReadAllText(IndexPath), ReadOpts) ?? []
+                : [];
+            // Drop any duplicate-id entries a past bug may have written (keep the first), then pick up new files.
+            int before = list.Count;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            list = list.Where(s => seen.Add(s.Id)).ToList();
+            bool changed = list.Count != before;
+            changed |= Reconcile(list);
+            if (changed) SaveAll(list);
             return list.OrderByDescending(s => s.UpdatedAt).ToList();
         }
         catch { return []; }
+    }
+
+    /// <summary>Adds an index entry for every diagram file on disk that has none — so copied-in diagrams appear on
+    /// the home. One entry per id (an id with both a flow and a struct file lists as the PAP). Returns true if any
+    /// were added. The name is taken from the diagram's own title where available.</summary>
+    static bool Reconcile(List<Sketch> list)
+    {
+        var known = list.Select(s => s.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dir = CodeEntityService.StructureFolder(Root);
+        bool added = false;
+
+        void Add(string id, SketchType type, Func<string> title)
+        {
+            if (id.Length == 0 || !known.Add(id)) return;   // already indexed, or claimed earlier this pass
+            string n = ""; try { n = title(); } catch { }
+            list.Add(new Sketch { Id = id, Type = type, Name = string.IsNullOrWhiteSpace(n) ? DefaultName(type) : n.Trim() });
+            added = true;
+        }
+        static string IdFrom(string file, string prefix)
+        {
+            var b = System.IO.Path.GetFileNameWithoutExtension(file);
+            return b.StartsWith(prefix, StringComparison.Ordinal) ? b[prefix.Length..] : "";
+        }
+
+        try
+        {
+            var flowDir = System.IO.Path.Combine(dir, "flow");
+            if (Directory.Exists(flowDir))
+                foreach (var f in Directory.EnumerateFiles(flowDir, "_flow_*.json"))
+                { var id = IdFrom(f, "_flow_"); Add(id, SketchType.Pap, () => FlowChartService.Load(Root, id).Title); }
+
+            var structDir = System.IO.Path.Combine(dir, "struct");
+            if (Directory.Exists(structDir))
+                foreach (var f in Directory.EnumerateFiles(structDir, "_struct_*.json"))
+                { var id = IdFrom(f, "_struct_"); Add(id, SketchType.Structogram, () => StructogramService.Load(Root, id).Title); }
+
+            if (Directory.Exists(dir))
+                foreach (var f in Directory.EnumerateFiles(dir, "_board_*.json"))
+                    Add(IdFrom(f, "_board_"), SketchType.Board, () => "");
+        }
+        catch { }
+        return added;
     }
 
     static void SaveAll(List<Sketch> list)
@@ -61,11 +112,13 @@ public static class SketchbookService
         catch { }
     }
 
-    /// <summary>Creates and records a new sketch, returning it.</summary>
+    /// <summary>Creates and records a new sketch, returning it. Its Id is a readable, unique key derived from the
+    /// name (the Id doubles as the diagram filename, so files read like the sketch and copy cleanly between machines).</summary>
     public static Sketch Create(SketchType type, string name)
     {
-        var s = new Sketch { Type = type, Name = string.IsNullOrWhiteSpace(name) ? DefaultName(type) : name.Trim() };
         var list = Load();
+        var display = string.IsNullOrWhiteSpace(name) ? DefaultName(type) : name.Trim();
+        var s = new Sketch { Type = type, Name = display, Id = NameKeys.From(display, list.Select(x => x.Id)) };
         list.Add(s);
         SaveAll(list);
         return s;
@@ -87,6 +140,15 @@ public static class SketchbookService
         var s = list.FirstOrDefault(x => x.Id == id);
         if (s is null || string.IsNullOrWhiteSpace(name)) return;
         s.Name = name.Trim();
+        // Keep the readable filename in step with the name: derive a new unique key and move the backing diagram file.
+        var newId = NameKeys.From(s.Name, list.Where(x => x != s).Select(x => x.Id));
+        if (newId != s.Id)
+        {
+            FlowChartService.Rename(Root, s.Id, newId);
+            StructogramService.Rename(Root, s.Id, newId);
+            CodeBoardDataService.Rename(Root, s.Id, newId);
+            s.Id = newId;
+        }
         SaveAll(list);
     }
 

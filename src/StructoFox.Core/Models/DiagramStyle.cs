@@ -60,6 +60,9 @@ public class DiagramStyle
     /// <summary>Where the logo sits on the plan (shares the 5-position system with title and info).</summary>
     public DecorPos LogoPosition { get; set; } = DecorPos.TopLeft;
 
+    /// <summary>Width (px) of the logo cell in a merged title block; the logo is scaled to fit inside it. 0 = auto.</summary>
+    public double LogoBoxWidth { get; set; } = 90;
+
     // ── Info field (an optional "title block" / Schriftfeld for presentation) ─────────────────────────────
     // Only non-empty rows are shown. Like the title, it sits in a reserved band (or overlays at Center).
     public bool   ShowInfo        { get; set; } = false;
@@ -72,6 +75,8 @@ public class DiagramStyle
     public string InfoAuthor      { get; set; } = "";
     public string InfoDepartment  { get; set; } = "";   // class (school) or department (company)
     public string InfoExtra       { get; set; } = "";   // free multiline note (plain text)
+    public string InfoPage        { get; set; } = "";   // rendered page number, e.g. "2 / 5" — filled by the composer
+    public bool   ShowPageNumber  { get; set; } = false; // print composer auto-fills InfoPage with "current / total"
 
     // ── Grid (snapping aid) ──────────────────────────────────────────────────
 

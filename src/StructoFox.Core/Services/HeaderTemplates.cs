@@ -34,6 +34,8 @@ public sealed class HeaderData
     public string   InfoAuthor     { get; set; } = "";
     public string   InfoDepartment { get; set; } = "";
     public string   InfoExtra      { get; set; } = "";
+    public string   InfoPage       { get; set; } = "";
+    public bool     ShowPageNumber { get; set; }
 
     /// <summary>Reads the header fields out of a diagram style.</summary>
     public static HeaderData Capture(DiagramStyle s) => new()
@@ -44,7 +46,8 @@ public sealed class HeaderData
         LogoPath = s.LogoPath, LogoPosition = s.LogoPosition,
         ShowInfo = s.ShowInfo, InfoPosition = s.InfoPosition, InfoName = s.InfoName, InfoProject = s.InfoProject,
         InfoProjectNo = s.InfoProjectNo, InfoVersion = s.InfoVersion, InfoDate = s.InfoDate,
-        InfoAuthor = s.InfoAuthor, InfoDepartment = s.InfoDepartment, InfoExtra = s.InfoExtra,
+        InfoAuthor = s.InfoAuthor, InfoDepartment = s.InfoDepartment, InfoExtra = s.InfoExtra, InfoPage = s.InfoPage,
+        ShowPageNumber = s.ShowPageNumber,
     };
 
     /// <summary>Writes these header fields into a diagram style (leaving colours/grid untouched).</summary>
@@ -56,7 +59,8 @@ public sealed class HeaderData
         s.LogoPath = LogoPath; s.LogoPosition = LogoPosition;
         s.ShowInfo = ShowInfo; s.InfoPosition = InfoPosition; s.InfoName = InfoName; s.InfoProject = InfoProject;
         s.InfoProjectNo = InfoProjectNo; s.InfoVersion = InfoVersion; s.InfoDate = InfoDate;
-        s.InfoAuthor = InfoAuthor; s.InfoDepartment = InfoDepartment; s.InfoExtra = InfoExtra;
+        s.InfoAuthor = InfoAuthor; s.InfoDepartment = InfoDepartment; s.InfoExtra = InfoExtra; s.InfoPage = InfoPage;
+        s.ShowPageNumber = ShowPageNumber;
     }
 }
 
@@ -83,6 +87,9 @@ public static class HeaderTemplateService
         }
         catch { return new(); }
     }
+
+    /// <summary>True if a template with this name is already saved (same sanitised file stem).</summary>
+    public static bool Exists(string name) => File.Exists(FileOf(name));
 
     public static HeaderData? Load(string name)
     {

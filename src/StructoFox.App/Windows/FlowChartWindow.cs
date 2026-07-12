@@ -409,7 +409,8 @@ public class FlowChartWindow : Window
         try
         {
             RecomputeJunctions();   // derive junction positions from their lines before realizing them
-            var vis = VisibleRect().Inflate(400);
+            // _renderAll (export/print): realize the WHOLE page, not just the viewport.
+            var vis = _renderAll ? new Rect(-100000, -100000, 200000, 200000) : VisibleRect().Inflate(400);
 
             foreach (var n in _data.Nodes)
             {
@@ -475,6 +476,15 @@ public class FlowChartWindow : Window
     {
         if (e.Key == Key.Delete) { RemoveSelected(); return; }
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        // Ctrl+A — select every node on the current page.
+        if (e.Key == Key.A)
+        {
+            _selected.Clear();
+            foreach (var n in _data.Nodes.Where(n => n.Page == _page)) _selected.Add(n.Id);
+            RefreshSelection();
+            e.Handled = true;
+            return;
+        }
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
@@ -684,6 +694,117 @@ public class FlowChartWindow : Window
 
     // Rebuilds the decoration (title / info field / watermark / logo) around the canvas, INSIDE the scroll/zoom
     // content, so it travels into print / PDF / image exports; edge decorations reserve an empty band.
+    // When true, CullToViewport realizes the whole page (used by RenderPageBitmap for export/print).
+    bool _renderAll;
+
+    /// <summary>Renders one page's full diagram (all nodes/connections + decoration/legend), sized to content, to
+    /// a bitmap at <paramref name="scale"/> (1.0 = 96 DPI). Reuses the exact editor rendering (RebuildAll +
+    /// DiagramDecor), so the output is identical to the on-screen diagram. Used by the print composer.</summary>
+    public Avalonia.Media.Imaging.RenderTargetBitmap? RenderPageBitmap(int page = 0, double scale = 1.0)
+    {
+        if (_canvas is null || _canvasHost is null) return null;
+        var savedPage = _page; var savedW = _canvas.Width; var savedH = _canvas.Height; var savedRA = _renderAll;
+        _page = page; _renderAll = true;
+        try
+        {
+            // Size the surface to the page's content bounding box (a small margin all round).
+            double w = 60, h = 60;
+            foreach (var n in _data.Nodes.Where(n => n.Page == page))
+            { w = Math.Max(w, n.X + n.Width + 30); h = Math.Max(h, n.Y + n.Height + 30); }
+            _canvas.Width = w; _canvas.Height = h;
+
+            RebuildAll();   // grid + all nodes/connections (unculled) + decoration, composed into _canvasHost
+
+            var host = _canvasHost;
+            host.Measure(Size.Infinity);
+            var size = host.DesiredSize;
+            if (size.Width < 1 || size.Height < 1) size = new Size(w, h);
+            host.Arrange(new Rect(size));
+
+            var px = new PixelSize(Math.Max(1, (int)Math.Ceiling(size.Width * scale)),
+                                   Math.Max(1, (int)Math.Ceiling(size.Height * scale)));
+            var rtb = new Avalonia.Media.Imaging.RenderTargetBitmap(px, new Vector(96 * scale, 96 * scale));
+            rtb.Render(host);
+            return rtb;
+        }
+        catch { return null; }
+        finally { _page = savedPage; _renderAll = savedRA; _canvas.Width = savedW; _canvas.Height = savedH; }
+    }
+
+    /// <summary>Renders JUST the diagram (no decoration), with a TRANSPARENT background, tightly cropped to the
+    /// node content — so it sits on the print page with a minimal footprint and can overlap freely. Scale 1.0 = 96 DPI.</summary>
+    public Avalonia.Media.Imaging.RenderTargetBitmap? RenderDiagramOnly(int page = 0, double scale = 1.0)
+    {
+        if (_canvas is null) return null;
+        var savedPage = _page; var savedW = _canvas.Width; var savedH = _canvas.Height; var savedRA = _renderAll; var savedBg = _canvas.Background;
+        _page = page; _renderAll = true;
+        try
+        {
+            var nodes = _data.Nodes.Where(n => n.Page == page).ToList();
+            if (nodes.Count == 0) return null;
+
+            // Route everything first (line routing is independent of the canvas size), which populates _connPts —
+            // the actual polyline points of every connection on this page.
+            RebuildAll();
+            _canvas.Background = Brushes.Transparent;   // no white fill — the PAP background is see-through
+
+            // Determine the TRUE content bounds from the real coordinates: node rects UNION every routed
+            // connection point (lines, connectors, taps). Margin only covers arrowheads/labels sitting a few px
+            // beyond the bare geometry — so the export sits tight on the content and moves cleanly on the page.
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = 0, maxY = 0;
+            foreach (var n in nodes) { minX = Math.Min(minX, n.X); minY = Math.Min(minY, n.Y); maxX = Math.Max(maxX, n.X + n.Width); maxY = Math.Max(maxY, n.Y + n.Height); }
+            foreach (var pts in _connPts.Values)
+                foreach (var p in pts) { minX = Math.Min(minX, p.X); minY = Math.Min(minY, p.Y); maxX = Math.Max(maxX, p.X); maxY = Math.Max(maxY, p.Y); }
+            const double m = 14;
+            double cx = Math.Max(0, minX - m), cy = Math.Max(0, minY - m);
+            double cw = (maxX + m) - cx, ch = (maxY + m) - cy;
+
+            // Size the canvas to exactly cover the content (max edge + margin), then render — nothing is clipped
+            // because every point lies within [0 .. max]. No oversized scratch surface.
+            _canvas.Width = maxX + m; _canvas.Height = maxY + m;
+            _canvas.Measure(new Size(_canvas.Width, _canvas.Height));
+            _canvas.Arrange(new Rect(0, 0, _canvas.Width, _canvas.Height));
+
+            var full = new Avalonia.Media.Imaging.RenderTargetBitmap(
+                new PixelSize(Math.Max(1, (int)Math.Ceiling(_canvas.Width * scale)), Math.Max(1, (int)Math.Ceiling(_canvas.Height * scale))),
+                new Vector(96 * scale, 96 * scale));
+            full.Render(_canvas);
+            // The crop is DPI-NEUTRAL (96 DPI): its DIP size equals its pixel size. This matters when the bitmap is
+            // embedded into another DPI-scaled render (the print export) — a 96*scale DPI here would multiply with
+            // the outer scale and blow the diagram up. With 96 DPI the caller controls the size purely by pixels.
+            var crop = new Avalonia.Media.Imaging.RenderTargetBitmap(
+                new PixelSize(Math.Max(1, (int)Math.Ceiling(cw * scale)), Math.Max(1, (int)Math.Ceiling(ch * scale))),
+                new Vector(96, 96));
+            using (var ctx = crop.CreateDrawingContext())
+                ctx.DrawImage(full, new Rect(cx * scale, cy * scale, cw * scale, ch * scale), new Rect(0, 0, cw * scale, ch * scale));
+            full.Dispose();
+            return crop;
+        }
+        catch { return null; }
+        finally { _page = savedPage; _renderAll = savedRA; _canvas.Width = savedW; _canvas.Height = savedH; _canvas.Background = savedBg; }
+    }
+
+    /// <summary>The decoration positions present on this diagram (title block / info / legend), so the composer can
+    /// create one movable item per position.</summary>
+    public List<DecorPos> DecorPositions() => DiagramDecor.EnumeratePositions(_data.Title, _style);
+
+    /// <summary>Renders ONE decoration block (the merged title/info/legend at <paramref name="pos"/>) to its own
+    /// bitmap, so it can be placed as an independent movable item. Null if that position is empty.</summary>
+    public Avalonia.Media.Imaging.RenderTargetBitmap? RenderDecorPiece(DecorPos pos, double scale = 1.0)
+    {
+        var piece = DiagramDecor.EnumeratePieces(_data.Title, _style).FirstOrDefault(p => p.Pos == pos).Ctrl;
+        if (piece is null) return null;
+        piece.Measure(Size.Infinity);
+        var size = piece.DesiredSize;
+        if (size.Width < 1 || size.Height < 1) return null;
+        piece.Arrange(new Rect(size));
+        var rtb = new Avalonia.Media.Imaging.RenderTargetBitmap(
+            new PixelSize(Math.Max(1, (int)Math.Ceiling(size.Width * scale)), Math.Max(1, (int)Math.Ceiling(size.Height * scale))),
+            new Vector(96 * scale, 96 * scale));
+        rtb.Render(piece);
+        return rtb;
+    }
+
     void RefreshDecor()
     {
         if (_canvasHost is null || _canvas is null) return;
@@ -1061,7 +1182,13 @@ public class FlowChartWindow : Window
     // Converts the flowchart to a structogram (deterministically) and opens it, warning if partial.
     async void ConvertToStructogram()
     {
-        if (StructogramService.Exists(_projFolder, _key))
+        // In the sketchbook a PAP and a structogram under the same id can't both show (the home lists one entry per
+        // sketch by its Type), so a conversion there gets its OWN structogram sketch entry instead of overwriting.
+        bool sketchbook = string.Equals(
+            System.IO.Path.GetFullPath(_projFolder), System.IO.Path.GetFullPath(SketchbookService.Root),
+            StringComparison.OrdinalIgnoreCase);
+
+        if (!sketchbook && StructogramService.Exists(_projFolder, _key))
         {
             var res = await MessageDialog.Show(this,
                 Loc.S("Flow_ToStructogramOverwrite"), Loc.S("Flow_ToStructogramTitle"), DialogButtons.YesNo);
@@ -1084,8 +1211,12 @@ public class FlowChartWindow : Window
             return;
         }
 
-        StructogramService.Save(_projFolder, _key, sd);
-        DiagramWindows.OpenOrActivate(DiagramWindows.StructId(_projFolder, _key), () => new StructogramWindow(_projFolder, _key, title, _themePath));
+        // Sketchbook: register a new structogram sketch so it appears on the home. Project: keep the shared function
+        // key (the structogram stays linked to its PAP and shows under the entity).
+        string targetKey = sketchbook ? SketchbookService.Create(SketchType.Structogram, title).Id : _key;
+        StructogramService.Save(_projFolder, targetKey, sd);
+        DiagramWindows.OpenOrActivate(DiagramWindows.StructId(_projFolder, targetKey),
+            () => new StructogramWindow(_projFolder, targetKey, title, _themePath));
     }
 
     // Switches edit mode, cancelling any in-progress connection and clearing selection outside Select.

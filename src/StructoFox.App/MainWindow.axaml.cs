@@ -72,7 +72,11 @@ public partial class MainWindow : Window
     // cockpit directly, with no way back to the home browser; closing the window quits the app.
     readonly bool _embedded;
 
-    public MainWindow(string? projectPath = null)
+    // Parameterless ctor required by Avalonia's XAML runtime loader (avares://…/MainWindow.axaml); delegates to
+    // the real one. The app itself always constructs via the string overload (App.axaml.cs).
+    public MainWindow() : this(null) { }
+
+    public MainWindow(string? projectPath)
     {
         InitializeComponent();
         Title = "StructoFox";
@@ -179,6 +183,19 @@ public partial class MainWindow : Window
             var close = new MenuItem { Header = Loc.S("Menu_CloseProject") };
             close.Click += (_, _) => ShowHome();
             cm.Items.Add(close);
+            cm.Items.Add(new Separator());
+        }
+
+        // Print / Export composer — lay diagrams out on paper-sized pages and export to PDF/TIFF/PNG.
+        // Available in a project AND in the sketchbook home view (the sketchbook isn't "opened" like a project,
+        // so it has no _project — we target its root folder directly).
+        if (_project is not null || _sketchMode)
+        {
+            var target = _project ?? SketchbookService.Root;
+            var key    = "print:" + (_project ?? "sketchbook");
+            var print  = new MenuItem { Header = "🖨  " + Loc.S("Menu_Print") };
+            print.Click += (_, _) => DiagramWindows.OpenOrActivate(key, () => new PrintComposerWindow(target));
+            cm.Items.Add(print);
             cm.Items.Add(new Separator());
         }
 
@@ -510,6 +527,8 @@ public partial class MainWindow : Window
         var browse = Ui.Btn(Loc.S("Sketch_Open"), Loc.S("Sketch_OpenTip"));
         browse.Click += (_, _) => OpenSketchbookWorkspace();
         create.Children.Add(browse);
+        // Print / Export lives in the ≡ menu (same place as in a project) once the sketchbook workspace is open —
+        // no separate button here, so the entry point is identical everywhere.
         Grid.SetRow(create, 0); grid.Children.Add(create);
 
         var hero = SketchHero(); Grid.SetRow(hero, 1); grid.Children.Add(hero);
@@ -1204,7 +1223,8 @@ public partial class MainWindow : Window
             (Section.Enum,      "Ⓔ", "Enums"),
             (Section.Function,  "ƒ",  "Functions"),
             (Section.Object,    "Ⓞ", "Objects"),
-            (Section.Export,    "⇩",  "Export"),
+            // Code export now lives per-structogram (the "Code skeleton" button in the structogram editor), not as a
+            // project section next to the entity libraries — it isn't a library and was easy to confuse with printing.
         };
         foreach (var (sec, icon, label) in items) stack.Children.Add(RailButton(sec, icon, label));
         var sectionsScroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -1636,8 +1656,18 @@ public partial class MainWindow : Window
         if (assignedBoards.Count > 0)
             msg += "\n\n" + string.Format(Loc.S("Sec_DeleteBoardWarn"), string.Join(", ", assignedBoards));
 
+        // Hint: still referenced by other documents (those links will be cleared on delete).
+        var usedBy = ids.SelectMany(id => ProjectUsageService.FindReferrers(_project, id))
+            .Select(u => $"•  {u.Referrer}  ({Loc.S("Usage_" + u.Kind)})").Distinct().ToList();
+        if (usedBy.Count > 0)
+            msg += "\n\n" + string.Format(Loc.S("Link_UsedByDelete"), "\n" + string.Join("\n", usedBy));
+
         if (await MessageDialog.Show(this, msg, Loc.S("Sec_DeleteTitle"), DialogButtons.YesNo) != DialogResult.Yes) return;
-        foreach (var id in ids) CodeEntityService.Delete(_project, section.ToString(), id);
+        foreach (var id in ids)
+        {
+            ProjectUsageService.RemoveReferences(_project, id);   // clear dangling links before removing the entity
+            CodeEntityService.Delete(_project, section.ToString(), id);
+        }
         ShowSection(section);
     }, "DeleteEntities");
 
@@ -1725,7 +1755,9 @@ public partial class MainWindow : Window
     void CreateMain() => CrashHandler.Safe(() =>
     {
         if (_project is null) return;
-        CodeEntityService.Save(_project, "Function", new CodeEntity { Name = "main", EntityType = CodeEntityType.Function, IsEntryPoint = true });
+        var taken = CodeEntityService.LoadAll(_project, "Function").Select(e => e.Id);
+        CodeEntityService.Save(_project, "Function",
+            new CodeEntity { Name = "main", EntityType = CodeEntityType.Function, IsEntryPoint = true, Id = NameKeys.From("main", taken) });
         ShowSection(Section.Main);
     }, "CreateMain");
 
@@ -1947,7 +1979,8 @@ public partial class MainWindow : Window
         var name = await PromptDialog.Show(this, Loc.S("Boards_NewPrompt"), Loc.S("Boards_Default"), Loc.S("Boards_New"));
         if (string.IsNullOrWhiteSpace(name)) return;
         var boards = CodeBoardRegistryService.Load(_project);
-        boards.Add(new CodeBoard { Name = name.Trim() });
+        var bn = name.Trim();
+        boards.Add(new CodeBoard { Name = bn, Id = NameKeys.From(bn, boards.Select(b => b.Id)) });
         CodeBoardRegistryService.Save(_project, boards);
         ShowSection(Section.Boards);
     }, "NewBoard");
@@ -1961,6 +1994,9 @@ public partial class MainWindow : Window
         var match = boards.FirstOrDefault(b => b.Id == board.Id);
         if (match is null) return;
         match.Name = name.Trim();
+        // Keep the board's readable data-file name in step with its name.
+        var newId = NameKeys.From(match.Name, boards.Where(b => b != match).Select(b => b.Id));
+        if (newId != match.Id) { CodeBoardDataService.Rename(_project, match.Id, newId); match.Id = newId; }
         CodeBoardRegistryService.Save(_project, boards);
         ShowSection(Section.Boards);
     }, "RenameBoard");
@@ -2008,17 +2044,29 @@ public partial class MainWindow : Window
             nsId = picked;
         }
 
-        // Warn if that name is already taken in the chosen namespace, so the user knows they're about to
-        // make a twin rather than silently stacking duplicates.
-        if (CodeEntityService.LoadAll(_project, section.ToString())
-                .Any(x => x.Namespace == nsId && string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)))
+        // Warn if that name is already taken in the chosen namespace, so the user knows they're about to make a
+        // twin rather than silently stacking duplicates. Class/Struct/Interface/Enum all declare a NAMED TYPE and
+        // share one type-name space — a same-named type of a DIFFERENT kind would collide in the generated code, so
+        // check across all of them (not just this section). Other kinds (Function/Object/Namespace) check same-kind.
+        string[] typeKinds = { "Class", "Struct", "Interface", "Enum" };
+        var pool = typeKinds.Contains(section.ToString())
+            ? typeKinds.SelectMany(t => CodeEntityService.LoadAll(_project, t))
+            : CodeEntityService.LoadAll(_project, section.ToString());
+        var clash = pool.FirstOrDefault(x => x.Namespace == nsId && string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (clash is not null)
         {
+            // Name the EXISTING kind ("… a Class named X already exists"), which may differ from the one being added.
             var res = await MessageDialog.Show(this,
-                string.Format(Loc.S("Sec_DupMsg"), SingularLabel(section), name), Loc.S("Sec_DupTitle"), DialogButtons.YesNo);
+                string.Format(Loc.S("Sec_DupMsg"), Loc.S("SecSg_" + clash.EntityType), name), Loc.S("Sec_DupTitle"), DialogButtons.YesNo);
             if (res != DialogResult.Yes) return;
         }
 
-        var entity = new CodeEntity { Name = name, EntityType = Enum.Parse<CodeEntityType>(section.ToString()), Namespace = nsId };
+        var takenKeys = CodeEntityService.LoadAll(_project, section.ToString()).Select(e => e.Id);
+        var entity = new CodeEntity
+        {
+            Name = name, EntityType = Enum.Parse<CodeEntityType>(section.ToString()), Namespace = nsId,
+            Id = NameKeys.From(name, takenKeys),   // readable, unique document key (= filename)
+        };
         CodeEntityService.Save(_project, section.ToString(), entity);
         ShowSection(section);
     }, "NewEntity");

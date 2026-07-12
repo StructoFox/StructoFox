@@ -334,17 +334,21 @@ public class HexColorPicker : StackPanel
     };
 
     // "C: [%] %" group. The label has a fixed width so the % fields line up across the 2×2 grid.
-    static Control PctGroup(string label, TextBox pct) => new StackPanel
+    static Control PctGroup(string label, TextBox pct)
     {
-        Orientation = Orientation.Horizontal, Spacing = 4,
-        Children = { Lbl(label), pct, new TextBlock { Text = "%", VerticalAlignment = VerticalAlignment.Center } },
-    };
+        var pc = new TextBlock { Text = "%", VerticalAlignment = VerticalAlignment.Center };
+        Ui.Theme(pc, TextBlock.ForegroundProperty, "ContentTextBrush");
+        return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { Lbl(label), pct, pc } };
+    }
 
-    // A fixed-width "<X>:" label, so every field that follows snaps to the same vertical line.
-    static TextBlock Lbl(string label) => new()
+    // A fixed-width "<X>:" label, so every field that follows snaps to the same vertical line. Theme-coloured so
+    // it stays readable on any background (never white-on-white).
+    static TextBlock Lbl(string label)
     {
-        Text = label + ":", Width = 18, VerticalAlignment = VerticalAlignment.Center,
-    };
+        var tb = new TextBlock { Text = label + ":", Width = 18, VerticalAlignment = VerticalAlignment.Center };
+        Ui.Theme(tb, TextBlock.ForegroundProperty, "ContentTextBrush");
+        return tb;
+    }
 
     // Parses a 0–255 decimal field (clamped) into a byte; false if it isn't a number.
     static bool TryByteDec(TextBox box, out byte value)

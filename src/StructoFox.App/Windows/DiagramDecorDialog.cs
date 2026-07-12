@@ -26,6 +26,7 @@ public class DiagramDecorDialog : Window
     readonly TextBox  _watermarkImg = new() { MinWidth = 280 };
     readonly TextBox  _wmAngle   = new() { Width = 64 };
     readonly TextBox  _logo      = new() { MinWidth = 280 };
+    readonly TextBox  _logoWidth = new() { Width = 64 };
     readonly ComboBox _corner    = Ui.Combo(160);
 
     // Info field ("title block").
@@ -35,6 +36,7 @@ public class DiagramDecorDialog : Window
     readonly TextBox  _infoProject   = new();
     readonly TextBox  _infoProjectNo = new();
     readonly TextBox  _infoVersion   = new();
+    readonly CheckBox _showPage      = new();
     readonly TextBox  _infoDate      = new();
     readonly TextBox  _infoAuthor    = new();
     readonly TextBox  _infoDept      = new();
@@ -57,7 +59,7 @@ public class DiagramDecorDialog : Window
         _title.Text = title;
         _showTitle.Content = Loc.S("Decor_ShowTitle");
         _showTitle.IsChecked = style.ShowTitle;
-        ThemeInput(_title); ThemeInput(_titleSize); ThemeInput(_watermark); ThemeInput(_watermarkImg); ThemeInput(_wmAngle); ThemeInput(_logo);
+        ThemeInput(_title); ThemeInput(_titleSize); ThemeInput(_watermark); ThemeInput(_watermarkImg); ThemeInput(_wmAngle); ThemeInput(_logo); ThemeInput(_logoWidth);
         Ui.Theme(_showTitle, CheckBox.ForegroundProperty, "ContentTextBrush");
         _titleBold.Content = Loc.S("Decor_TitleBold");
         _titleBold.IsChecked = style.TitleBold;
@@ -73,6 +75,7 @@ public class DiagramDecorDialog : Window
         _watermarkImg.Text = style.WatermarkImage;
         _wmAngle.Text = style.WatermarkAngle.ToString(System.Globalization.CultureInfo.InvariantCulture);
         _logo.Text = style.LogoPath;
+        _logoWidth.Text = style.LogoBoxWidth.ToString(System.Globalization.CultureInfo.InvariantCulture);
         foreach (var c in Enum.GetValues<DecorPos>()) _corner.Items.Add(c);
         _corner.SelectedItem = style.LogoPosition;
 
@@ -84,6 +87,8 @@ public class DiagramDecorDialog : Window
         _infoName.Text = style.InfoName; _infoProject.Text = style.InfoProject; _infoProjectNo.Text = style.InfoProjectNo;
         _infoVersion.Text = style.InfoVersion; _infoDate.Text = style.InfoDate; _infoAuthor.Text = style.InfoAuthor;
         _infoDept.Text = style.InfoDepartment; _infoExtra.Text = style.InfoExtra;
+        _showPage.Content = Loc.S("Decor_ShowPage"); _showPage.IsChecked = style.ShowPageNumber;
+        Ui.Theme(_showPage, CheckBox.ForegroundProperty, "ContentTextBrush");
         foreach (var b in new[] { _infoName, _infoProject, _infoProjectNo, _infoVersion, _infoDate, _infoAuthor, _infoDept, _infoExtra })
             ThemeInput(b);
 
@@ -129,8 +134,16 @@ public class DiagramDecorDialog : Window
         {
             var n = await PromptDialog.Show(this, Loc.S("Decor_TemplateName"), "");
             if (string.IsNullOrWhiteSpace(n)) return;
+            var name = n.Trim();
+            // Don't silently clobber an existing template — confirm overwrite (or cancel).
+            if (HeaderTemplateService.Exists(name))
+            {
+                var res = await MessageDialog.Show(this, string.Format(Loc.S("Decor_TemplateExists"), name),
+                    Loc.S("Decor_SaveTemplate"), DialogButtons.YesNo);
+                if (res != DialogResult.Yes) return;
+            }
             var tmp = new DiagramStyle(); ApplyTo(tmp);
-            HeaderTemplateService.Save(n.Trim(), HeaderData.Capture(tmp));
+            HeaderTemplateService.Save(name, HeaderData.Capture(tmp));
         };
         var applyTpl = Ui.Btn(Loc.S("Decor_ApplyTemplate"));
         applyTpl.Click += async (_, _) =>
@@ -204,13 +217,14 @@ public class DiagramDecorDialog : Window
                 Label(Loc.S("Decor_Logo")),
                 FieldRow(_logo, browse, clear),
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
-                    Children = { Label(Loc.S("Decor_Corner")), _corner } },
+                    Children = { Label(Loc.S("Decor_Corner")), _corner, Label(Loc.S("Decor_LogoWidth")), _logoWidth } },
                 new Border { BorderThickness = new(0, 1, 0, 0), Margin = new(0, 4, 0, 0), Padding = new(0, 8, 0, 0),
                     BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0x80, 0x80, 0x80)), Child = infoHeader },
                 _showInfo,
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
                     Children = { Label(Loc.S("Decor_InfoPos")), _infoPos } },
                 InfoGrid(),
+                _showPage,
                 Label(Loc.S("Decor_InfoExtra")), _infoExtra,
                 new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new(0, 6, 0, 0), Children = { cancel, ok } },
             },
@@ -233,10 +247,11 @@ public class DiagramDecorDialog : Window
         if (string.IsNullOrWhiteSpace(s.TitleColor)) _titleColor.Inherit = true;
         else { _titleColor.Inherit = false; try { _titleColor.Color = Color.Parse(s.TitleColor); } catch { } }
         _watermark.Text = s.Watermark; _watermarkImg.Text = s.WatermarkImage; _wmAngle.Text = s.WatermarkAngle.ToString(inv);
-        _logo.Text = s.LogoPath; _corner.SelectedItem = s.LogoPosition;
+        _logo.Text = s.LogoPath; _logoWidth.Text = s.LogoBoxWidth.ToString(inv); _corner.SelectedItem = s.LogoPosition;
         _showInfo.IsChecked = s.ShowInfo; _infoPos.SelectedItem = s.InfoPosition;
         _infoName.Text = s.InfoName; _infoProject.Text = s.InfoProject; _infoProjectNo.Text = s.InfoProjectNo;
         _infoVersion.Text = s.InfoVersion; _infoDate.Text = s.InfoDate; _infoAuthor.Text = s.InfoAuthor; _infoExtra.Text = s.InfoExtra;
+        _showPage.IsChecked = s.ShowPageNumber;
     }
 
     // Writes the edits back into the style and closes with the (possibly changed) title.
@@ -255,6 +270,7 @@ public class DiagramDecorDialog : Window
         s.WatermarkImage = (_watermarkImg.Text ?? "").Trim();
         if (double.TryParse(_wmAngle.Text, System.Globalization.NumberStyles.Any, inv, out var wa)) s.WatermarkAngle = wa;
         s.LogoPath       = (_logo.Text ?? "").Trim();
+        if (double.TryParse(_logoWidth.Text, System.Globalization.NumberStyles.Any, inv, out var lw) && lw >= 0) s.LogoBoxWidth = lw;
         s.LogoPosition   = _corner.SelectedItem is DecorPos c ? c : s.LogoPosition;
 
         s.ShowInfo       = _showInfo.IsChecked == true;
@@ -263,6 +279,7 @@ public class DiagramDecorDialog : Window
         s.InfoProject    = (_infoProject.Text ?? "").Trim();
         s.InfoProjectNo  = (_infoProjectNo.Text ?? "").Trim();
         s.InfoVersion    = (_infoVersion.Text ?? "").Trim();
+        s.ShowPageNumber = _showPage.IsChecked == true;
         s.InfoDate       = (_infoDate.Text ?? "").Trim();
         s.InfoAuthor     = (_infoAuthor.Text ?? "").Trim();
         s.InfoDepartment = (_infoDept.Text ?? "").Trim();

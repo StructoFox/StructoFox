@@ -399,6 +399,7 @@ public class CodeBoardWindow : Window
     // them, so pasted cards are independent copies wired up correctly. Shared across board windows. ──
     sealed class BoardClip
     {
+        public string                               SourceProject { get; set; } = "";   // so a paste can tell it's cross-project
         public List<CodeEntity>                     Entities  { get; set; } = new();
         public Dictionary<string, CodeCardPosition> Positions { get; set; } = new();   // keyed by old entity id
         public List<CodeRelation>                   Relations { get; set; } = new();
@@ -410,6 +411,7 @@ public class CodeBoardWindow : Window
         if (_selectedIds.Count == 0) return;
         var clip = new BoardClip
         {
+            SourceProject = _projFolder,
             Entities  = _selectedIds.Where(_entities.ContainsKey).Select(id => _entities[id]).ToList(),
             Positions = _selectedIds.Where(_boardData.Positions.ContainsKey).ToDictionary(id => id, id => _boardData.Positions[id]),
             Relations = _boardData.Relations.Where(r => _selectedIds.Contains(r.FromId) && _selectedIds.Contains(r.ToId)).ToList(),
@@ -417,12 +419,33 @@ public class CodeBoardWindow : Window
         _boardClip = System.Text.Json.JsonSerializer.Serialize(clip);
     }
 
-    void PasteClipboard()
+    // True if the target project already holds an entity of the SAME type with this one's name — the conflict that
+    // blocks a cross-project paste (the user must delete/rename the existing one first).
+    bool NameClashesInProject(CodeEntity e) =>
+        CodeEntityService.LoadAll(_projFolder, e.EntityType.ToString())
+            .Any(x => string.Equals(x.Name, e.Name, StringComparison.OrdinalIgnoreCase));
+
+    async void PasteClipboard()
     {
         if (_boardClip is null) return;
         BoardClip? p;
         try { p = System.Text.Json.JsonSerializer.Deserialize<BoardClip>(_boardClip, _undoJson); } catch { return; }
         if (p is null || p.Entities.Count == 0) return;
+
+        // Cross-project paste: if an entity of the same type + name already exists here, it's a hard conflict —
+        // abort and let the user delete/rename the existing one first (no silent twin). Same-project paste (an
+        // intentional duplicate) stays silent and auto-suffixes.
+        if (!string.Equals(p.SourceProject, _projFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            var clashes = p.Entities.Where(NameClashesInProject)
+                .Select(e => $"{Loc.S("SecSg_" + e.EntityType)} „{e.Name}“").Distinct().ToList();
+            if (clashes.Count > 0)
+            {
+                await MessageDialog.Show(this,
+                    string.Format(Loc.S("Board_CrossDupMsg"), string.Join(", ", clashes)), Loc.S("Sec_DupTitle"));
+                return;
+            }
+        }
 
         // Offset the group so its top-left lands at the cursor (if inside the canvas), else cascade. The
         // offset is snapped ONCE (a grid-multiple delta) and applied uniformly — relative layout is kept
@@ -444,7 +467,10 @@ public class CodeBoardWindow : Window
             // remapped, so they stay pointing at the originals: an Object keeps InstanceOfId (stays an
             // instance of the SAME class — many objects of one class is normal), and BaseClassId /
             // ImplementsIds / Namespace stay as-is too.
-            var oldE = e.Id; e.Id = Nid(); entMap[oldE] = e.Id;
+            // A copy is a new entity → a fresh readable, unique key from its name (e.g. "Fahrzeug_2").
+            var oldE = e.Id;
+            e.Id = NameKeys.From(e.Name, CodeEntityService.LoadAll(_projFolder, e.EntityType.ToString()).Select(x => x.Id));
+            entMap[oldE] = e.Id;
             foreach (var port in e.Ports) { var oldP = port.Id; port.Id = Nid(); portMap[oldP] = port.Id; }
             CodeEntityService.Save(_projFolder, e.EntityType.ToString(), e);   // a copy is a new entity
             _entities[e.Id] = e;
@@ -471,6 +497,15 @@ public class CodeBoardWindow : Window
     {
         if (e.Key == Key.Delete && _selectedIds.Count > 0) { RemoveSelectedFromBoard(); return; }
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        // Ctrl+A — select every card on the board.
+        if (e.Key == Key.A)
+        {
+            _selectedIds.Clear();
+            foreach (var id in _entities.Keys) _selectedIds.Add(id);
+            RefreshSelectionVisuals();
+            e.Handled = true;
+            return;
+        }
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
@@ -1569,7 +1604,8 @@ public class CodeBoardWindow : Window
         var name = await PromptDialog.Show(this, Loc.S("Common_NameColon"), "", string.Format(Loc.S("Code_NewTypeTitle"), entityTypeName));
         if (string.IsNullOrWhiteSpace(name)) return;
 
-        var entity = new CodeEntity { Name = name.Trim(), EntityType = et };
+        var entity = new CodeEntity { Name = name.Trim(), EntityType = et,
+            Id = NameKeys.From(name.Trim(), CodeEntityService.LoadAll(_projFolder, entityTypeName).Select(e => e.Id)) };
         _entities[entity.Id] = entity;
         CodeEntityService.Save(_projFolder, entityTypeName, entity);
 

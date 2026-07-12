@@ -215,7 +215,8 @@ public static class SubroutineLinkDialog
 
             var nm = newObjectBox.Text?.Trim();
             if (string.IsNullOrWhiteSpace(nm)) return null;
-            var obj = new CodeEntity { Name = nm, EntityType = CodeEntityType.Object, InstanceOfId = _instClassId, Namespace = "" };
+            var obj = new CodeEntity { Name = nm, EntityType = CodeEntityType.Object, InstanceOfId = _instClassId, Namespace = "",
+                Id = NameKeys.From(nm, objects.Select(o => o.Id)) };
             CodeEntityService.Save(projFolder, "Object", obj);
             objects.Add(obj);
             return nm;
@@ -280,7 +281,8 @@ public static class SubroutineLinkDialog
                 // No → fall through and create another anyway
             }
 
-            var fn = new CodeEntity { Name = name, EntityType = CodeEntityType.Function, Namespace = nsId };
+            var fn = new CodeEntity { Name = name, EntityType = CodeEntityType.Function, Namespace = nsId,
+                Id = NameKeys.From(name, funcs.Select(f => f.Id)) };
             CodeEntityService.Save(projFolder, "Function", fn);
             dlg.Close(Result(fn.Id, ""));
         };
