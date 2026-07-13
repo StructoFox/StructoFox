@@ -6,6 +6,8 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
+using Avalonia.Reactive;
+using Avalonia.Threading;
 
 namespace StructoFox.App;
 
@@ -23,6 +25,27 @@ public sealed record ComboItem(string Name, string Id)
 /// </summary>
 public static class Ui
 {
+    /// <summary>
+    /// Runs <paramref name="onChanged"/> whenever a control's layout bounds change — but ALWAYS DEFERRED (posted at
+    /// Render priority), so it never executes inside Avalonia's layout/arrange pass.
+    ///
+    /// ── WHY THIS EXISTS / THE RULE ──────────────────────────────────────────────────────────────────────────────
+    /// NEVER add or remove visual-tree children (Panel/Canvas <c>Children.Add/Remove</c>, re-rendering visuals, etc.)
+    /// directly inside a Bounds / LayoutUpdated / PropertyChanged(BoundsProperty) callback. While arranging, Avalonia
+    /// is ENUMERATING those children — mutating the collection then throws
+    /// "Collection was modified; enumeration operation may not execute" (and repeatedly re-invalidating layout from
+    /// such a callback can spin into a hang). Symptoms show up as a crash/hang during <c>Window.Show</c>.
+    ///
+    /// Safe INLINE in a bounds callback: only REPOSITION existing elements (<c>Canvas.SetLeft/Top</c>, setting a
+    /// Width/Height) — that does not change the Children collection. Anything that ADDS/REMOVES children, or rebuilds
+    /// a set of visuals, must be DEFERRED — which is exactly what this helper does. Prefer it over subscribing to
+    /// <c>BoundsProperty</c> by hand. (Pure redraw requests like <c>InvalidateVisual()</c> are also fine inline.)
+    /// </summary>
+    public static IDisposable OnBoundsChanged(Visual target, Action onChanged) =>
+        target.GetObservable(Visual.BoundsProperty).Subscribe(new AnonymousObserver<Rect>(_ =>
+            Dispatcher.UIThread.Post(() => { try { onChanged(); } catch { /* never let a layout callback crash the UI */ } },
+                                     DispatcherPriority.Render)));
+
     /// <summary>
     /// Builds a standard push button with uniform padding and an optional tooltip.
     /// One button to rule them all — or at least to look the same everywhere.

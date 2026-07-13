@@ -27,7 +27,6 @@ public class CodeBoardWindow : Window
     readonly string    _projFolder;
     readonly CodeBoard _board;
     readonly string?   _themePath;
-    readonly Action<IEnumerable<CodeEntity>>? _onExport;
     CodeBoardData      _boardData;
 
     Canvas?       _canvas;
@@ -36,7 +35,8 @@ public class CodeBoardWindow : Window
 
     readonly Dictionary<string, CodeEntity> _entities  = new();   // entity id → entity
     readonly Dictionary<string, Border>     _cards     = new();   // entity id → card
-    readonly Dictionary<string, Ellipse>    _portDots  = new();   // "{entityId}:{portId}" → dot
+    readonly Dictionary<string, Border>     _portDots  = new();   // "{entityId}:{portId}" → port box
+    readonly Dictionary<string, TextBlock>  _portLabels = new();  // "{entityId}:{portId}" → name label next to the dot
     readonly Dictionary<string, List<Control>> _relViews = new(); // relation id → line/arrow/hit visuals
 
     // Snapshot-based undo/redo of the board (JSON of _boardData), recorded at each Save() boundary.
@@ -59,6 +59,11 @@ public class CodeBoardWindow : Window
     readonly HashSet<string> _selectedIds = new();
     string? _selectionAnchor;
     Point?  _mousePos;                          // last pointer pos over the canvas (null when outside)
+
+    // Reroute nodes (board-only): a selected connection shows draggable square handles at its waypoints.
+    string? _selectedRel;                       // id of the connection whose reroute handles are shown
+    CodeRelation? _dragWpRel; BoardWaypoint? _dragWp;   // waypoint currently being dragged
+    const double WpHandle = 11;
     Dictionary<string, Point>? _dragStart;      // start positions of all selected cards during a multi-drag
 
     double _zoom = 1.0;
@@ -68,9 +73,11 @@ public class CodeBoardWindow : Window
     bool   _rightMaybeMenu;                            // a right press that opens the add-menu if it wasn't a drag
     bool   _rightCancelConnect;                        // a right press (connect mode) that cancels if it wasn't a drag
 
-    const double PortRadius  = 6;
+    const double PortRadius  = 8;    // half the port box (ports are 2*PortRadius square boxes)
+    const double PortLabelW  = 90;   // fixed width for right-aligned port labels (avoids measuring in layout)
     const double DefaultCardW = 180;
 
+    Button? _selectBtn;
     Button? _connectBtn;
     ContextMenu? _menu;   // the single open context menu, so opening a new one closes the old
     Control? _emptyHint;  // centered "what is a board" overlay, shown only while the board has no cards
@@ -88,13 +95,11 @@ public class CodeBoardWindow : Window
 
     void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
 
-    public CodeBoardWindow(string projFolder, CodeBoard board, string? themePath,
-        Action<IEnumerable<CodeEntity>>? onExport = null)
+    public CodeBoardWindow(string projFolder, CodeBoard board, string? themePath)
     {
         _projFolder = projFolder;
         _board      = board;
         _themePath  = themePath;
-        _onExport   = onExport;
         _boardData  = CodeBoardDataService.Load(projFolder, board.Id);
         _snapshot   = System.Text.Json.JsonSerializer.Serialize(_boardData);   // baseline for undo
 
@@ -158,7 +163,7 @@ public class CodeBoardWindow : Window
     {
         if (_canvas is null) return;
         _canvas.Children.Clear();
-        _cards.Clear(); _portDots.Clear(); _relViews.Clear();
+        _cards.Clear(); _portDots.Clear(); _portLabels.Clear(); _relViews.Clear();
         _gridRect = null;
         _selectedIds.Clear(); _selectionAnchor = null;
         RenderGrid();
@@ -292,6 +297,11 @@ public class CodeBoardWindow : Window
         addBtn.Click += (_, _) => ShowAddEntityMenu(addBtn);
         row.Children.Add(addBtn);
 
+        _selectBtn = Btn(Loc.S("Code_SelectMode"), Loc.S("Code_SelectModeTip"));
+        _selectBtn.Click += (_, _) => EnterSelectMode();
+        StyleModeBtn(_selectBtn, true);   // select/move is the default mode
+        row.Children.Add(_selectBtn);
+
         _connectBtn = Btn(Loc.S("Code_ConnectPorts"), Loc.S("Code_ConnectPortsTip"));
         _connectBtn.Click += (_, _) => ToggleConnectMode();
         row.Children.Add(_connectBtn);
@@ -303,23 +313,6 @@ public class CodeBoardWindow : Window
         var delBtn = Btn(Loc.S("Code_RemoveCards"), Loc.S("Code_RemoveCardsTip"));
         delBtn.Click += (_, _) => RemoveSelectedFromBoard();
         row.Children.Add(delBtn);
-
-        if (_onExport is not null)
-        {
-            row.Children.Add(new Border { Width = 8 });
-            var exportAllBtn = Btn(Loc.S("Code_ExportAll"), Loc.S("Code_ExportAllTip"));
-            exportAllBtn.Click += (_, _) => _onExport!.Invoke(AllBoardEntities());
-            row.Children.Add(exportAllBtn);
-
-            var exportSelBtn = Btn(Loc.S("Code_ExportSelected"), Loc.S("Code_ExportSelectedTip"));
-            exportSelBtn.Click += async (_, _) =>
-            {
-                var sel = SelectedEntities();
-                if (sel.Count == 0) { await MessageDialog.Show(this, Loc.S("Code_NoSelection"), Loc.S("Code_ExportSelected")); return; }
-                _onExport!.Invoke(sel);
-            };
-            row.Children.Add(exportSelBtn);
-        }
 
         row.Children.Add(new Border { Width = 8 });
         var viewBtn = Btn(Loc.S("Flow_View"), Loc.S("Flow_ViewTip"));
@@ -605,6 +598,17 @@ public class CodeBoardWindow : Window
         }
         if (_canvas is not null)
             _canvas.Cursor = new Cursor(_connectMode ? StandardCursorType.Cross : StandardCursorType.Arrow);
+        StyleModeBtn(_selectBtn, !_connectMode && !_scaleMode);
+    }
+
+    // Select / move mode: the default — pan (right-drag), marquee-select (left-drag on empty), click / Ctrl-click to
+    // (de)select, drag to move the selection. Just leaves connect and scale mode.
+    void EnterSelectMode()
+    {
+        if (_connectMode) ToggleConnectMode();
+        if (_scaleMode)   ToggleScaleMode();
+        StyleModeBtn(_selectBtn, true);
+        if (_canvas is not null) _canvas.Cursor = new Cursor(StandardCursorType.Arrow);
     }
 
     // Scale mode: cards show resize grips and stop being draggable, so a drag resizes (via a grip) rather
@@ -614,6 +618,7 @@ public class CodeBoardWindow : Window
         _scaleMode = !_scaleMode;
         if (_scaleMode && _connectMode) ToggleConnectMode();   // turn connect off first
         StyleModeBtn(_scaleBtn, _scaleMode);
+        StyleModeBtn(_selectBtn, !_connectMode && !_scaleMode);
         RefreshScaleHandles();
         if (_canvas is not null)
             _canvas.Cursor = new Cursor(StandardCursorType.Arrow);
@@ -754,12 +759,11 @@ public class CodeBoardWindow : Window
         UpdateEmptyHint();   // a card exists now → drop the empty-state explanation
         if (_scaleMode) RefreshScaleHandles();   // a card added while resizing gets grips too
 
-        // Re-place ports (and any touching relations) whenever the card's measured size changes.
-        card.GetObservable(Visual.BoundsProperty).Subscribe(new AnonymousObserver<Rect>(_ =>
-        {
-            UpdatePortPositions(entity.Id);
-            UpdateRelationsForEntity(entity.Id);
-        }));
+        // Re-place ports (and any touching relations) whenever the card's measured size changes. Ui.OnBoundsChanged
+        // defers this out of the layout pass — re-rendering ports/relations adds & removes canvas children, which
+        // must NOT happen while Avalonia is arranging (see the rule documented on Ui.OnBoundsChanged).
+        var id = entity.Id;
+        Ui.OnBoundsChanged(card, () => { UpdatePortPositions(id); UpdateRelationsForEntity(id); });
     }
 
     void WireCard(Border card, CodeEntity entity)
@@ -772,7 +776,11 @@ public class CodeBoardWindow : Window
             var props = e.GetCurrentPoint(card).Properties;
             if (props.IsRightButtonPressed) { ShowCardContextMenu(entity, card); e.Handled = true; return; }
             if (_scaleMode) { e.Handled = true; return; }     // resizing happens via the grips, not the body
-            if (_connectMode) { e.Handled = true; return; }   // port dots handle connecting
+            if (_connectMode)   // port dots wire ports; a click on a card body (with a port armed) tries a type link
+            {
+                if (_connectFromPortId is not null && !props.IsRightButtonPressed) TryTypeLink(entity.Id);
+                e.Handled = true; return;
+            }
             if (e.ClickCount >= 2) { _ = ShowEntityEditor(entity); e.Handled = true; return; }
 
             var mods = e.KeyModifiers;
@@ -1085,8 +1093,9 @@ public class CodeBoardWindow : Window
         double w = card.Bounds.Width  > 0 ? card.Bounds.Width  : DefaultCardW;
         double h = card.Bounds.Height > 0 ? card.Bounds.Height : 80;
 
-        var inputs  = entity.Ports.Where(p => p.Direction == PortDirection.Input).ToList();
-        var outputs = entity.Ports.Where(p => p.Direction == PortDirection.Output).ToList();
+        var eff     = EffectivePorts(entity).ToList();
+        var inputs  = eff.Where(p => p.Direction == PortDirection.Input).ToList();
+        var outputs = eff.Where(p => p.Direction == PortDirection.Output).ToList();
 
         PlacePortDots(entity, inputs,  x, y, w, h, pos.PortOrientation, isInput: true);
         PlacePortDots(entity, outputs, x, y, w, h, pos.PortOrientation, isInput: false);
@@ -1134,34 +1143,65 @@ public class CodeBoardWindow : Window
 
             Canvas.SetLeft(dot, centerX - PortRadius);
             Canvas.SetTop(dot,  centerY - PortRadius);
+
+            // Place the name label just next to the dot: inputs read INTO the card (right of a left-edge dot),
+            // outputs read out (left of a right-edge dot). Vertical orientation stacks the label beside the dot.
+            if (_portLabels.TryGetValue($"{entity.Id}:{ports[i].Id}", out var lbl))
+            {
+                // Labels sit OUTSIDE the card (no Measure — fixed offsets) and ABOVE the box (like PAP line labels),
+                // so they never overlap the connection line that enters/leaves the port. Input = fixed-width
+                // right-aligned block to the left; output = left-aligned to the right.
+                double lx = isInput ? centerX - PortRadius - 3 - PortLabelW : centerX + PortRadius + 3;
+                double ly = centerY - PortRadius - 13;
+                Canvas.SetLeft(lbl, lx);
+                Canvas.SetTop(lbl, ly);
+            }
         }
     }
 
-    Ellipse GetOrCreatePortDot(string entityId, CodePort port)
+    Border GetOrCreatePortDot(string entityId, CodePort port)
     {
         var key = $"{entityId}:{port.Id}";
         if (_portDots.TryGetValue(key, out var existing)) return existing;
 
         var isInput = port.Direction == PortDirection.Input;
-        var dot = new Ellipse
+        // A port is a small square box straddling the card edge (a "built-on" tab), not a dot. Direct value ports are
+        // a coloured box (blue = in, green = out) with an arrow; a reference/pointer port (the passed object may be
+        // modified in place) is neutral — a WHITE box with a ring, no in/out arrow.
+        bool isRef = port.Convention is PassingConvention.Reference or PassingConvention.Pointer;
+        var glyph = new TextBlock
         {
-            Width = PortRadius * 2, Height = PortRadius * 2,
-            Fill = new SolidColorBrush(isInput ? Color.FromRgb(0x42, 0xA5, 0xF5) : Color.FromRgb(0x66, 0xBB, 0x6A)),
-            Stroke = Brushes.White, StrokeThickness = 1.5,
-            Cursor = new Cursor(StandardCursorType.Cross),
+            Text = isRef ? "◯" : "▸",
+            FontSize = 11, FontWeight = FontWeight.Bold, IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Foreground = isRef ? new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)) : Brushes.White,
         };
-        ToolTip.SetTip(dot, BuildPortTooltip(port));
-        dot.ZIndex = 5;
-        _canvas!.Children.Add(dot);
-        _portDots[key] = dot;
+        var box = new Border
+        {
+            Width = PortRadius * 2, Height = PortRadius * 2, CornerRadius = new(3),
+            Background = isRef ? Brushes.White : new SolidColorBrush(isInput ? Color.FromRgb(0x42, 0xA5, 0xF5) : Color.FromRgb(0x66, 0xBB, 0x6A)),
+            BorderBrush = Brushes.White, BorderThickness = new(1.5),
+            Child = glyph, Cursor = new Cursor(StandardCursorType.Cross), ZIndex = 5,
+        };
+        ToolTip.SetTip(box, BuildPortTooltip(port));
+        _canvas!.Children.Add(box);
+        _portDots[key] = box;
 
-        dot.PointerPressed += (_, e) =>
+        // Name label OUTSIDE the card so it never overwrites card content: input labels sit to the LEFT of the box
+        // (right-aligned within a fixed width — no measuring needed), output labels to the RIGHT (left-aligned).
+        var label = new TextBlock { Text = port.Name, FontSize = 10, Opacity = 0.85, IsHitTestVisible = false, ZIndex = 5 };
+        if (isInput) { label.Width = PortLabelW; label.TextAlignment = TextAlignment.Right; }
+        Ui.Theme(label, TextBlock.ForegroundProperty, "ContentTextBrush");
+        _canvas!.Children.Add(label);
+        _portLabels[key] = label;
+
+        box.PointerPressed += (_, e) =>
         {
             if (!_connectMode) return;
             HandlePortClick(entityId, port.Id, port.Direction);
             e.Handled = true;
         };
-        return dot;
+        return box;
     }
 
     static string BuildPortTooltip(CodePort port)
@@ -1174,10 +1214,10 @@ public class CodeBoardWindow : Window
 
     void HandlePortClick(string entityId, string portId, PortDirection direction)
     {
-        // A connection starts at an output port; arming it lights up the valid targets across the board.
+        // Arm from ANY port (a data wire only completes on an output→input pair; a TYPE LINK can start from any port
+        // and complete on a matching type card — see TryTypeLink). Arming lights up the valid targets.
         if (_connectFromEntityId is null)
         {
-            if (direction != PortDirection.Output) return;
             _connectFromEntityId = entityId;
             _connectFromPortId   = portId;
             EnsureRubberBand();
@@ -1186,9 +1226,10 @@ public class CodeBoardWindow : Window
         }
 
         if (entityId == _connectFromEntityId) { CancelConnect(); return; }   // back on the source → cancel
-        if (direction != PortDirection.Input) return;                       // must land on an input
+        if (direction != PortDirection.Input) return;                       // a wire must land on an input
 
         var src = FindPort(_connectFromEntityId!, _connectFromPortId!);
+        if (src is null || src.Direction != PortDirection.Output) { CancelConnect(); return; }   // wires start at an output
         var dst = FindPort(entityId, portId);
         // Only an exact match wires up — the red/amber ✕ already shows why the others can't.
         if (src is null || dst is null || PortMatchOf(src, dst) != PortMatch.Exact) return;
@@ -1197,6 +1238,35 @@ public class CodeBoardWindow : Window
         _boardData.Relations.Add(rel);
         Save();
         RenderRelation(rel);
+        CancelConnect();
+    }
+
+    // A type link: the armed port → a TYPE card whose name matches the port's data type. Dashed, no arrow, pure
+    // documentation ("this port is of this type"). Only created when the names match; otherwise the arm is dropped.
+    void TryTypeLink(string targetEntityId)
+    {
+        var src = FindPort(_connectFromEntityId!, _connectFromPortId!);
+        if (src is null || targetEntityId == _connectFromEntityId || !_entities.TryGetValue(targetEntityId, out var target))
+        { CancelConnect(); return; }
+
+        bool isType = target.EntityType is CodeEntityType.Class or CodeEntityType.Struct
+                                        or CodeEntityType.Interface or CodeEntityType.Enum;
+        if (isType && string.Equals(NormType(src.DataType), target.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            bool exists = _boardData.Relations.Any(r => r.IsTypeLink
+                && r.FromId == _connectFromEntityId && r.FromPortId == _connectFromPortId && r.ToId == targetEntityId);
+            if (!exists)
+            {
+                var rel = new CodeRelation
+                {
+                    FromId = _connectFromEntityId!, FromPortId = _connectFromPortId!, ToId = targetEntityId, ToPortId = "",
+                    IsTypeLink = true, LineStyle = BoardLineStyle.Dashed, HasArrow = false,
+                };
+                _boardData.Relations.Add(rel);
+                Save();
+                RenderRelation(rel);
+            }
+        }
         CancelConnect();
     }
 
@@ -1210,7 +1280,36 @@ public class CodeBoardWindow : Window
     }
 
     CodePort? FindPort(string entityId, string portId) =>
-        _entities.TryGetValue(entityId, out var e) ? e.Ports.FirstOrDefault(p => p.Id == portId) : null;
+        _entities.TryGetValue(entityId, out var e) ? EffectivePorts(e).FirstOrDefault(p => p.Id == portId) : null;
+
+    // The ports a card actually exposes as connectable dots: its own (manual) ports, plus — for an OBJECT — one
+    // input AND one output data port per public field of its class (strictly output→input wiring needs both sides).
+    // Field-port ids are derived from the field name so connections survive re-renders.
+    IEnumerable<CodePort> EffectivePorts(CodeEntity e)
+    {
+        foreach (var p in e.Ports) yield return p;
+        if (e.EntityType == CodeEntityType.Object && !string.IsNullOrEmpty(e.InstanceOfId)
+            && _entities.TryGetValue(e.InstanceOfId, out var cls))
+        {
+            foreach (var f in cls.Fields.Where(f => f.Visibility == CodeVisibility.Public))
+            {
+                yield return new CodePort { Id = "fld:in:"  + f.Name, Name = f.Name, DataType = f.DataType, Direction = PortDirection.Input };
+                yield return new CodePort { Id = "fld:out:" + f.Name, Name = f.Name, DataType = f.DataType, Direction = PortDirection.Output };
+            }
+            // Accessors: a getter (returns a value) is an OUTPUT port, a setter (takes a value) is an INPUT port.
+            foreach (var m in cls.Methods)
+            {
+                var nm = m.Name ?? "";
+                // Name the port after the METHOD (GetITest / SetITest) so an accessor is visibly distinct from a
+                // raw public field (which shows the bare field name).
+                if (nm.StartsWith("get", System.StringComparison.OrdinalIgnoreCase) && nm.Length > 3
+                    && !string.IsNullOrWhiteSpace(m.ReturnType) && m.ReturnType.Trim() is not "void")
+                    yield return new CodePort { Id = "mget:" + nm, Name = nm, DataType = m.ReturnType, Direction = PortDirection.Output };
+                else if (nm.StartsWith("set", System.StringComparison.OrdinalIgnoreCase) && nm.Length > 3 && m.Parameters.Count > 0)
+                    yield return new CodePort { Id = "mset:" + nm, Name = nm, DataType = m.Parameters[0].DataType, Direction = PortDirection.Input };
+            }
+        }
+    }
 
     static string NormType(string t) => (t ?? "").Trim().TrimEnd('*', '&', ' ');
 
@@ -1248,7 +1347,7 @@ public class CodeBoardWindow : Window
             switch (PortMatchOf(src, port))
             {
                 case PortMatch.Exact:
-                    dot.Stroke = Brushes.LimeGreen; dot.StrokeThickness = 3; dot.Opacity = 1;
+                    dot.BorderBrush = Brushes.LimeGreen; dot.BorderThickness = new(3); dot.Opacity = 1;
                     break;
                 case PortMatch.ConvMismatch:
                     dot.Opacity = 0.55; AddCross(dot, Color.FromRgb(0xF5, 0xC2, 0x00));  // amber
@@ -1260,8 +1359,8 @@ public class CodeBoardWindow : Window
         }
     }
 
-    // Places a small ✕ over a port dot (the marker is purely decorative — clicks pass through).
-    void AddCross(Ellipse dot, Color color)
+    // Places a small ✕ over a port box (the marker is purely decorative — clicks pass through).
+    void AddCross(Border dot, Color color)
     {
         var x = new TextBlock { Text = "✕", FontSize = 11, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(color), IsHitTestVisible = false };
         Canvas.SetLeft(x, Canvas.GetLeft(dot) + PortRadius - 5);
@@ -1276,7 +1375,7 @@ public class CodeBoardWindow : Window
     {
         foreach (var m in _dragMarkers) _canvas?.Children.Remove(m);
         _dragMarkers.Clear();
-        foreach (var dot in _portDots.Values) { dot.Stroke = Brushes.White; dot.StrokeThickness = 1.5; dot.Opacity = 1; }
+        foreach (var dot in _portDots.Values) { dot.BorderBrush = Brushes.White; dot.BorderThickness = new(1.5); dot.Opacity = 1; }
     }
 
     void EnsureRubberBand()
@@ -1307,12 +1406,15 @@ public class CodeBoardWindow : Window
 
     void RenderRelation(CodeRelation rel)
     {
+      try
+      {
         if (_relViews.TryGetValue(rel.Id, out var old))
             foreach (var v in old) _canvas!.Children.Remove(v);
         _relViews.Remove(rel.Id);
 
         var p1 = GetPortCenter(rel.FromId, rel.FromPortId);
-        var p2 = GetPortCenter(rel.ToId,   rel.ToPortId);
+        // A type link anchors to the target CARD (it has no target port); a normal relation to the target port.
+        var p2 = rel.IsTypeLink ? GetCardAnchor(rel.ToId) : GetPortCenter(rel.ToId, rel.ToPortId);
         if (p1 is null || p2 is null) return;
 
         var color   = ParseColor(rel.LineColor);
@@ -1331,15 +1433,47 @@ public class CodeBoardWindow : Window
             _canvas!.Children.Add(line); visuals.Add(line);
         }
 
-        // Fat transparent hit-zone for right-click delete.
-        var hit = new Line { StartPoint = p1.Value, EndPoint = p2.Value, Stroke = Brushes.Transparent, StrokeThickness = 12, Cursor = new Cursor(StandardCursorType.Hand) };
-        hit.ZIndex = 3;
         var capRel = rel;
-        hit.PointerPressed += (_, e) =>
+        // Per-segment hit-zones follow the bent path: left-click selects the connection (shows reroute handles),
+        // right-click opens the menu (insert a reroute node here / delete the connection).
+        for (int s = 0; s < points.Count - 1; s++)
         {
-            if (e.GetCurrentPoint(hit).Properties.IsRightButtonPressed) { ShowRelationContextMenu(capRel, hit); e.Handled = true; }
-        };
-        _canvas!.Children.Add(hit); visuals.Add(hit);
+            int seg = s;
+            var hit = new Line { StartPoint = points[s], EndPoint = points[s + 1], Stroke = Brushes.Transparent,
+                                 StrokeThickness = 12, Cursor = new Cursor(StandardCursorType.Hand), ZIndex = 3 };
+            hit.PointerPressed += (_, e) =>
+            {
+                var pt = e.GetCurrentPoint(_canvas).Properties;
+                if (pt.IsRightButtonPressed) { ShowRelationContextMenu(capRel, hit, seg, e.GetPosition(_canvas)); e.Handled = true; }
+                else if (pt.IsLeftButtonPressed) { SelectRelation(capRel.Id); e.Handled = true; }
+            };
+            _canvas!.Children.Add(hit); visuals.Add(hit);
+        }
+
+        // Reroute handles: draggable squares at each waypoint, shown ONLY while this connection is selected.
+        if (rel.Id == _selectedRel)
+            foreach (var wp in rel.Waypoints)
+            {
+                var capWp = wp;
+                var h = new Rectangle
+                {
+                    Width = WpHandle, Height = WpHandle, Fill = brush, Stroke = Brushes.White, StrokeThickness = 1.5,
+                    Cursor = new Cursor(StandardCursorType.SizeAll), ZIndex = 6,
+                };
+                Canvas.SetLeft(h, wp.X - WpHandle / 2); Canvas.SetTop(h, wp.Y - WpHandle / 2);
+                h.PointerPressed += (_, e) =>
+                {
+                    var pt = e.GetCurrentPoint(_canvas).Properties;
+                    if (pt.IsRightButtonPressed) { ShowWaypointContextMenu(capRel, capWp, h); e.Handled = true; }
+                    else if (pt.IsLeftButtonPressed)
+                    {
+                        _dragWpRel = capRel; _dragWp = capWp;
+                        e.Pointer.Capture(_canvas);   // capture on the canvas so re-rendering the handle won't drop the drag
+                        e.Handled = true;
+                    }
+                };
+                _canvas!.Children.Add(h); visuals.Add(h);
+            }
 
         if (rel.HasArrow)
         {
@@ -1349,6 +1483,8 @@ public class CodeBoardWindow : Window
         }
 
         _relViews[rel.Id] = visuals;
+      }
+      catch { /* a malformed relation must never crash/hang the board */ }
     }
 
     Point? GetPortCenter(string entityId, string portId)
@@ -1356,6 +1492,16 @@ public class CodeBoardWindow : Window
         var key = $"{entityId}:{portId}";
         if (!_portDots.TryGetValue(key, out var dot)) return null;
         return new Point(Canvas.GetLeft(dot) + PortRadius, Canvas.GetTop(dot) + PortRadius);
+    }
+
+    // The centre of an entity's card — the anchor a type link points at (the type entity has no port).
+    Point? GetCardAnchor(string entityId)
+    {
+        if (!_cards.TryGetValue(entityId, out var card)) return null;
+        double x = Canvas.GetLeft(card), y = Canvas.GetTop(card);
+        double w = card.Bounds.Width  > 0 ? card.Bounds.Width  : DefaultCardW;
+        double h = card.Bounds.Height > 0 ? card.Bounds.Height : 80;
+        return new Point(x + w / 2, y + h / 2);
     }
 
     void UpdateRelationsForEntity(string entityId)
@@ -1413,6 +1559,7 @@ public class CodeBoardWindow : Window
 
         if (_connectMode) return;
 
+        SelectRelation(null);   // clicking empty canvas also drops a selected connection (hides its reroute handles)
         _selectedIds.Clear();
         _selectionAnchor = null;
         RefreshSelectionVisuals();
@@ -1425,6 +1572,17 @@ public class CodeBoardWindow : Window
     void Canvas_PointerMoved(object? sender, PointerEventArgs e)
     {
         _mousePos = e.GetPosition(_canvas);   // remembered for paste-at-cursor
+
+        // Dragging a reroute node: move the waypoint (snapped) and re-draw the connection live.
+        if (_dragWp is not null && _dragWpRel is not null)
+        {
+            var m = e.GetPosition(_canvas);
+            _dragWp.X = _boardData.SnapToGrid && _boardData.GridSize >= 1 ? Snap(m.X) : m.X;
+            _dragWp.Y = _boardData.SnapToGrid && _boardData.GridSize >= 1 ? Snap(m.Y) : m.Y;
+            RenderRelation(_dragWpRel);
+            return;
+        }
+
         if (_connectMode && _connectFromEntityId is not null && _rubberBand is not null)
         {
             if (GetPortCenter(_connectFromEntityId, _connectFromPortId!) is { } c) _rubberBand.StartPoint = c;
@@ -1463,6 +1621,15 @@ public class CodeBoardWindow : Window
 
     void Canvas_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_dragWp is not null)
+        {
+            _dragWp = null; _dragWpRel = null;
+            e.Pointer.Capture(null);
+            Save();
+            e.Handled = true;
+            return;
+        }
+
         if (_panning)
         {
             _panning = false;
@@ -1520,13 +1687,6 @@ public class CodeBoardWindow : Window
             cm.Items.Add(flowMi);
         }
 
-        if (_onExport is not null)
-        {
-            var exportMi = new MenuItem { Header = Loc.S("Code_ExportThis") };
-            exportMi.Click += (_, _) => _onExport!.Invoke(new[] { entity });
-            cm.Items.Add(exportMi);
-        }
-
         cm.Items.Add(new Separator());
 
         if (_boardData.Positions.TryGetValue(entity.Id, out var pos))
@@ -1564,19 +1724,84 @@ public class CodeBoardWindow : Window
         OpenMenu(cm, anchor);
     }
 
-    void ShowRelationContextMenu(CodeRelation rel, Control anchor)
+    void ShowRelationContextMenu(CodeRelation rel, Control anchor, int segIndex, Point at)
     {
         var cm = new ContextMenu();
-        var delMi = new MenuItem { Header = Loc.S("Code_DeleteConnection") };
-        delMi.Click += (_, _) =>
+
+        // Insert a reroute node into the clicked segment (snapped to grid) — the line then bends through it.
+        var addMi = new MenuItem { Header = Loc.S("Code_AddReroute") };
+        addMi.Click += (_, _) =>
         {
-            _boardData.Relations.Remove(rel);
+            var wp = new BoardWaypoint { X = Snap(at.X), Y = Snap(at.Y) };
+            rel.Waypoints.Insert(Math.Clamp(segIndex, 0, rel.Waypoints.Count), wp);
             Save();
-            if (_relViews.TryGetValue(rel.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
-            _relViews.Remove(rel.Id);
+            _selectedRel = rel.Id;
+            RenderRelation(rel);
         };
+        cm.Items.Add(addMi);
+
+        var delMi = new MenuItem { Header = Loc.S("Code_DeleteConnection") };
+        delMi.Click += (_, _) => RemoveRelation(rel);
         cm.Items.Add(delMi);
         OpenMenu(cm, anchor);
+    }
+
+    void RemoveRelation(CodeRelation rel)
+    {
+        _boardData.Relations.Remove(rel);
+        if (_selectedRel == rel.Id) _selectedRel = null;
+        Save();
+        if (_relViews.TryGetValue(rel.Id, out var vs)) foreach (var v in vs) _canvas!.Children.Remove(v);
+        _relViews.Remove(rel.Id);
+    }
+
+    // Selects a connection (shows its reroute handles) — or clears the selection (id = null). Re-renders both the
+    // previously and newly selected relation so their handles appear/disappear.
+    void SelectRelation(string? id)
+    {
+        if (_selectedRel == id) return;
+        var prev = _selectedRel;
+        _selectedRel = id;
+        if (id is not null && _selectedIds.Count > 0) { _selectedIds.Clear(); RefreshSelectionVisuals(); }
+        if (prev is not null && _boardData.Relations.FirstOrDefault(r => r.Id == prev) is { } pr) RenderRelation(pr);
+        if (id   is not null && _boardData.Relations.FirstOrDefault(r => r.Id == id)   is { } nr) RenderRelation(nr);
+    }
+
+    void ShowWaypointContextMenu(CodeRelation rel, BoardWaypoint wp, Control anchor)
+    {
+        var cm = new ContextMenu();
+        var delMi = new MenuItem { Header = Loc.S("Code_RemoveReroute") };
+        // Removal is allowed ONLY when the line runs straight through the node (collinear with its neighbours), so
+        // deleting it can never silently change the routing — bend it back onto the line first to remove it.
+        delMi.IsEnabled = IsWaypointStraight(rel, wp);
+        delMi.Click += (_, _) => { rel.Waypoints.Remove(wp); Save(); RenderRelation(rel); };
+        cm.Items.Add(delMi);
+        OpenMenu(cm, anchor);
+    }
+
+    // True if the waypoint is (near-)collinear with its neighbours — the line is "straight through" it.
+    bool IsWaypointStraight(CodeRelation rel, BoardWaypoint wp)
+    {
+        int idx = rel.Waypoints.IndexOf(wp);
+        if (idx < 0) return false;
+        var pts = RelationPoints(rel);
+        if (pts is null) return true;
+        Point a = pts[idx], b = pts[idx + 1], c = pts[idx + 2];   // before / node / after
+        double cross = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+        double len   = Math.Max(1, Math.Sqrt((c.X - a.X) * (c.X - a.X) + (c.Y - a.Y) * (c.Y - a.Y)));
+        return Math.Abs(cross) / len < 4;   // within ~4px of the straight line A→C
+    }
+
+    // The full poly-line points of a relation: from-port, its waypoints, to-port (or target card for a type link).
+    List<Point>? RelationPoints(CodeRelation rel)
+    {
+        var p1 = GetPortCenter(rel.FromId, rel.FromPortId);
+        var p2 = rel.IsTypeLink ? GetCardAnchor(rel.ToId) : GetPortCenter(rel.ToId, rel.ToPortId);
+        if (p1 is null || p2 is null) return null;
+        var pts = new List<Point> { p1.Value };
+        foreach (var w in rel.Waypoints) pts.Add(new Point(w.X, w.Y));
+        pts.Add(p2.Value);
+        return pts;
     }
 
     // ── Add entity ─────────────────────────────────────────────────────────
@@ -1779,6 +2004,7 @@ public class CodeBoardWindow : Window
         {
             _canvas!.Children.Remove(_portDots[key]);
             _portDots.Remove(key);
+            if (_portLabels.TryGetValue(key, out var lbl)) { _canvas.Children.Remove(lbl); _portLabels.Remove(key); }
         }
         if (_boardData.Positions.TryGetValue(entity.Id, out var pos))
         {

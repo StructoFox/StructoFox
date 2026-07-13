@@ -1955,7 +1955,7 @@ public partial class MainWindow : Window
     {
         if (_project is null) return;
         DiagramWindows.OpenOrActivate(DiagramWindows.BoardId(_project, board.Id),
-            () => new CodeBoardWindow(_project, board, null, ents => new ExportWindow(_project, ents, board.Name).Show()));
+            () => new CodeBoardWindow(_project, board, null));
     }, "OpenBoard");
 
     // ── Export section ─────────────────────────────────────────────────────

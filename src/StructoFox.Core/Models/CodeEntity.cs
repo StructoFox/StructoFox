@@ -119,6 +119,10 @@ public class CodeRelation
     public string              FromPortId { get; set; } = "";
     public string              ToId       { get; set; } = "";
     public string              ToPortId   { get; set; } = "";
+    /// <summary>A "type link": a dashed line from a port to a TYPE entity (Class/Struct/Interface/Enum) whose name
+    /// matches the port's data type — pure documentation ("this port is of this type"), not a data wire. ToPortId is
+    /// empty; the line anchors to the target card, not a port.</summary>
+    public bool                IsTypeLink { get; set; } = false;
     public string              Caption    { get; set; } = "";
     public BoardLineStyle      LineStyle  { get; set; } = BoardLineStyle.Solid;
     public string              LineColor  { get; set; } = "#2196F3";

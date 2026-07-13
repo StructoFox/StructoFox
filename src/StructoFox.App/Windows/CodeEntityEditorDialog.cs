@@ -494,7 +494,7 @@ public class CodeEntityEditorDialog : Window
             fieldsSection.IsVisible   = isClassish;
             methodsSection.IsVisible  = isClassish || t == CodeEntityType.Interface;
             enumSection.IsVisible     = t == CodeEntityType.Enum;
-            portsSection.IsVisible    = t == CodeEntityType.Function;
+            portsSection.IsVisible    = t is CodeEntityType.Function or CodeEntityType.Object or CodeEntityType.Class or CodeEntityType.Struct;
             varsSection.IsVisible     = t == CodeEntityType.Function;
         }
         typeCombo.SelectionChanged += (_, _) => UpdateSections();
