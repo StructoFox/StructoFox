@@ -174,6 +174,7 @@ public sealed class TextItem : PrintItem
     public double        FontSize   { get; set; } = 14;
     public string        Align      { get; set; } = "Left";   // Left / Center / Right
     public double        Width      { get; set; } = 240;       // wrap width (device-independent px)
+    public double        LineSpacing { get; set; } = 1.0;      // line-height multiplier (1 = tight, per box)
     public TextListStyle List       { get; set; } = TextListStyle.None;
     public string        Color      { get; set; } = "#000000";
     public bool          Bold       { get; set; }
@@ -209,6 +210,16 @@ public sealed class TextRun
     public bool    Italic    { get; set; }
     public bool    Underline { get; set; }
     public bool    Strike    { get; set; }
+    public double? Size      { get; set; }   // null = the box's base font size
+    public bool    Super     { get; set; }   // superscript (mutually exclusive with Sub)
+    public bool    Sub       { get; set; }   // subscript
+
+    public TextRun Clone() => new() { Text = Text, Fg = Fg, Marker = Marker, Bold = Bold, Italic = Italic,
+        Underline = Underline, Strike = Strike, Size = Size, Super = Super, Sub = Sub };
+
+    /// <summary>True if two runs carry the same formatting (used to merge adjacent runs; Text is ignored).</summary>
+    public bool SameFormat(TextRun o) => Fg == o.Fg && Marker == o.Marker && Bold == o.Bold && Italic == o.Italic
+        && Underline == o.Underline && Strike == o.Strike && Size == o.Size && Super == o.Super && Sub == o.Sub;
 }
 
 /// <summary>A standalone legend / caption table (like a PAP's), movable and scalable on its own.</summary>

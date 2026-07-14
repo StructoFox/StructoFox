@@ -237,7 +237,7 @@ public class PrintComposerWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_savedName)) { await SaveAs(); return; }
         PrintDocumentService.Save(_projFolder, _doc, _savedName);
-        _savedName = _doc.Name; Notify("Saved"); UpdateTitle();
+        _savedName = _doc.Name; Notify(Loc.S("Pc_Saved")); UpdateTitle();
     }
 
     // Save as: ask for a name, confirm before overwriting a different existing document, then save a new file.
@@ -254,7 +254,7 @@ public class PrintComposerWindow : Window
         }
         _doc.Name = n;
         PrintDocumentService.Save(_projFolder, _doc);   // a new file under the new name (Save As = copy, no move)
-        _savedName = n; Notify("Saved"); UpdateTitle();
+        _savedName = n; Notify(Loc.S("Pc_Saved")); UpdateTitle();
     }
 
     // ── Export ───────────────────────────────────────────────────────────────
@@ -916,66 +916,87 @@ public class PrintComposerWindow : Window
     // indents (leading space/tab) are continuations — no marker, aligned under the text.
     Control BuildTextVisual(TextItem txt)
     {
-        double boxW = txt.Width * _viewScale;
+        EnsureRunsMigrated(txt);
+        double scale = _viewScale;
+        double boxW  = txt.Width * scale;
         var align = txt.Align == "Center" ? TextAlignment.Center : txt.Align == "Right" ? TextAlignment.Right : TextAlignment.Left;
         var fam   = string.IsNullOrEmpty(txt.FontFamily) ? FontFamily.Default : new FontFamily(txt.FontFamily);
+        var defFg = ParseBrush(txt.Color, Brushes.Black);
+        double baseFs = txt.FontSize;
 
-        TextBlock Styled(string s, bool wrap) => new()
+        // A line's height follows its LARGEST font (so an enlarged word pushes the next line down), scaled by the
+        // spacing factor and floored at the glyph height so lines can tighten but never overlap.
+        double LineHOf(double fs) => Math.Max(fs * scale * 1.3 * txt.LineSpacing, fs * scale * 1.18);
+        double MaxFsIn(int a, int b)
         {
-            Text = s, TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
-            FontFamily = fam, FontSize = txt.FontSize * _viewScale,
-            FontWeight = txt.Bold ? FontWeight.Bold : FontWeight.Normal,
-            FontStyle = txt.Italic ? FontStyle.Italic : FontStyle.Normal,
-            Foreground = ParseBrush(txt.Color, Brushes.Black),
-            TextDecorations = Decorations(txt.Underline, txt.Strike),
-        };
+            double mx = baseFs; int pos = 0;
+            foreach (var r in txt.Runs) { int s = Math.Max(a, pos), e = Math.Min(b, pos + r.Text.Length); if (e > s && r.Size is { } sz && sz > mx) mx = sz; pos += r.Text.Length; }
+            return mx;
+        }
 
-        // Each line (Enter) renders TIGHT — no gap between consecutive lines. A BLANK line (Enter twice) is a
-        // paragraph break: a small vertical gap. Per line: leading whitespace = indent (tab = 4 cols), then a
-        // typed marker (1. / a) / - / *) on the rest — leading spaces nest it (marker + text shift right together).
-        double para = txt.FontSize * _viewScale * 0.55;   // gap for a blank line
-        var lines = txt.PlainText.Replace("\r\n", "\n").Split('\n');
-        var parsed = lines.Select(l =>
+        // A plain TextBlock (list markers aren't per-run formatted).
+        TextBlock Styled(string s, double lineH) { var tb = new TextBlock { Text = s, FontFamily = fam, FontSize = baseFs * scale, Foreground = defFg, LineHeight = lineH }; return tb; }
+        // A TextBlock built from the run-slice covering one line body's character range [a,b).
+        TextBlock Body(int a, int b, double width, double lineH)
         {
-            // Leading whitespace → indent, directly proportional to what was typed (a tab = 4 spaces). So even a
-            // single leading space already nests — no coarse level rounding that swallows small indents.
-            int cols = 0, i = 0;
-            for (; i < l.Length; i++) { if (l[i] == ' ') cols++; else if (l[i] == '\t') cols += 4; else break; }
-            return (blank: string.IsNullOrWhiteSpace(l), cols, mark: DetectMarker(l[i..]), plain: l[i..]);
-        }).ToList();
+            var tb = new TextBlock { TextWrapping = TextWrapping.Wrap, FontFamily = fam, FontSize = baseFs * scale,
+                                     Foreground = defFg, Width = width, TextAlignment = align, LineHeight = lineH };
+            foreach (var inl in RichText.ToInlines(RichText.Slice(txt.Runs, a, b), baseFs, scale, defFg)) tb.Inlines!.Add(inl);
+            return tb;
+        }
 
-        double gap     = txt.FontSize * _viewScale * 0.45;   // small space after the marker, before the text
-        double perCol  = txt.FontSize * _viewScale * 0.9;    // indent per leading space (marker AND text shift)
+        double para   = baseFs * scale * 0.55;   // blank line = paragraph gap
+        double gap     = baseFs * scale * 0.45;   // marker → text gap
+        double perCol  = baseFs * scale * 0.9;    // indent per leading space
+        var plain = RichText.Plain(txt.Runs).Replace("\r\n", "\n").Replace("\r", "\n");
+        var lines = plain.Split('\n');
 
         var panel = new StackPanel { Width = boxW };
-        foreach (var p in parsed)
+        int lineStart = 0;
+        foreach (var l in lines)
         {
-            if (p.blank) { panel.Children.Add(new Border { Height = para }); continue; }
-            double indent = p.cols * perCol;
-            double avail = Math.Max(20, boxW - indent);
+            if (string.IsNullOrWhiteSpace(l)) { panel.Children.Add(new Border { Height = para }); lineStart += l.Length + 1; continue; }
+            int cols = 0, i = 0;
+            for (; i < l.Length; i++) { if (l[i] == ' ') cols++; else if (l[i] == '\t') cols += 4; else break; }
+            var mark = DetectMarker(l[i..]);
+            string bodyStr = mark?.rest ?? l[i..];     // a suffix of l (indent/marker trimmed from the front)
+            int bodyStart = lineStart + (l.Length - bodyStr.Length);
+            int bodyEnd   = lineStart + l.Length;
+            double indent = cols * perCol;
+            double avail  = Math.Max(20, boxW - indent);
+            double lineH  = LineHOf(MaxFsIn(bodyStart, bodyEnd));   // height driven by this line's biggest font
             Control unit;
-            if (p.mark is null)
-            {
-                var tb = Styled(p.plain, true); tb.Width = avail; tb.TextAlignment = align;
-                unit = tb;
-            }
+            if (mark is null) unit = Body(bodyStart, bodyEnd, avail, lineH);
             else
             {
-                // Marker column is Auto (just the marker's width) + a small gap; the text column wraps, so a wrapped
-                // line keeps a hanging indent under the text — but the marker→text gap stays tight.
-                var row = new Grid { ColumnDefinitions = new("Auto,*"), Width = avail };
-                var mk = Styled(p.mark.Value.marker, false); mk.VerticalAlignment = VerticalAlignment.Top; mk.Margin = new(0, 0, gap, 0);
-                var bd = Styled(p.mark.Value.rest, true); bd.TextAlignment = align; Grid.SetColumn(bd, 1);
-                row.Children.Add(mk); row.Children.Add(bd);
-                unit = row;
+                // A wrapping TextBlock in a Grid '*' column measures against infinity and won't wrap (it gets clipped
+                // instead), so measure the marker and give the body an EXPLICIT remaining width so it wraps properly.
+                var mk = Styled(mark.Value.marker, lineH); mk.VerticalAlignment = VerticalAlignment.Top; mk.Margin = new(0, 0, gap, 0);
+                mk.Measure(Avalonia.Size.Infinity);
+                double bodyW = Math.Max(20, avail - mk.DesiredSize.Width - gap);
+                var bd = Body(bodyStart, bodyEnd, bodyW, lineH);
+                unit = new StackPanel { Orientation = Orientation.Horizontal, Width = avail, Children = { mk, bd } };
             }
             unit.HorizontalAlignment = HorizontalAlignment.Left;
             unit.Margin = new(indent, 0, 0, 0);
             panel.Children.Add(unit);
+            lineStart += l.Length + 1;
         }
-        Control content = string.IsNullOrEmpty(txt.PlainText)
-            ? new TextBlock { Text = " ", Width = boxW } : panel;
+        Control content = string.IsNullOrEmpty(plain) ? new TextBlock { Text = " ", Width = boxW } : panel;
         return BoxAround(content, txt.Background, txt.BorderColor, txt.BorderThickness, txt.Padding);
+    }
+
+    // Backward-compat: old text boxes carried box-level Bold/Italic/Underline/Strike with a single plain run. Fold
+    // those into the runs (once) so the run model is authoritative, then clear the box-level flags.
+    static void EnsureRunsMigrated(TextItem t)
+    {
+        if (t.Runs.Count == 0) t.Runs.Add(new TextRun { Text = "" });
+        bool runFmt = t.Runs.Any(r => r.Bold || r.Italic || r.Underline || r.Strike || r.Fg != null || r.Marker != null || r.Size != null || r.Super || r.Sub);
+        if (!runFmt && (t.Bold || t.Italic || t.Underline || t.Strike))
+        {
+            foreach (var r in t.Runs) { r.Bold = t.Bold; r.Italic = t.Italic; r.Underline = t.Underline; r.Strike = t.Strike; }
+            t.Bold = t.Italic = t.Underline = t.Strike = false;
+        }
     }
 
     // Wraps text content in a Border carrying the optional fill / border / padding (all scaled to the view).
@@ -1047,7 +1068,7 @@ public class PrintComposerWindow : Window
     static Control RenderPlaceholder() => new Border
     {
         Width = 140, Height = 60, BorderBrush = Brushes.OrangeRed, BorderThickness = new(1),
-        Child = new TextBlock { Text = "(nothing to render)", Margin = new(8), Foreground = Brushes.OrangeRed },
+        Child = new TextBlock { Text = Loc.S("Pc_NothingToRender"), Margin = new(8), Foreground = Brushes.OrangeRed },
     };
 
     // A decoration block as a LIVE control (text stays crisp at any scale), scaled steplessly via a layout transform.
@@ -1065,30 +1086,30 @@ public class PrintComposerWindow : Window
         var list = new List<MenuItem>();
         if (item is LabelItem or TextItem)
         {
-            var editTxt = new MenuItem { Header = "Edit…" }; editTxt.Click += async (_, _) => await EditItem(item);
+            var editTxt = new MenuItem { Header = Loc.S("Pc_Edit") }; editTxt.Click += async (_, _) => await EditItem(item);
             list.Add(editTxt);
         }
         else
         {
-            var bigger  = new MenuItem { Header = "Bigger" };  bigger.Click  += (_, _) => Rescale(item, 1.25);
-            var smaller = new MenuItem { Header = "Smaller" }; smaller.Click += (_, _) => Rescale(item, 0.8);
-            var scaleTo = new MenuItem { Header = "Scale…" };  scaleTo.Click += async (_, _) => await ScaleDialog(item);
-            var reset   = new MenuItem { Header = "Reset size (100%)" }; reset.Click += (_, _) => SetScale(item, 1.0);
+            var bigger  = new MenuItem { Header = Loc.S("Pc_Bigger") };  bigger.Click  += (_, _) => Rescale(item, 1.25);
+            var smaller = new MenuItem { Header = Loc.S("Pc_Smaller") }; smaller.Click += (_, _) => Rescale(item, 0.8);
+            var scaleTo = new MenuItem { Header = Loc.S("Pc_ScaleDots") };  scaleTo.Click += async (_, _) => await ScaleDialog(item);
+            var reset   = new MenuItem { Header = Loc.S("Pc_ResetSize") }; reset.Click += (_, _) => SetScale(item, 1.0);
             list.Add(bigger); list.Add(smaller); list.Add(scaleTo); list.Add(reset);
         }
         if (item is DiagramItem di)
         {
-            var update = new MenuItem { Header = "Update" }; update.Click += (_, _) => { _diagramCache.Remove(item.Id); RenderPage(); };
-            var edit   = new MenuItem { Header = "Edit source" }; edit.Click += (_, _) => OpenSource(di);
+            var update = new MenuItem { Header = Loc.S("Pc_Update") }; update.Click += (_, _) => { _diagramCache.Remove(item.Id); RenderPage(); };
+            var edit   = new MenuItem { Header = Loc.S("Pc_EditSource") }; edit.Click += (_, _) => OpenSource(di);
             list.Add(update); list.Add(edit);
         }
         if (item is HeaderItem hdr)
         {
-            var edit = new MenuItem { Header = "Edit…" }; edit.Click += async (_, _) => await EditItem(item);
+            var edit = new MenuItem { Header = Loc.S("Pc_Edit") }; edit.Click += async (_, _) => await EditItem(item);
             var width = new MenuItem { Header = Loc.S("Pc_HeaderWidth") }; width.Click += async (_, _) => await HeaderWidthDialog(hdr);
             list.Add(edit); list.Add(width);   // page number is toggled in the header editor (checkbox)
         }
-        var del = new MenuItem { Header = "Delete" };
+        var del = new MenuItem { Header = Loc.S("Pc_Delete") };
         del.Click += (_, _) => { Page.Items.Remove(item); _diagramCache.Remove(item.Id); _selected.Remove(item.Id); RenderPage(); };
         list.Add(del);
         return list;
@@ -1107,7 +1128,7 @@ public class PrintComposerWindow : Window
     async Task ScaleDialog(PrintItem item)
     {
         var cur = ((int)Math.Round(item.Scale * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var s = await PromptDialog.Show(this, "Scale (%) — 100 = original", cur, "Scale");
+        var s = await PromptDialog.Show(this, Loc.S("Pc_ScalePrompt"), cur, Loc.S("Pc_ScaleTitle"));
         if (string.IsNullOrWhiteSpace(s)) return;
         s = s.Trim().TrimEnd('%').Trim().Replace(',', '.');
         if (double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pct) && pct > 0)
@@ -1134,7 +1155,7 @@ public class PrintComposerWindow : Window
     async Task AddDiagram()
     {
         var entries = DiagramRenderer.ListAvailable(_projFolder);
-        if (entries.Count == 0) { Notify("No diagrams found — draw a flowchart first"); return; }
+        if (entries.Count == 0) { Notify(Loc.S("Pc_NoDiagrams")); return; }
         var pick = await PickDiagram(entries);
         if (pick is not { } e) return;
 
@@ -1166,7 +1187,7 @@ public class PrintComposerWindow : Window
 
     async Task<DiagramRenderer.Entry?> PickDiagram(List<DiagramRenderer.Entry> entries)
     {
-        var dlg = new Window { Title = "Add diagram", Width = 380, Height = 460, CanResize = false,
+        var dlg = new Window { Title = Loc.S("Pc_AddDiagramTitle"), Width = 380, Height = 460, CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner };
         Ui.ThemeWindow(dlg);
         var listBox = new ListBox();
@@ -1196,8 +1217,8 @@ public class PrintComposerWindow : Window
         DiagramRenderer.Entry? result = null;
         void Accept() { if (listBox.SelectedIndex >= 0 && listBox.SelectedIndex < filtered.Count) { result = filtered[listBox.SelectedIndex]; dlg.Close(); } }
         listBox.DoubleTapped += (_, _) => Accept();
-        var ok = Ui.Btn("Add"); ok.Click += (_, _) => Accept();
-        var cancel = Ui.Btn("Cancel"); cancel.Click += (_, _) => dlg.Close();
+        var ok = Ui.Btn(Loc.S("Common_Add")); ok.Click += (_, _) => Accept();
+        var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.Click += (_, _) => dlg.Close();
         var filters = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(0, 0, 0, 10), Children = { papBtn, nsBtn } };
         var grid = new Grid { Margin = new(14), RowDefinitions = new("Auto,*,Auto") };
         Grid.SetRow(filters, 0); grid.Children.Add(filters);
@@ -1460,7 +1481,7 @@ public class PrintComposerWindow : Window
         var pr = Page.PrintablePx;            // place & size within the printable area (inside the margins)
         double maxW = pr.W;                   // default header max width = full printable width → long fields wrap
         var pieces = DiagramDecor.EnumeratePieces(title, style);
-        if (pieces.Count == 0) { Notify("Header is empty — enable title, info or a logo"); return; }
+        if (pieces.Count == 0) { Notify(Loc.S("Pc_HeaderEmpty")); return; }
 
         _selected.Clear();
         foreach (var (pos, ctrl) in pieces)
@@ -1521,6 +1542,7 @@ public class PrintComposerWindow : Window
     // text/background/border colours, border thickness — and, for a Text box, wrap width + alignment.
     async Task<bool> EditText(PrintItem item)
     {
+        if (item is TextItem rich) return await EditRichText(rich);   // text boxes use the selection-based rich editor
         bool isText = item is TextItem;
         string curText   = isText ? ((TextItem)item).PlainText : ((LabelItem)item).Text;
         string curFamily = isText ? ((TextItem)item).FontFamily : ((LabelItem)item).FontFamily;
@@ -1604,6 +1626,256 @@ public class PrintComposerWindow : Window
             tx.Color = textHex ?? "#000000"; tx.Background = bgHex; tx.BorderColor = bdHex; tx.BorderThickness = bw;
             if (alignBox is not null) tx.Align = alignBox.SelectedIndex == 1 ? "Center" : alignBox.SelectedIndex == 2 ? "Right" : "Left";
         }
+        return true;
+    }
+
+    // Rich text-box editor: plain typing + a selection-based formatting toolbar (Avalonia has no rich-text control),
+    // a live formatted PREVIEW, and box-level font/line-spacing/colour/border. Formatting is stored per TextRun and
+    // kept aligned to the characters as the text is edited. Font FAMILY stays per box.
+    async Task<bool> EditRichText(TextItem t)
+    {
+        EnsureRunsMigrated(t);
+        var runs = t.Runs.Select(r => r.Clone()).ToList();   // work on a copy; Cancel discards
+        string cur = RichText.Plain(runs).Replace("\r\n", "\n").Replace("\r", "\n");
+
+        var dlg = new Window { Title = Loc.S("Pc_TextBox"), Width = 820, MinWidth = 640, CanResize = true,
+            SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        Ui.ThemeWindow(dlg);
+
+        var textBox = new TextBox { Text = cur, AcceptsReturn = true, MinHeight = 190, TextWrapping = TextWrapping.Wrap,
+            HorizontalAlignment = HorizontalAlignment.Stretch };
+        ThemeInput(textBox);
+
+        var family = new ComboBox { MinWidth = 170 }; ThemeInput(family);
+        family.Items.Add(Loc.S("Pc_Default"));
+        foreach (var f in FontManager.Current.SystemFonts.Select(f => f.Name).Distinct().OrderBy(n => n)) family.Items.Add(f);
+        family.SelectedIndex = string.IsNullOrEmpty(t.FontFamily) ? 0 : Math.Max(0, family.Items.IndexOf(t.FontFamily));
+        var size   = new TextBox { Text = Num(t.FontSize), Width = 56 }; ThemeInput(size);
+        var lineSp = new TextBox { Text = Num(t.LineSpacing), Width = 56 }; ThemeInput(lineSp);
+        var alignBox = new ComboBox { MinWidth = 110 }; ThemeInput(alignBox);
+        foreach (var a in new[] { "Pc_AlignLeft", "Pc_AlignCenter", "Pc_AlignRight" }) alignBox.Items.Add(Loc.S(a));
+        alignBox.SelectedIndex = t.Align == "Center" ? 1 : t.Align == "Right" ? 2 : 0;
+
+        var textCol   = new ColorField(Loc.S("Pc_ColorText"));  SetColorField(textCol, t.Color, Colors.Black, false);
+        var backCol   = new ColorField(Loc.S("Pc_Background")); SetColorField(backCol, t.Background, Colors.White, true);
+        var borderCol = new ColorField(Loc.S("Pc_Border"));     SetColorField(borderCol, t.BorderColor, Colors.Black, true);
+        var borderW   = new TextBox { Text = Num(t.BorderThickness), Width = 56 }; ThemeInput(borderW);
+
+        // The preview mimics the printed result: the OUTER border is the page/canvas colour, the INNER border is the
+        // text box itself (its own background + border), so the box's optics show exactly as they will on the page.
+        var canvasBg = ParseBrush(Page.Background, Brushes.White);
+        var preview = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var previewInner = new Border { Child = preview, Padding = new(8) };
+        var previewBox = new Border { Child = previewInner, Padding = new(14), MinHeight = 190,
+            Background = canvasBg, BorderThickness = new(1),
+            VerticalAlignment = VerticalAlignment.Stretch };
+        Ui.Theme(previewBox, Border.BorderBrushProperty, "ControlBorderBrush");
+
+        // Clicking a toolbar button or the colour dialog moves focus off the editor and clears the live selection,
+        // so remember the last non-empty selection and fall back to it when the editor currently has none.
+        (int s, int e) lastSel = (0, 0);
+        (int s, int e) Sel()
+        {
+            int a = textBox.SelectionStart, b = textBox.SelectionEnd;
+            var cur = a <= b ? (a, b) : (b, a);
+            if (cur.Item2 > cur.Item1) { lastSel = cur; return cur; }
+            return lastSel;
+        }
+        var selSize = new TextBox { Text = "", Width = 46, PlaceholderText = "px" }; ThemeInput(selSize);
+        ToolTip.SetTip(selSize, Loc.S("Pc_SelSize"));
+        var selSizeBtn = Ui.Btn(Loc.S("Pc_ApplySize")); selSizeBtn.Focusable = false;
+        ToolTip.SetTip(selSizeBtn, Loc.S("Pc_SelSize"));
+
+        // Shows the selected text's font size (empty when the selection mixes sizes); not while the field is being typed in.
+        void SyncSelSize()
+        {
+            if (selSize.IsFocused) return;
+            int a0 = textBox.SelectionStart, b0 = textBox.SelectionEnd;
+            int s = Math.Min(a0, b0), e = Math.Max(a0, b0); if (e <= s) { selSize.Text = ""; return; }
+            double box = Math.Clamp(ParseNum(size.Text, t.FontSize), 4, 400);
+            double? common = null; bool mixed = false; int pos = 0;
+            foreach (var r in runs)
+            {
+                int a = Math.Max(s, pos), b = Math.Min(e, pos + r.Text.Length);
+                if (b > a) { double eff = r.Size is { } sz && sz > 0 ? sz : box; if (common is null) common = eff; else if (Math.Abs(common.Value - eff) > 0.001) mixed = true; }
+                pos += r.Text.Length;
+            }
+            selSize.Text = mixed || common is null ? "" : Num(common.Value);
+        }
+        void ApplySelSize() { var (s, e) = Sel(); if (e <= s) return; var v = ParseNum(selSize.Text, 0); RichText.Apply(runs, s, e, r => r.Size = v >= 4 ? v : (double?)null); Refresh(); }
+
+        // Three-state toggles so a button can show ON (whole selection), OFF (none), or indeterminate (mixed).
+        var bold = new ToggleButton { Content = "B", FontWeight = FontWeight.Bold, MinWidth = 32, IsThreeState = true };
+        var ital = new ToggleButton { Content = "I", FontStyle = FontStyle.Italic, MinWidth = 32, IsThreeState = true };
+        var undl = new ToggleButton { Content = "U", MinWidth = 32, IsThreeState = true };
+        var strk = new ToggleButton { Content = "S", MinWidth = 32, IsThreeState = true };
+        var sup  = new ToggleButton { Content = "x²", MinWidth = 34, IsThreeState = true };
+        var sub  = new ToggleButton { Content = "x₂", MinWidth = 34, IsThreeState = true };
+        foreach (var b in new Control[] { bold, ital, undl, strk, sup, sub }) ThemeInput(b);
+
+        bool AnyRun(int s, int e, Func<TextRun, bool> p)
+        {
+            int pos = 0;
+            foreach (var r in runs) { int a = Math.Max(s, pos), b = Math.Min(e, pos + r.Text.Length); if (b > a && p(r)) return true; pos += r.Text.Length; }
+            return false;
+        }
+        // Reflects the LIVE selection (not the remembered one) in each toggle: highlighted when the selection has the
+        // effect, dimmed when only part of it does (mixed), plain when none. We avoid the tri-state "indeterminate"
+        // visual because this theme renders it as unreadable white-on-light — a dimmed checked look reads far better.
+        void SyncButtons()
+        {
+            int a0 = textBox.SelectionStart, b0 = textBox.SelectionEnd;
+            int s = Math.Min(a0, b0), e = Math.Max(a0, b0);
+            void Set(ToggleButton btn, Func<TextRun, bool> p)
+            {
+                bool all = e > s && RichText.All(runs, s, e, p);
+                bool any = e > s && AnyRun(s, e, p);
+                btn.IsChecked = all || any;
+                btn.Opacity   = any && !all ? 0.55 : 1.0;
+            }
+            Set(bold, r => r.Bold); Set(ital, r => r.Italic); Set(undl, r => r.Underline);
+            Set(strk, r => r.Strike); Set(sup, r => r.Super); Set(sub, r => r.Sub);
+        }
+
+        selSizeBtn.Click += (_, _) => ApplySelSize();
+        selSize.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { ApplySelSize(); e.Handled = true; } };
+
+        textBox.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == TextBox.SelectionStartProperty || e.Property == TextBox.SelectionEndProperty)
+            {
+                int a = textBox.SelectionStart, b = textBox.SelectionEnd;
+                if (a != b) lastSel = a <= b ? (a, b) : (b, a);
+                SyncSelSize();   // reflect the selection's font size in the px field
+                SyncButtons();   // …and its effects in the toggle buttons
+            }
+        };
+
+        void Refresh()
+        {
+            preview.Inlines!.Clear();
+            preview.FontFamily = family.SelectedIndex <= 0 ? FontFamily.Default : new FontFamily(family.SelectedItem as string ?? "");
+            double bs = Math.Clamp(ParseNum(size.Text, t.FontSize), 4, 400);
+            preview.FontSize = bs;
+            preview.TextAlignment = alignBox.SelectedIndex == 1 ? TextAlignment.Center : alignBox.SelectedIndex == 2 ? TextAlignment.Right : TextAlignment.Left;
+            var defFg = ParseBrush(textCol.Inherit ? "#000000" : HexColorPicker.HexOf(textCol.Color), Brushes.Black);
+            preview.Foreground = defFg;
+            double lsv = Math.Clamp(ParseNum(lineSp.Text, 1), 0.1, 4);
+            double maxFs = runs.Aggregate(bs, (m, r) => r.Size is { } sz && sz > m ? sz : m);   // biggest font in the box
+            preview.LineHeight = Math.Max(maxFs * 1.3 * lsv, maxFs * 1.18);   // floor: never let lines overlap
+            // Mirror the box's own optics onto the inner border; transparent bg lets the canvas colour show through.
+            previewInner.Background = backCol.Inherit ? Brushes.Transparent : ParseBrush(HexColorPicker.HexOf(backCol.Color), Brushes.Transparent);
+            double bw = Math.Clamp(ParseNum(borderW.Text, 0), 0, 40);
+            previewInner.BorderThickness = new(bw);
+            previewInner.BorderBrush = bw > 0 && !borderCol.Inherit ? ParseBrush(HexColorPicker.HexOf(borderCol.Color), Brushes.Transparent) : Brushes.Transparent;
+            foreach (var inl in RichText.ToInlines(runs, bs, 1.0, defFg)) preview.Inlines.Add(inl);
+            SyncSelSize();   // keep the px field in step with the current selection
+            SyncButtons();   // …and the effect toggles
+        }
+
+        void Toggle(Func<TextRun, bool> get, Action<TextRun, bool> set)
+        {
+            var (s, e) = Sel(); if (e <= s) return;
+            bool allOn = RichText.All(runs, s, e, get);
+            RichText.Apply(runs, s, e, r => set(r, !allOn));
+            Refresh();
+        }
+
+        bold.Click += (_, _) => Toggle(r => r.Bold,      (r, v) => r.Bold = v);
+        ital.Click += (_, _) => Toggle(r => r.Italic,    (r, v) => r.Italic = v);
+        undl.Click += (_, _) => Toggle(r => r.Underline, (r, v) => r.Underline = v);
+        strk.Click += (_, _) => Toggle(r => r.Strike,    (r, v) => r.Strike = v);
+        sup.Click  += (_, _) => { var (s, e) = Sel(); if (e <= s) return; bool on = RichText.All(runs, s, e, r => r.Super); RichText.Apply(runs, s, e, r => { r.Super = !on; if (r.Super) r.Sub = false; }); Refresh(); };
+        sub.Click  += (_, _) => { var (s, e) = Sel(); if (e <= s) return; bool on = RichText.All(runs, s, e, r => r.Sub);   RichText.Apply(runs, s, e, r => { r.Sub = !on;   if (r.Sub)   r.Super = false; }); Refresh(); };
+
+        var colBtn = Ui.Btn("A"); ToolTip.SetTip(colBtn, Loc.S("Pc_ColorText"));
+        colBtn.Click += async (_, _) => { var (s, e) = Sel(); if (e <= s) return; var hex = await ColorPickDialog.Pick(dlg, Loc.S("Pc_ColorText"), "#000000"); if (hex is null) return; RichText.Apply(runs, s, e, r => r.Fg = hex); Refresh(); };
+        var mkBtn = Ui.Btn("▨"); ToolTip.SetTip(mkBtn, Loc.S("Pc_Marker"));
+        mkBtn.Click += async (_, _) =>
+        {
+            var (s, e) = Sel(); if (e <= s) return;
+            if (RichText.All(runs, s, e, r => r.Marker != null)) { RichText.Apply(runs, s, e, r => r.Marker = null); Refresh(); return; }
+            var hex = await ColorPickDialog.Pick(dlg, Loc.S("Pc_Marker"), "#FFF176"); if (hex is null) return;
+            RichText.Apply(runs, s, e, r => r.Marker = hex); Refresh();
+        };
+
+        var clearBtn = Ui.Btn("⊘"); ToolTip.SetTip(clearBtn, Loc.S("Pc_ClearFormat"));
+        clearBtn.Click += (_, _) => { var (s, e) = Sel(); if (e <= s) return; RichText.Apply(runs, s, e, r => { r.Bold = r.Italic = r.Underline = r.Strike = r.Super = r.Sub = false; r.Fg = null; r.Marker = null; r.Size = null; }); Refresh(); };
+
+        var help = new Button { Content = "?", Width = 26, Padding = new(0), Focusable = false }; ThemeInput(help);
+        ToolTip.SetTip(help, Loc.S("Pc_FormatHelp"));
+
+        textBox.TextChanged += (_, _) => { var nt = (textBox.Text ?? "").Replace("\r\n", "\n").Replace("\r", "\n"); RichText.Remap(runs, cur, nt); cur = nt; Refresh(); };
+        family.SelectionChanged  += (_, _) => Refresh();
+        size.TextChanged     += (_, _) => Refresh();
+        lineSp.TextChanged   += (_, _) => Refresh();
+        borderW.TextChanged  += (_, _) => Refresh();
+        alignBox.SelectionChanged += (_, _) => Refresh();
+        textCol.Changed   += (_, _) => Refresh();
+        backCol.Changed   += (_, _) => Refresh();
+        borderCol.Changed += (_, _) => Refresh();
+
+        var toolbar = new WrapPanel();
+        foreach (var c in new Control[] { bold, ital, undl, strk, sup, sub, colBtn, mkBtn, clearBtn })
+        { c.Margin = new(0, 0, 4, 4); c.Focusable = false; toolbar.Children.Add(c); }
+
+        // The box font size and the selection-size field belong together, so bundle them in one framed group.
+        var sizeGroup = new Border { CornerRadius = new(4), Padding = new(6, 2), VerticalAlignment = VerticalAlignment.Center,
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
+                Children = { Lbl(Loc.S("Pc_Size")), Spinner(size, 4, 400, 1), selSize, selSizeBtn } } };
+        Ui.Theme(sizeGroup, Border.BorderBrushProperty, "ControlBorderBrush");
+        sizeGroup.BorderThickness = new(1);
+
+        // Global (whole-box) typography — sits ABOVE both panes because it can't be applied per selection.
+        var globalRow = new WrapPanel { Children = {
+            family, sizeGroup,
+            Lbl(Loc.S("Pc_LineSpacing")), Spinner(lineSp, 0.1, 4, 0.1),
+            Lbl(Loc.S("Pc_Align")), alignBox } };
+        foreach (var c in globalRow.Children) c.Margin = new(0, 0, 12, 4);
+
+        // Box optics (text colour / background / border) — grouped UNDER the preview and mirrored into it.
+        // Border width: label sits ABOVE its little field so the pair fits neatly beside the border colour button.
+        var borderWCol = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center,
+            Children = { Lbl(Loc.S("Pc_BorderWidth")), Spinner(borderW, 0, 40, 0.5) } };
+        var opticsCol = new StackPanel { Spacing = 6, Children = { textCol, backCol,
+            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { borderCol, borderWCol } } } };
+
+        // Two columns: live preview (+ optics under it) on the LEFT, the plain editor + toolbar on the RIGHT.
+        // The editor header carries the "?" formatting-help button flush to the right.
+        var editorHead = new Grid { ColumnDefinitions = new("*,Auto") };
+        var editorLbl = Lbl(Loc.S("Pc_Editor")); Grid.SetColumn(editorLbl, 0);
+        Grid.SetColumn(help, 1);
+        editorHead.Children.Add(editorLbl); editorHead.Children.Add(help);
+
+        var previewCol = new StackPanel { Spacing = 6, Children = { Lbl(Loc.S("Pc_Preview")), previewBox, opticsCol } };
+        var editorCol  = new StackPanel { Spacing = 6, Children = { editorHead, textBox, toolbar } };
+        var topGrid = new Grid { ColumnDefinitions = new("*,Auto,*"), ColumnSpacing = 12 };
+        // Invisible spacer column: keeps the two-pane structure/gap without a line the optics labels can bump into.
+        var colSep = new Border { Width = 1, Background = Brushes.Transparent, Margin = new(0, 4) };
+        Grid.SetColumn(previewCol, 0); topGrid.Children.Add(previewCol);
+        Grid.SetColumn(colSep, 1);     topGrid.Children.Add(colSep);
+        Grid.SetColumn(editorCol, 2);  topGrid.Children.Add(editorCol);
+
+        // Horizontal divider between the global typography row and the two panes.
+        var rowSep = new Border { Height = 1, Background = Brushes.Gray, Opacity = 0.4 };
+        var panel = new StackPanel { Margin = new(16), Spacing = 10, Children = { globalRow, rowSep, topGrid } };
+        var okBtn = Ui.Btn(Loc.S("Common_Ok")); bool ok = false; okBtn.Click += (_, _) => { ok = true; dlg.Close(); };
+        var cancel = Ui.Btn(Loc.S("Common_Cancel")); cancel.Click += (_, _) => dlg.Close();
+        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Children = { cancel, okBtn } });
+        dlg.Content = new ScrollViewer { Content = panel, MaxHeight = 740 };
+        Refresh();
+        await dlg.ShowDialog(this);
+        if (!ok) return false;
+
+        t.Runs = runs;
+        t.FontFamily = family.SelectedIndex <= 0 ? "" : (family.SelectedItem as string ?? "");
+        t.FontSize   = Math.Clamp(ParseNum(size.Text, t.FontSize), 4, 400);
+        t.LineSpacing = Math.Clamp(ParseNum(lineSp.Text, 1), 0.1, 4);
+        t.Align = alignBox.SelectedIndex == 1 ? "Center" : alignBox.SelectedIndex == 2 ? "Right" : "Left";
+        t.Color = textCol.Inherit ? "#000000" : (HexColorPicker.HexOf(textCol.Color) ?? "#000000");
+        t.Background = backCol.Inherit ? null : HexColorPicker.HexOf(backCol.Color);
+        t.BorderColor = borderCol.Inherit ? null : HexColorPicker.HexOf(borderCol.Color);
+        t.BorderThickness = Math.Clamp(ParseNum(borderW.Text, 0), 0, 40);
         return true;
     }
 

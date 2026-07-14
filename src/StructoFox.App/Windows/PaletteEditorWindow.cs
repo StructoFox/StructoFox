@@ -19,13 +19,13 @@ public class PaletteEditorWindow : Window
 
     readonly ComboBox    _paletteCombo = new() { MinWidth = 220 };
     readonly WrapPanel   _swatches     = new();
-    readonly TextBox     _nameBox      = new() { PlaceholderText = "Colour name", MinWidth = 160 };
+    readonly TextBox     _nameBox      = new() { PlaceholderText = Loc.S("Pal_ColorName"), MinWidth = 160 };
     HexColorPicker _picker = null!;   // assigned in BuildContent (needs the leading column)
 
     // Loads the saved palettes (seeding if needed) and builds the editor around the first one.
     public PaletteEditorWindow()
     {
-        Title                 = "🎨 Palette editor";
+        Title                 = Loc.S("Pal_Title");
         Width                 = 560;
         Height                = 680;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -47,7 +47,7 @@ public class PaletteEditorWindow : Window
         // ── Top: palette chooser + new/save ───────────────────────────────────
         var top = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         DockPanel.SetDock(top, Dock.Top);
-        top.Children.Add(new TextBlock { Text = "Palette:", VerticalAlignment = VerticalAlignment.Center });
+        top.Children.Add(new TextBlock { Text = Loc.S("Pal_Label"), VerticalAlignment = VerticalAlignment.Center });
         _paletteCombo.SelectionChanged += (_, _) =>
         {
             if (_paletteCombo.SelectedItem is ComboItem ci)
@@ -58,22 +58,22 @@ public class PaletteEditorWindow : Window
             }
         };
         top.Children.Add(_paletteCombo);
-        var newBtn  = Ui.Btn("New…", "Create a new palette");  newBtn.Click  += async (_, _) => await NewPalette();
-        var saveBtn = Ui.Btn("💾 Save", "Save this palette to a file"); saveBtn.Click += async (_, _) => await SaveCurrent();
+        var newBtn  = Ui.Btn(Loc.S("Pal_New"), Loc.S("Pal_NewTip"));  newBtn.Click  += async (_, _) => await NewPalette();
+        var saveBtn = Ui.Btn(Loc.S("Pal_Save"), Loc.S("Pal_SaveTip")); saveBtn.Click += async (_, _) => await SaveCurrent();
         top.Children.Add(newBtn);
         top.Children.Add(saveBtn);
         root.Children.Add(top);
 
         // ── Bottom: colour editor — wide 3-column picker (name+buttons | picker | preview) ──
-        var addBtn = Ui.Btn("＋ Add / Update", "Add a new colour, or update the selected one");
+        var addBtn = Ui.Btn(Loc.S("Pal_AddUpdate"), Loc.S("Pal_AddUpdateTip"));
         addBtn.Click += (_, _) => AddOrUpdate();
-        var delBtn = Ui.Btn("✕ Remove", "Remove the selected colour");
+        var delBtn = Ui.Btn(Loc.S("Pal_Remove"), Loc.S("Pal_RemoveTip"));
         delBtn.Click += (_, _) => RemoveSelected();
 
         var lead = new StackPanel
         {
             Width = 170, Spacing = 8,
-            Children = { new TextBlock { Text = "Name:" }, _nameBox, addBtn, delBtn },
+            Children = { new TextBlock { Text = Loc.S("Pal_Name") }, _nameBox, addBtn, delBtn },
         };
         _picker = new HexColorPicker(showPalette: false, leadingColumn: lead) { Color = Colors.SteelBlue };
         _picker.Margin = new(0, 12, 0, 0);
@@ -126,7 +126,7 @@ public class PaletteEditorWindow : Window
     // Adds a new colour, or updates the selected one, from the name box + picker, then redraws.
     void AddOrUpdate()
     {
-        var name = string.IsNullOrWhiteSpace(_nameBox.Text) ? "Colour" : _nameBox.Text.Trim();
+        var name = string.IsNullOrWhiteSpace(_nameBox.Text) ? Loc.S("Pal_DefaultColor") : _nameBox.Text.Trim();
         var hex  = HexOf(_picker.Color);
 
         if (_selected is not null && _current.Colors.Contains(_selected))
@@ -153,7 +153,7 @@ public class PaletteEditorWindow : Window
     // Prompts for a name, creates an empty palette, makes it current and saves it.
     async Task NewPalette()
     {
-        var name = await PromptDialog.Show(this, "New palette name:", "My Palette", "New palette");
+        var name = await PromptDialog.Show(this, Loc.S("Pal_NewPrompt"), Loc.S("Pal_NewDefault"), Loc.S("Pal_NewTitle"));
         if (string.IsNullOrWhiteSpace(name)) return;
 
         _current = new ColorPalette { Name = name.Trim() };
@@ -168,7 +168,7 @@ public class PaletteEditorWindow : Window
     async Task SaveCurrent()
     {
         var path = PaletteStore.Save(_current);
-        await MessageDialog.Show(this, $"Saved palette \"{_current.Name}\" to:\n{path}", "Palette saved");
+        await MessageDialog.Show(this, string.Format(Loc.S("Pal_Saved"), _current.Name, path), Loc.S("Pal_SavedTitle"));
     }
 
     // ── Colour helpers ─────────────────────────────────────────────────────────

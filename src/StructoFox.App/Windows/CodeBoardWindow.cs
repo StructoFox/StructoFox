@@ -1479,7 +1479,7 @@ public class CodeBoardWindow : Window
         {
             var arrow = BuildArrow(points[^2], points[^1], brush);
             arrow.ZIndex = 2;
-            _canvas.Children.Add(arrow); visuals.Add(arrow);
+            _canvas!.Children.Add(arrow); visuals.Add(arrow);
         }
 
         _relViews[rel.Id] = visuals;
