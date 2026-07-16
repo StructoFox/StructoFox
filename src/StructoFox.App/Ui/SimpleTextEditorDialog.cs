@@ -51,10 +51,6 @@ public static class SimpleTextEditorDialog
         var strk = new ToggleButton { Content = "S", MinWidth = 34, IsChecked = m.Strike };
         foreach (var t in new[] { bold, ital, undl, strk }) ThemeInput(t);
 
-        var alignBox = new ComboBox { MinWidth = 110 }; ThemeInput(alignBox);
-        foreach (var a in new[] { "Pc_AlignLeft", "Pc_AlignCenter", "Pc_AlignRight" }) alignBox.Items.Add(Loc.S(a));
-        alignBox.SelectedIndex = m.Align == "Center" ? 1 : m.Align == "Right" ? 2 : 0;
-
         var textCol   = new ColorField(Loc.S("Pc_ColorText"));  SetColorField(textCol, m.Color, Colors.Black, false);
         var backCol   = new ColorField(Loc.S("Pc_Background")); SetColorField(backCol, m.Background, Colors.White, true);
         var borderCol = new ColorField(Loc.S("Pc_Border"));     SetColorField(borderCol, m.BorderColor, Colors.Black, true);
@@ -62,10 +58,9 @@ public static class SimpleTextEditorDialog
 
         var styleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { bold, ital, undl, strk } };
         var fontRow  = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { family, Lbl(Loc.S("Pc_Size")), Spinner(size, 4, 400, 1) } };
-        var alignRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lbl(Loc.S("Pc_Align")), alignBox } };
         var borderRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { borderCol, Lbl(Loc.S("Pc_BorderWidth")), Spinner(borderW, 0, 40, 0.5) } };
 
-        var panel = new StackPanel { Margin = new(16), Spacing = 10, Children = { textBox, fontRow, styleRow, alignRow, textCol, backCol, borderRow } };
+        var panel = new StackPanel { Margin = new(16), Spacing = 10, Children = { textBox, fontRow, styleRow, textCol, backCol, borderRow } };
 
         bool ok = false;
         var okBtn = Ui.Btn(Loc.S("Common_Ok")); okBtn.Click += (_, _) => { ok = true; dlg.Close(); };
@@ -80,7 +75,6 @@ public static class SimpleTextEditorDialog
         m.FontSize = Math.Clamp(ParseNum(size.Text, m.FontSize), 4, 400);
         m.Bold = bold.IsChecked == true; m.Italic = ital.IsChecked == true;
         m.Underline = undl.IsChecked == true; m.Strike = strk.IsChecked == true;
-        m.Align = alignBox.SelectedIndex == 1 ? "Center" : alignBox.SelectedIndex == 2 ? "Right" : "Left";
         m.Color = textCol.Inherit ? "#000000" : (HexColorPicker.HexOf(textCol.Color) ?? "#000000");
         m.Background = backCol.Inherit ? null : HexColorPicker.HexOf(backCol.Color);
         m.BorderColor = borderCol.Inherit ? null : HexColorPicker.HexOf(borderCol.Color);

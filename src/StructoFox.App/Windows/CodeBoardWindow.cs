@@ -318,12 +318,12 @@ public class CodeBoardWindow : Window
         row.Children.Add(delBtn);
 
         row.Children.Add(new Border { Width = 8 });
-        var textBtn = Btn(Loc.S("Code_AddText"), Loc.S("Code_AddTextTip"));
-        textBtn.Click += (_, _) => _ = AddTextBox(singleLine: false);
+        // One "＋ Text ▾" button with a fly-out (single-line label / multi-line box) — mirrors the print composer.
+        var textBtn = Btn(Loc.S("Pc_AddText"), Loc.S("Code_AddTextTip"));
+        var labelMi = new MenuItem { Header = Loc.S("Pc_LabelSingle") }; labelMi.Click += (_, _) => _ = AddTextBox(singleLine: true);
+        var boxMi   = new MenuItem { Header = Loc.S("Pc_TextMulti") };   boxMi.Click   += (_, _) => _ = AddTextBox(singleLine: false);
+        textBtn.Flyout = new MenuFlyout { ItemsSource = new[] { labelMi, boxMi } };
         row.Children.Add(textBtn);
-        var lineBtn = Btn(Loc.S("Code_AddLine"), Loc.S("Code_AddLineTip"));
-        lineBtn.Click += (_, _) => _ = AddTextBox(singleLine: true);
-        row.Children.Add(lineBtn);
 
         row.Children.Add(new Border { Width = 8 });
         var viewBtn = Btn(Loc.S("Flow_View"), Loc.S("Flow_ViewTip"));
@@ -998,7 +998,7 @@ public class CodeBoardWindow : Window
                 Background = NoneIfTransparent(tb.BgColor), BorderColor = tb.FrameThick > 0 ? tb.FrameColor : null,
                 BorderThickness = tb.FrameThick, Align = tb.HAlign,
             };
-            if (!await SimpleTextEditorDialog.Edit(this, m, Loc.S("Code_AddLine"))) return;
+            if (!await SimpleTextEditorDialog.Edit(this, m, Loc.S("Pc_Label"))) return;
             tb.Text = m.Text; tb.FontFamily = m.FontFamily; tb.FontSize = m.FontSize; tb.TextColor = m.Color;
             tb.Bold = m.Bold; tb.Italic = m.Italic; tb.Underline = m.Underline; tb.Strike = m.Strike;
             tb.BgColor = m.Background ?? "#00000000"; tb.FrameColor = m.BorderColor ?? tb.FrameColor;
@@ -1014,7 +1014,7 @@ public class CodeBoardWindow : Window
                 Background = NoneIfTransparent(tb.BgColor), BorderColor = tb.FrameThick > 0 ? tb.FrameColor : null,
                 BorderThickness = tb.FrameThick,
             };
-            if (!await RichTextEditorDialog.Edit(this, m, Loc.S("Code_AddText"), CanvasBgHex())) return;
+            if (!await RichTextEditorDialog.Edit(this, m, Loc.S("Pc_TextBox"), CanvasBgHex())) return;
             tb.Runs = m.Runs; tb.FontFamily = m.FontFamily; tb.FontSize = m.FontSize; tb.HAlign = m.Align;
             tb.LineSpacing = m.LineSpacing; tb.TextColor = m.Color; tb.BgColor = m.Background ?? "#00000000";
             tb.FrameColor = m.BorderColor ?? tb.FrameColor; tb.FrameThick = m.BorderThickness;
