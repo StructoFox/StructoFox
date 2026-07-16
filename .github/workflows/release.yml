@@ -115,9 +115,12 @@ jobs:
             ## StructoFox ${{ steps.ver.outputs.version }}
 
             Licensed under the **MIT License** (the `LICENSE` file is included in every package).
-            The **Windows** build is produced by hand and added to this release's assets manually.
 
-            > ⚠️ **Both packages below are cross-compiled and have NOT been verified on real hardware yet.**
+            ### Windows (x64, slim — needs .NET 10)
+            Small download. The free **.NET 10 Desktop Runtime** must be installed. Unzip and run `StructoFox.exe`
+            (unsigned → SmartScreen: *More info → Run anyway*). Built by hand and added to this release's assets manually.
+
+            > ⚠️ **The Linux and macOS packages below are cross-compiled and have NOT been verified on real hardware yet.**
             > If you try one, please confirm it runs without errors — and report any problems back. Thank you! 🦊
 
             ### Linux (x64, self-contained — no .NET required)
