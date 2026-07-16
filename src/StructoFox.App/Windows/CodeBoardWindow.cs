@@ -94,6 +94,8 @@ public class CodeBoardWindow : Window
     static readonly FontFamily Mono = new("Consolas, Cascadia Mono, monospace");
     static readonly BoxShadows SelGlow   = BoxShadows.Parse("0 0 12 0 #CC2196F3");
     static readonly BoxShadows HoverGlow = BoxShadows.Parse("0 0 8 0 #66FFFFFF");
+    static readonly IBrush TextHandleBrush = new SolidColorBrush(Color.Parse("#2196F3"));
+    Border? _textHandle;   // right-edge width grip shown on the selected (multi-line) text box
 
     void OpenMenu(ContextMenu cm, Control anchor) { _menu?.Close(); _menu = cm; cm.Open(anchor); }
 
@@ -916,6 +918,7 @@ public class CodeBoardWindow : Window
     {
         if (_textViews.TryGetValue(tb.Id, out var old)) { _canvas?.Children.Remove(old); _textViews.Remove(tb.Id); }
         RenderTextBox(tb);
+        UpdateTextHandle();   // the visual was replaced — re-attach the width grip if this box is selected
     }
 
     Control BuildTextBoxContent(BoardTextBox tb)
@@ -981,6 +984,7 @@ public class CodeBoardWindow : Window
             dragging = false; e.Pointer.Capture(null);
             tb.X = Canvas.GetLeft(box); tb.Y = Canvas.GetTop(box);
             if (moved) { FitCanvas(); Save(); }
+            if (_textHandle is not null && _selectedText.Contains(tb.Id)) PositionTextHandle(_textHandle, box);
             e.Handled = true;
         };
         box.PointerEntered += (_, _) => { if (!_selectedText.Contains(tb.Id)) box.BoxShadow = HoverGlow; };
@@ -998,6 +1002,64 @@ public class CodeBoardWindow : Window
     void RefreshTextSelectionVisuals()
     {
         foreach (var (id, box) in _textViews) box.BoxShadow = _selectedText.Contains(id) ? SelGlow : default;
+        UpdateTextHandle();
+    }
+
+    // Shows a right-edge width grip when exactly one MULTI-LINE text box is selected (its width is the wrap width).
+    void UpdateTextHandle()
+    {
+        if (_textHandle is not null) { _canvas?.Children.Remove(_textHandle); _textHandle = null; }
+        if (_canvas is null || _selectedText.Count != 1) return;
+        var id = _selectedText.First();
+        if (!_textViews.TryGetValue(id, out var box)) return;
+        var tb = _boardData.TextBoxes.FirstOrDefault(t => t.Id == id);
+        if (tb is null || tb.SingleLine) return;
+
+        var handle = new Border
+        {
+            Width = 10, Height = 28, ZIndex = 60, CornerRadius = new(3),
+            Background = TextHandleBrush, BorderBrush = Brushes.White, BorderThickness = new(1.5),
+            Cursor = new Cursor(StandardCursorType.SizeWestEast),
+        };
+        PositionTextHandle(handle, box);
+        WireTextHandle(handle, box, tb);
+        _canvas.Children.Add(handle);
+        _textHandle = handle;
+        // Bounds may not be measured yet (e.g. right after a re-render) — reposition once layout has settled.
+        Dispatcher.UIThread.Post(() => { if (_textHandle == handle) PositionTextHandle(handle, box); }, DispatcherPriority.Render);
+    }
+
+    void PositionTextHandle(Border handle, Border box)
+    {
+        double bw = box.Bounds.Width > 1 ? box.Bounds.Width : box.MinWidth;
+        double bh = box.Bounds.Height > 1 ? box.Bounds.Height : 24;
+        Canvas.SetLeft(handle, Canvas.GetLeft(box) + bw - 5);
+        Canvas.SetTop(handle,  Canvas.GetTop(box) + bh / 2 - 14);
+    }
+
+    void WireTextHandle(Border handle, Border box, BoardTextBox tb)
+    {
+        bool drag = false;
+        handle.PointerPressed += (_, e) => { drag = true; e.Pointer.Capture(handle); e.Handled = true; };
+        handle.PointerMoved += (_, e) =>
+        {
+            if (!drag) return;
+            var p = e.GetPosition(_canvas);
+            double w = Math.Max(40, Snap(p.X) - Canvas.GetLeft(box) - 12);   // 12 = box left+right padding
+            tb.Width = w;
+            if (box.Child is TextBlock tk) tk.Width = w;
+            Canvas.SetLeft(handle, Canvas.GetLeft(box) + w + 12 - 5);
+            GrowCanvasFor(Canvas.GetLeft(box), Canvas.GetTop(box), w + 12, box.Bounds.Height);
+            e.Handled = true;
+        };
+        handle.PointerReleased += (_, e) =>
+        {
+            if (!drag) return;
+            drag = false; e.Pointer.Capture(null);
+            FitCanvas(); Save();
+            Dispatcher.UIThread.Post(() => PositionTextHandle(handle, box), DispatcherPriority.Render);
+            e.Handled = true;
+        };
     }
 
     void RemoveSelectedTextBoxes()
@@ -1008,6 +1070,7 @@ public class CodeBoardWindow : Window
             _boardData.TextBoxes.RemoveAll(t => t.Id == id);
         }
         _selectedText.Clear();
+        UpdateTextHandle();
         UpdateEmptyHint();
         Save();
     }
