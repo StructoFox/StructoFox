@@ -26,7 +26,9 @@ public class BoardWaypoint
     public string? LinkedToId { get; set; } = null;
 }
 
-/// <summary>A freely-placeable styled text annotation on the board canvas.</summary>
+/// <summary>A freely-placeable styled text annotation on the board canvas. Two flavours share this model:
+/// a multi-line RICH box (per-character styles in <see cref="Runs"/>) and a light SINGLE-LINE box
+/// (<see cref="SingleLine"/> = true, one uniform style in <see cref="Text"/> + the box-level flags).</summary>
 public class BoardTextBox
 {
     public string Id          { get; set; } = Guid.NewGuid().ToString("N")[..8];
@@ -39,6 +41,8 @@ public class BoardTextBox
     public double FontSize    { get; set; } = 12;
     public bool   Bold        { get; set; } = false;
     public bool   Italic      { get; set; } = false;
+    public bool   Underline   { get; set; } = false;
+    public bool   Strike      { get; set; } = false;
     public string TextColor   { get; set; } = "#212121";
     public string BgColor     { get; set; } = "#00000000";
     public string FrameColor  { get; set; } = "#FF808080";
@@ -46,6 +50,12 @@ public class BoardTextBox
     public string FrameStyle  { get; set; } = "None"; // None, Solid, Dashed, Dotted
     public string HAlign      { get; set; } = "Left";  // Left, Center, Right, Justify
     public string VAlign      { get; set; } = "Top";   // Top, Center, Bottom
+
+    /// <summary>True = a single-line, one-style box (uses <see cref="Text"/>); false = a multi-line rich box (uses <see cref="Runs"/>).</summary>
+    public bool          SingleLine  { get; set; } = false;
+    public double        LineSpacing { get; set; } = 1.0;
+    /// <summary>Per-character styled runs for the multi-line rich box.</summary>
+    public List<TextRun> Runs        { get; set; } = new();
 }
 
 /// <summary>A colored grouping frame that groups and moves items on the board canvas.</summary>

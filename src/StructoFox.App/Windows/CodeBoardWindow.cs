@@ -38,6 +38,7 @@ public class CodeBoardWindow : Window
     readonly Dictionary<string, Border>     _portDots  = new();   // "{entityId}:{portId}" → port box
     readonly Dictionary<string, TextBlock>  _portLabels = new();  // "{entityId}:{portId}" → name label next to the dot
     readonly Dictionary<string, List<Control>> _relViews = new(); // relation id → line/arrow/hit visuals
+    readonly Dictionary<string, Border>     _textViews = new();    // BoardTextBox id → its canvas visual
 
     // Snapshot-based undo/redo of the board (JSON of _boardData), recorded at each Save() boundary.
     readonly List<string> _undo = new();
@@ -163,7 +164,7 @@ public class CodeBoardWindow : Window
     {
         if (_canvas is null) return;
         _canvas.Children.Clear();
-        _cards.Clear(); _portDots.Clear(); _portLabels.Clear(); _relViews.Clear();
+        _cards.Clear(); _portDots.Clear(); _portLabels.Clear(); _relViews.Clear(); _textViews.Clear();
         _gridRect = null;
         _selectedIds.Clear(); _selectionAnchor = null;
         RenderGrid();
@@ -172,6 +173,7 @@ public class CodeBoardWindow : Window
             if (_entities.TryGetValue(kv.Key, out var entity)) RenderCard(entity, kv.Value);
             else _boardData.Positions.Remove(kv.Key);
         }
+        foreach (var tb in _boardData.TextBoxes) RenderTextBox(tb);
         Dispatcher.UIThread.Post(RenderAllRelations, DispatcherPriority.Loaded);
     }
 
@@ -243,6 +245,7 @@ public class CodeBoardWindow : Window
             if (_entities.TryGetValue(kv.Key, out var entity)) RenderCard(entity, kv.Value);
             else _boardData.Positions.Remove(kv.Key);
         }
+        foreach (var tb in _boardData.TextBoxes) RenderTextBox(tb);
 
         // Relations need card sizes; draw them once layout has settled.
         Dispatcher.UIThread.Post(RenderAllRelations, DispatcherPriority.Loaded);
@@ -313,6 +316,14 @@ public class CodeBoardWindow : Window
         var delBtn = Btn(Loc.S("Code_RemoveCards"), Loc.S("Code_RemoveCardsTip"));
         delBtn.Click += (_, _) => RemoveSelectedFromBoard();
         row.Children.Add(delBtn);
+
+        row.Children.Add(new Border { Width = 8 });
+        var textBtn = Btn(Loc.S("Code_AddText"), Loc.S("Code_AddTextTip"));
+        textBtn.Click += (_, _) => _ = AddTextBox(singleLine: false);
+        row.Children.Add(textBtn);
+        var lineBtn = Btn(Loc.S("Code_AddLine"), Loc.S("Code_AddLineTip"));
+        lineBtn.Click += (_, _) => _ = AddTextBox(singleLine: true);
+        row.Children.Add(lineBtn);
 
         row.Children.Add(new Border { Width = 8 });
         var viewBtn = Btn(Loc.S("Flow_View"), Loc.S("Flow_ViewTip"));
@@ -847,6 +858,192 @@ public class CodeBoardWindow : Window
         card.PointerEntered += (_, _) => { if (!_selectedIds.Contains(entity.Id)) card.BoxShadow = HoverGlow; };
         card.PointerExited  += (_, _) => { if (!_selectedIds.Contains(entity.Id)) card.BoxShadow = default; };
     }
+
+    // ── Free text boxes (board annotations) ───────────────────────────────────
+    // Two flavours share BoardTextBox: a multi-line RICH box (the shared RichTextEditorDialog) and a light
+    // single-line box (SimpleTextEditorDialog). They are independent, draggable canvas items — NOT part of the
+    // entity selection/relation system — so the board's norm-relevant card logic stays untouched.
+
+    // Inserts a new text box at the viewport centre and opens its editor straight away.
+    async Task AddTextBox(bool singleLine)
+    {
+        var (cx, cy) = ViewportCenter();
+        var tb = new BoardTextBox { X = Snap(cx), Y = Snap(cy), SingleLine = singleLine };
+        if (singleLine) { tb.Text = Loc.S("Code_NewLineText"); tb.Width = 0; }
+        else { tb.Text = Loc.S("Code_NewText"); tb.Runs = new() { new TextRun { Text = tb.Text } }; tb.Width = 220; }
+        _boardData.TextBoxes.Add(tb);
+        RenderTextBox(tb);
+        await EditTextBox(tb);   // let the user type immediately; EditTextBox re-renders + saves
+        Save();
+    }
+
+    void RenderTextBox(BoardTextBox tb)
+    {
+        if (_canvas is null || _textViews.ContainsKey(tb.Id)) return;
+        var box = new Border
+        {
+            Padding = new(6), MinWidth = 24, MinHeight = 18, ZIndex = 2,
+            Cursor = new Cursor(StandardCursorType.SizeAll),
+            Background = ParseBrushSafe(tb.BgColor, Brushes.Transparent),
+            Child = BuildTextBoxContent(tb),
+        };
+        if (tb.FrameThick > 0 && tb.FrameStyle != "None")
+        {
+            box.BorderBrush = ParseBrushSafe(tb.FrameColor, Brushes.Gray);
+            box.BorderThickness = new(tb.FrameThick);
+        }
+        Canvas.SetLeft(box, tb.X); Canvas.SetTop(box, tb.Y);
+        _canvas.Children.Add(box);
+        _textViews[tb.Id] = box;
+        WireTextBox(box, tb);
+        UpdateEmptyHint();
+    }
+
+    // Rebuilds a text box's visual in place (after an edit).
+    void ReRenderTextBox(BoardTextBox tb)
+    {
+        if (_textViews.TryGetValue(tb.Id, out var old)) { _canvas?.Children.Remove(old); _textViews.Remove(tb.Id); }
+        RenderTextBox(tb);
+    }
+
+    Control BuildTextBoxContent(BoardTextBox tb)
+    {
+        var fam = string.IsNullOrEmpty(tb.FontFamily) ? FontFamily.Default : new FontFamily(tb.FontFamily);
+        var fg  = ParseBrushSafe(tb.TextColor, Brushes.Black);
+        var align = tb.HAlign == "Center" ? TextAlignment.Center : tb.HAlign == "Right" ? TextAlignment.Right : TextAlignment.Left;
+
+        if (tb.SingleLine)
+        {
+            var one = new TextBlock
+            {
+                Text = tb.Text, FontFamily = fam, FontSize = tb.FontSize, Foreground = fg, TextAlignment = align,
+                TextWrapping = TextWrapping.NoWrap,
+                FontWeight = tb.Bold ? FontWeight.Bold : FontWeight.Normal,
+                FontStyle  = tb.Italic ? FontStyle.Italic : FontStyle.Normal,
+            };
+            var dec = new TextDecorationCollection();
+            if (tb.Underline) dec.Add(new TextDecoration { Location = TextDecorationLocation.Underline });
+            if (tb.Strike)    dec.Add(new TextDecoration { Location = TextDecorationLocation.Strikethrough });
+            if (dec.Count > 0) one.TextDecorations = dec;
+            return one;
+        }
+
+        if (tb.Runs.Count == 0) tb.Runs.Add(new TextRun { Text = tb.Text });
+        var rich = new TextBlock { FontFamily = fam, FontSize = tb.FontSize, Foreground = fg, TextAlignment = align,
+            TextWrapping = TextWrapping.Wrap, Width = tb.Width > 0 ? tb.Width : 220 };
+        double maxFs = tb.Runs.Aggregate(tb.FontSize, (mx, r) => r.Size is { } sz && sz > mx ? sz : mx);
+        rich.LineHeight = Math.Max(maxFs * 1.3 * tb.LineSpacing, maxFs * 1.18);
+        foreach (var inl in RichText.ToInlines(tb.Runs, tb.FontSize, 1.0, fg)) rich.Inlines!.Add(inl);
+        return rich;
+    }
+
+    void WireTextBox(Border box, BoardTextBox tb)
+    {
+        bool dragging = false, moved = false; Point offset = default;
+        box.PointerPressed += (_, e) =>
+        {
+            var props = e.GetCurrentPoint(box).Properties;
+            if (props.IsRightButtonPressed) { ShowTextBoxMenu(tb, box); e.Handled = true; return; }
+            if (_connectMode || _scaleMode) return;   // leave connect/scale interactions to the board
+            if (e.ClickCount >= 2) { _ = EditTextBox(tb); e.Handled = true; return; }
+            dragging = true; moved = false; offset = e.GetPosition(box);
+            e.Pointer.Capture(box); e.Handled = true;
+        };
+        box.PointerMoved += (_, e) =>
+        {
+            if (!dragging) return;
+            var pt = e.GetPosition(_canvas);
+            double x = Snap(Math.Max(0, pt.X - offset.X)), y = Snap(Math.Max(0, pt.Y - offset.Y));
+            Canvas.SetLeft(box, x); Canvas.SetTop(box, y);
+            GrowCanvasFor(x, y, box.Bounds.Width, box.Bounds.Height);
+            moved = true; e.Handled = true;
+        };
+        box.PointerReleased += (_, e) =>
+        {
+            if (!dragging) return;
+            dragging = false; e.Pointer.Capture(null);
+            tb.X = Canvas.GetLeft(box); tb.Y = Canvas.GetTop(box);
+            if (moved) { FitCanvas(); Save(); }
+            e.Handled = true;
+        };
+        box.PointerEntered += (_, _) => box.BoxShadow = HoverGlow;
+        box.PointerExited  += (_, _) => box.BoxShadow = default;
+    }
+
+    void ShowTextBoxMenu(BoardTextBox tb, Control anchor)
+    {
+        var menu = new ContextMenu();
+        var edit = new MenuItem { Header = Loc.S("Pc_Edit") };   edit.Click += (_, _) => _ = EditTextBox(tb);
+        var del  = new MenuItem { Header = Loc.S("Pc_Delete") }; del.Click  += (_, _) => RemoveTextBox(tb);
+        menu.Items.Add(edit); menu.Items.Add(del);
+        menu.Open(anchor);
+    }
+
+    void RemoveTextBox(BoardTextBox tb)
+    {
+        if (_textViews.TryGetValue(tb.Id, out var v)) { _canvas?.Children.Remove(v); _textViews.Remove(tb.Id); }
+        _boardData.TextBoxes.Remove(tb);
+        UpdateEmptyHint();
+        Save();
+    }
+
+    async Task EditTextBox(BoardTextBox tb)
+    {
+        if (tb.SingleLine)
+        {
+            var m = new SimpleTextModel
+            {
+                Text = tb.Text, FontFamily = tb.FontFamily, FontSize = tb.FontSize, Color = tb.TextColor,
+                Bold = tb.Bold, Italic = tb.Italic, Underline = tb.Underline, Strike = tb.Strike,
+                Background = NoneIfTransparent(tb.BgColor), BorderColor = tb.FrameThick > 0 ? tb.FrameColor : null,
+                BorderThickness = tb.FrameThick, Align = tb.HAlign,
+            };
+            if (!await SimpleTextEditorDialog.Edit(this, m, Loc.S("Code_AddLine"))) return;
+            tb.Text = m.Text; tb.FontFamily = m.FontFamily; tb.FontSize = m.FontSize; tb.TextColor = m.Color;
+            tb.Bold = m.Bold; tb.Italic = m.Italic; tb.Underline = m.Underline; tb.Strike = m.Strike;
+            tb.BgColor = m.Background ?? "#00000000"; tb.FrameColor = m.BorderColor ?? tb.FrameColor;
+            tb.FrameThick = m.BorderThickness; tb.FrameStyle = m.BorderThickness > 0 ? "Solid" : "None"; tb.HAlign = m.Align;
+        }
+        else
+        {
+            if (tb.Runs.Count == 0) tb.Runs.Add(new TextRun { Text = tb.Text });
+            var m = new RichTextModel
+            {
+                Runs = tb.Runs.Select(r => r.Clone()).ToList(), FontFamily = tb.FontFamily, FontSize = tb.FontSize,
+                Align = tb.HAlign, LineSpacing = tb.LineSpacing, Color = tb.TextColor,
+                Background = NoneIfTransparent(tb.BgColor), BorderColor = tb.FrameThick > 0 ? tb.FrameColor : null,
+                BorderThickness = tb.FrameThick,
+            };
+            if (!await RichTextEditorDialog.Edit(this, m, Loc.S("Code_AddText"), CanvasBgHex())) return;
+            tb.Runs = m.Runs; tb.FontFamily = m.FontFamily; tb.FontSize = m.FontSize; tb.HAlign = m.Align;
+            tb.LineSpacing = m.LineSpacing; tb.TextColor = m.Color; tb.BgColor = m.Background ?? "#00000000";
+            tb.FrameColor = m.BorderColor ?? tb.FrameColor; tb.FrameThick = m.BorderThickness;
+            tb.FrameStyle = m.BorderThickness > 0 ? "Solid" : "None"; tb.Text = RichText.Plain(tb.Runs);
+        }
+        ReRenderTextBox(tb);
+        Save();
+    }
+
+    // Viewport centre in canvas coordinates (so a new item lands where the user is looking).
+    (double x, double y) ViewportCenter()
+    {
+        if (_scroll is null) return (80, 80);
+        double vx = _scroll.Offset.X + _scroll.Viewport.Width / 2;
+        double vy = _scroll.Offset.Y + _scroll.Viewport.Height / 2;
+        return (vx / _zoom, vy / _zoom);
+    }
+
+    string CanvasBgHex()
+    {
+        if (_canvas?.Background is ISolidColorBrush sb) { var c = sb.Color; return $"#{c.R:X2}{c.G:X2}{c.B:X2}"; }
+        return "#2B2B2B";
+    }
+
+    static IBrush ParseBrushSafe(string? hex, IBrush fallback)
+    { try { return string.IsNullOrWhiteSpace(hex) ? fallback : new SolidColorBrush(Color.Parse(hex)); } catch { return fallback; } }
+
+    static string? NoneIfTransparent(string? hex)
+    { if (string.IsNullOrWhiteSpace(hex)) return null; try { return Color.Parse(hex).A == 0 ? null : hex; } catch { return null; } }
 
     Border BuildCard(CodeEntity entity)
     {
