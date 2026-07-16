@@ -50,6 +50,7 @@ jobs:
           DIR="StructoFox-$V-linux-x64"
           mv out/linux "$DIR"
           rm -f "$DIR"/*.pdb
+          cp LICENSE "$DIR/"
           mkdir -p "$DIR/Plugins/AiCodegen/Languages"
           cp plugin-out/StructoFox.Plugin.AiCodegen.dll plugin-out/StructoFox.AI.dll plugin-out/StructoFox.Plugin.AiCodegen.deps.json "$DIR/Plugins/AiCodegen/"
           cp plugin-out/Languages/*.json "$DIR/Plugins/AiCodegen/Languages/"
@@ -71,6 +72,7 @@ jobs:
           cp plugin-out/StructoFox.Plugin.AiCodegen.dll plugin-out/StructoFox.AI.dll plugin-out/StructoFox.Plugin.AiCodegen.deps.json "$APP/Contents/MacOS/Plugins/AiCodegen/"
           cp plugin-out/Languages/*.json "$APP/Contents/MacOS/Plugins/AiCodegen/Languages/"
           cp Assets/Structofox.icns "$APP/Contents/Resources/Structofox.icns"
+          cp LICENSE "$APP/Contents/Resources/LICENSE"
           chmod +x "$APP/Contents/MacOS/StructoFox"
           cat > "$APP/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -90,7 +92,7 @@ jobs:
           </dict>
           </plist>
           PLIST
-          tar -czf "StructoFox-$V-macOS-x64.tar.gz" "$APP"
+          tar -czf "StructoFox-$V-macOS-x64.tar.gz" "$APP" LICENSE
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -112,20 +114,25 @@ jobs:
           body: |
             ## StructoFox ${{ steps.ver.outputs.version }}
 
-            **Windows** wird separat gebaut und ist hier nicht enthalten.
+            Licensed under the **MIT License** (the `LICENSE` file is included in every package).
+            **Windows** is built separately and is not part of this release.
 
-            ### Linux (x64, self-contained — kein .NET nötig)
+            > ⚠️ **Both packages below are cross-compiled and have NOT been verified on real hardware yet.**
+            > If you try one, please confirm it runs without errors — and report any problems back. Thank you! 🦊
+
+            ### Linux (x64, self-contained — no .NET required)
             ```
             tar -xzf StructoFox-${{ steps.ver.outputs.version }}-linux-x64.tar.gz
             cd StructoFox-${{ steps.ver.outputs.version }}-linux-x64
             ./StructoFox
             ```
 
-            ### macOS (Intel x64) — ⚠️ untested & unsigned
-            Von Windows/Linux cross-kompiliert und **nicht auf echter Hardware getestet**. Benötigt macOS 12+.
-            Da nicht signiert, blockt Gatekeeper zunächst:
+            ### macOS (Intel x64) — untested & unsigned
+            Cross-compiled and **not tested on real hardware**. Requires macOS 12+.
+            As it is unsigned, Gatekeeper blocks it at first:
             ```
             tar -xzf StructoFox-${{ steps.ver.outputs.version }}-macOS-x64.tar.gz
             xattr -dr com.apple.quarantine StructoFox.app
             open StructoFox.app
             ```
+            Please confirm it launches and runs without errors.
