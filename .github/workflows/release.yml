@@ -115,7 +115,7 @@ jobs:
             ## StructoFox ${{ steps.ver.outputs.version }}
 
             Licensed under the **MIT License** (the `LICENSE` file is included in every package).
-            The **Windows** build is produced by hand and attached to this release separately (see the assets below).
+            The **Windows** build is produced by hand and added to this release's assets manually.
 
             > ⚠️ **Both packages below are cross-compiled and have NOT been verified on real hardware yet.**
             > If you try one, please confirm it runs without errors — and report any problems back. Thank you! 🦊
