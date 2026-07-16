@@ -191,8 +191,8 @@ public static class Loc
         // Diagram chooser (DiagramLauncher)
         ["Diag_Title"]     = "Diagram",
         ["Diag_SketchOf"]  = "Sketch the flow of:\n{0}",
-        ["Diag_Pap"]       = "🔁 Programmablaufplan",
-        ["Diag_PapExists"] = "🔁 Programmablaufplan (exists)",
+        ["Diag_Pap"]       = "🔁 Flowchart",
+        ["Diag_PapExists"] = "🔁 Flowchart (exists)",
         ["Diag_Ns"]        = "▦ Structogram",
         ["Diag_NsExists"]  = "▦ Structogram (exists)",
         ["Diag_NsTip"]     = "Nassi-Shneiderman structogram editor (DIN 66261)",
