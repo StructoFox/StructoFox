@@ -1,0 +1,131 @@
+name: Release
+
+# Builds the Linux and macOS packages on a Linux runner (both cross-published — no macOS runner, no Apple account).
+# Windows is built by hand and is intentionally NOT part of this workflow.
+#
+# Run it by pushing a version tag (creates a GitHub Release):   git tag v0.9.9 && git push origin v0.9.9
+# …or trigger it manually from the Actions tab (uploads artifacts only, no Release).
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the leading v (e.g. 0.9.9)'
+        required: true
+
+permissions:
+  contents: write   # needed so the tag build can create the Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then V="${GITHUB_REF_NAME#v}"; else V="${{ github.event.inputs.version }}"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building version $V"
+
+      # The AiCodegen plugin is a drop-in (not referenced by the app), so publish it once and fold it into each
+      # package under Plugins/AiCodegen/ (its dll + bundled StructoFox.AI + deps.json + language packs; NOT Core).
+      - name: Publish AiCodegen plugin
+        run: dotnet publish src/StructoFox.Plugin.AiCodegen/StructoFox.Plugin.AiCodegen.csproj -c Release -o plugin-out
+
+      # ---------------- Linux (self-contained x64) ----------------
+      - name: Publish Linux
+        run: dotnet publish src/StructoFox.App/StructoFox.App.csproj -c Release -r linux-x64 --self-contained true -o out/linux
+
+      - name: Assemble Linux package
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          DIR="StructoFox-$V-linux-x64"
+          mv out/linux "$DIR"
+          rm -f "$DIR"/*.pdb
+          mkdir -p "$DIR/Plugins/AiCodegen/Languages"
+          cp plugin-out/StructoFox.Plugin.AiCodegen.dll plugin-out/StructoFox.AI.dll plugin-out/StructoFox.Plugin.AiCodegen.deps.json "$DIR/Plugins/AiCodegen/"
+          cp plugin-out/Languages/*.json "$DIR/Plugins/AiCodegen/Languages/"
+          chmod +x "$DIR/StructoFox"
+          tar -czf "$DIR.tar.gz" "$DIR"
+
+      # ---------------- macOS (cross-published, UNSIGNED + UNTESTED) ----------------
+      - name: Publish macOS (Intel x64)
+        run: dotnet publish src/StructoFox.App/StructoFox.App.csproj -c Release -r osx-x64 --self-contained true -o out/mac
+
+      - name: Assemble macOS .app
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          APP="StructoFox.app"
+          rm -f out/mac/*.pdb
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp -R out/mac/. "$APP/Contents/MacOS/"
+          mkdir -p "$APP/Contents/MacOS/Plugins/AiCodegen/Languages"
+          cp plugin-out/StructoFox.Plugin.AiCodegen.dll plugin-out/StructoFox.AI.dll plugin-out/StructoFox.Plugin.AiCodegen.deps.json "$APP/Contents/MacOS/Plugins/AiCodegen/"
+          cp plugin-out/Languages/*.json "$APP/Contents/MacOS/Plugins/AiCodegen/Languages/"
+          cp Assets/Structofox.icns "$APP/Contents/Resources/Structofox.icns"
+          chmod +x "$APP/Contents/MacOS/StructoFox"
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>StructoFox</string>
+            <key>CFBundleDisplayName</key><string>StructoFox</string>
+            <key>CFBundleIdentifier</key><string>com.hansrobertmatthes.structofox</string>
+            <key>CFBundleVersion</key><string>$V</string>
+            <key>CFBundleShortVersionString</key><string>$V</string>
+            <key>CFBundleExecutable</key><string>StructoFox</string>
+            <key>CFBundleIconFile</key><string>Structofox.icns</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          tar -czf "StructoFox-$V-macOS-x64.tar.gz" "$APP"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: StructoFox-${{ steps.ver.outputs.version }}
+          path: |
+            StructoFox-*-linux-x64.tar.gz
+            StructoFox-*-macOS-x64.tar.gz
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: StructoFox ${{ steps.ver.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            StructoFox-*-linux-x64.tar.gz
+            StructoFox-*-macOS-x64.tar.gz
+          body: |
+            ## StructoFox ${{ steps.ver.outputs.version }}
+
+            **Windows** wird separat gebaut und ist hier nicht enthalten.
+
+            ### Linux (x64, self-contained — kein .NET nötig)
+            ```
+            tar -xzf StructoFox-${{ steps.ver.outputs.version }}-linux-x64.tar.gz
+            cd StructoFox-${{ steps.ver.outputs.version }}-linux-x64
+            ./StructoFox
+            ```
+
+            ### macOS (Intel x64) — ⚠️ untested & unsigned
+            Von Windows/Linux cross-kompiliert und **nicht auf echter Hardware getestet**. Benötigt macOS 12+.
+            Da nicht signiert, blockt Gatekeeper zunächst:
+            ```
+            tar -xzf StructoFox-${{ steps.ver.outputs.version }}-macOS-x64.tar.gz
+            xattr -dr com.apple.quarantine StructoFox.app
+            open StructoFox.app
+            ```
