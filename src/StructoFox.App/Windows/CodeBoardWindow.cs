@@ -58,6 +58,7 @@ public class CodeBoardWindow : Window
 
     // Selection
     readonly HashSet<string> _selectedIds = new();
+    readonly HashSet<string> _selectedText = new();   // selected free-text box ids (own light selection)
     string? _selectionAnchor;
     Point?  _mousePos;                          // last pointer pos over the canvas (null when outside)
 
@@ -166,7 +167,7 @@ public class CodeBoardWindow : Window
         _canvas.Children.Clear();
         _cards.Clear(); _portDots.Clear(); _portLabels.Clear(); _relViews.Clear(); _textViews.Clear();
         _gridRect = null;
-        _selectedIds.Clear(); _selectionAnchor = null;
+        _selectedIds.Clear(); _selectionAnchor = null; _selectedText.Clear();
         RenderGrid();
         foreach (var kv in _boardData.Positions.ToList())
         {
@@ -499,7 +500,13 @@ public class CodeBoardWindow : Window
 
     void HandleKey(KeyEventArgs e)
     {
-        if (e.Key == Key.Delete && _selectedIds.Count > 0) { RemoveSelectedFromBoard(); return; }
+        if (e.Key == Key.Delete && (_selectedIds.Count > 0 || _selectedText.Count > 0))
+        {
+            if (_selectedText.Count > 0) RemoveSelectedTextBoxes();
+            if (_selectedIds.Count > 0) RemoveSelectedFromBoard();
+            e.Handled = true;
+            return;
+        }
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
         // Ctrl+A — select every card on the board.
         if (e.Key == Key.A)
@@ -794,6 +801,8 @@ public class CodeBoardWindow : Window
             }
             if (e.ClickCount >= 2) { _ = ShowEntityEditor(entity); e.Handled = true; return; }
 
+            if (_selectedText.Count > 0) { _selectedText.Clear(); RefreshTextSelectionVisuals(); }   // cards and text don't co-select
+
             var mods = e.KeyModifiers;
             if (mods.HasFlag(KeyModifiers.Shift))
             {
@@ -864,13 +873,15 @@ public class CodeBoardWindow : Window
     // single-line box (SimpleTextEditorDialog). They are independent, draggable canvas items — NOT part of the
     // entity selection/relation system — so the board's norm-relevant card logic stays untouched.
 
-    // Inserts a new text box at the viewport centre and opens its editor straight away.
+    // Inserts a new text box on free space in the visible area and opens its editor straight away.
     async Task AddTextBox(bool singleLine)
     {
-        var (cx, cy) = ViewportCenter();
-        var tb = new BoardTextBox { X = Snap(cx), Y = Snap(cy), SingleLine = singleLine };
+        var tb = new BoardTextBox { SingleLine = singleLine };
         if (singleLine) { tb.Text = Loc.S("Code_NewLineText"); tb.Width = 0; }
         else { tb.Text = Loc.S("Code_NewText"); tb.Runs = new() { new TextRun { Text = tb.Text } }; tb.Width = 220; }
+        double estW = singleLine ? 140 : tb.Width + 12, estH = singleLine ? 34 : 64;
+        var (x, y) = FindFreeSpot(estW, estH);
+        tb.X = x; tb.Y = y;
         _boardData.TextBoxes.Add(tb);
         RenderTextBox(tb);
         await EditTextBox(tb);   // let the user type immediately; EditTextBox re-renders + saves
@@ -882,8 +893,9 @@ public class CodeBoardWindow : Window
         if (_canvas is null || _textViews.ContainsKey(tb.Id)) return;
         var box = new Border
         {
-            Padding = new(6), MinWidth = 24, MinHeight = 18, ZIndex = 2,
+            Padding = new(6), MinWidth = 24, MinHeight = 18, ZIndex = 3,   // above cards so new text isn't hidden
             Cursor = new Cursor(StandardCursorType.SizeAll),
+            BoxShadow = _selectedText.Contains(tb.Id) ? SelGlow : default,
             Background = ParseBrushSafe(tb.BgColor, Brushes.Transparent),
             Child = BuildTextBoxContent(tb),
         };
@@ -943,9 +955,14 @@ public class CodeBoardWindow : Window
         box.PointerPressed += (_, e) =>
         {
             var props = e.GetCurrentPoint(box).Properties;
-            if (props.IsRightButtonPressed) { ShowTextBoxMenu(tb, box); e.Handled = true; return; }
+            if (props.IsRightButtonPressed) { if (!_selectedText.Contains(tb.Id)) SelectTextBoxExclusive(tb.Id); ShowTextBoxMenu(tb, box); e.Handled = true; return; }
             if (_connectMode || _scaleMode) return;   // leave connect/scale interactions to the board
             if (e.ClickCount >= 2) { _ = EditTextBox(tb); e.Handled = true; return; }
+
+            // Select this text box (Ctrl toggles); clears the card selection so Delete acts on the right thing.
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) { if (!_selectedText.Add(tb.Id)) _selectedText.Remove(tb.Id); RefreshTextSelectionVisuals(); }
+            else if (!_selectedText.Contains(tb.Id)) SelectTextBoxExclusive(tb.Id);
+
             dragging = true; moved = false; offset = e.GetPosition(box);
             e.Pointer.Capture(box); e.Handled = true;
         };
@@ -966,8 +983,60 @@ public class CodeBoardWindow : Window
             if (moved) { FitCanvas(); Save(); }
             e.Handled = true;
         };
-        box.PointerEntered += (_, _) => box.BoxShadow = HoverGlow;
-        box.PointerExited  += (_, _) => box.BoxShadow = default;
+        box.PointerEntered += (_, _) => { if (!_selectedText.Contains(tb.Id)) box.BoxShadow = HoverGlow; };
+        box.PointerExited  += (_, _) => { if (!_selectedText.Contains(tb.Id)) box.BoxShadow = default; };
+    }
+
+    // Selects exactly one text box, dropping any card and other-text selection.
+    void SelectTextBoxExclusive(string id)
+    {
+        if (_selectedIds.Count > 0) { _selectedIds.Clear(); _selectionAnchor = null; RefreshSelectionVisuals(); }
+        _selectedText.Clear(); _selectedText.Add(id);
+        RefreshTextSelectionVisuals();
+    }
+
+    void RefreshTextSelectionVisuals()
+    {
+        foreach (var (id, box) in _textViews) box.BoxShadow = _selectedText.Contains(id) ? SelGlow : default;
+    }
+
+    void RemoveSelectedTextBoxes()
+    {
+        foreach (var id in _selectedText.ToList())
+        {
+            if (_textViews.TryGetValue(id, out var v)) { _canvas?.Children.Remove(v); _textViews.Remove(id); }
+            _boardData.TextBoxes.RemoveAll(t => t.Id == id);
+        }
+        _selectedText.Clear();
+        UpdateEmptyHint();
+        Save();
+    }
+
+    // Finds a free spot near the viewport centre (no overlap with existing cards/text boxes), on the grid.
+    (double x, double y) FindFreeSpot(double w, double h)
+    {
+        var (cx, cy) = ViewportCenter();
+        double x0 = Math.Max(0, cx - w / 2), y0 = Math.Max(0, cy - h / 2);
+        var occ = OccupiedRects();
+        double step = Math.Max(24, _boardData.SnapToGrid && _boardData.GridSize >= 1 ? _boardData.GridSize * 2 : 24);
+        for (int ring = 0; ring < 60; ring++)
+            for (int dy = -ring; dy <= ring; dy++)
+                for (int dx = -ring; dx <= ring; dx++)
+                {
+                    if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != ring) continue;   // walk the ring's perimeter only
+                    double x = Math.Max(0, x0 + dx * step), y = Math.Max(0, y0 + dy * step);
+                    var r = new Rect(x, y, w, h).Inflate(8);
+                    if (!occ.Any(o => o.Intersects(r))) return (Snap(x), Snap(y));
+                }
+        return (Snap(x0), Snap(y0));
+    }
+
+    List<Rect> OccupiedRects()
+    {
+        var list = new List<Rect>();
+        foreach (var c in _cards.Values)     list.Add(new Rect(Canvas.GetLeft(c), Canvas.GetTop(c), Math.Max(1, c.Bounds.Width), Math.Max(1, c.Bounds.Height)));
+        foreach (var t in _textViews.Values) list.Add(new Rect(Canvas.GetLeft(t), Canvas.GetTop(t), Math.Max(1, t.Bounds.Width), Math.Max(1, t.Bounds.Height)));
+        return list;
     }
 
     void ShowTextBoxMenu(BoardTextBox tb, Control anchor)
@@ -983,6 +1052,7 @@ public class CodeBoardWindow : Window
     {
         if (_textViews.TryGetValue(tb.Id, out var v)) { _canvas?.Children.Remove(v); _textViews.Remove(tb.Id); }
         _boardData.TextBoxes.Remove(tb);
+        _selectedText.Remove(tb.Id);
         UpdateEmptyHint();
         Save();
     }
@@ -1760,6 +1830,7 @@ public class CodeBoardWindow : Window
         _selectedIds.Clear();
         _selectionAnchor = null;
         RefreshSelectionVisuals();
+        if (_selectedText.Count > 0) { _selectedText.Clear(); RefreshTextSelectionVisuals(); }
         _rubberStart = e.GetPosition(_canvas);
         _rubberSelecting = true;
         e.Pointer.Capture(_canvas);
@@ -1849,9 +1920,16 @@ public class CodeBoardWindow : Window
             if (cx >= rx && cy >= ry && cx + card.Bounds.Width <= rx + rw && cy + card.Bounds.Height <= ry + rh)
                 _selectedIds.Add(id);
         }
+        foreach (var (id, box) in _textViews)
+        {
+            double bx = Canvas.GetLeft(box), by = Canvas.GetTop(box);
+            if (bx >= rx && by >= ry && bx + box.Bounds.Width <= rx + rw && by + box.Bounds.Height <= ry + rh)
+                _selectedText.Add(id);
+        }
         _canvas!.Children.Remove(_rubberRect);
         _rubberRect = null;
         RefreshSelectionVisuals();
+        RefreshTextSelectionVisuals();
     }
 
     void ShowCanvasAddMenu(Point dropPoint)
