@@ -1389,7 +1389,7 @@ public class PrintComposerWindow : Window
         if (tb is null) return;
         var handle = new Border
         {
-            Width = HandleSize, Height = HandleSize, Background = AccentBrush, BorderBrush = Brushes.White, BorderThickness = new(1.5),
+            Width = HandleSize, Height = 26, CornerRadius = new(3), Background = AccentBrush, BorderBrush = Brushes.White, BorderThickness = new(1.5),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
             Margin = new(0, 0, -HandleSize / 2, 0), Cursor = new Cursor(StandardCursorType.SizeWestEast),
         };
@@ -1424,7 +1424,7 @@ public class PrintComposerWindow : Window
         double hardMax = Math.Max(60, (pr.X + pr.W - hd.X) / sc);
         var handle = new Border
         {
-            Width = HandleSize, Height = HandleSize, Background = AccentBrush, BorderBrush = Brushes.White, BorderThickness = new(1.5),
+            Width = HandleSize, Height = 26, CornerRadius = new(3), Background = AccentBrush, BorderBrush = Brushes.White, BorderThickness = new(1.5),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
             Margin = new(0, 0, -HandleSize / 2, 0), Cursor = new Cursor(StandardCursorType.SizeWestEast),
         };
